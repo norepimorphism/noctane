@@ -9,4 +9,6 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-libui-ng-sys = { git = "https://github.com/norepimorphism/libui-ng-sys.git", branch = "unix-ext" }
+boing = { git = "https://github.com/norepimorphism/boing.git" }
+open = "2.1"
+tracing = "0.1"
