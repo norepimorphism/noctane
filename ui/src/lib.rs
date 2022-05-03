@@ -8,7 +8,7 @@ pub fn run() {
     boing::Ui::run(|ui| {
         menu_bar::setup(ui).unwrap();
 
-        let mut window = ui.create_window(
+        let window = ui.create_window(
             "Noctane",
             256,
             144,
