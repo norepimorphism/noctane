@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bit::BitIndex as _;
-use std::ops::Range;
 use super::{
     Instr,
     IType,
@@ -32,29 +31,33 @@ macro_rules! def_decode_instr_part {
     ($fn_name:ident, $range:tt, $ty:ty) => {
         #[inline(always)]
         pub fn $fn_name(code: u32) -> $ty {
-            code.bit_range(Self::$range) as $ty
+            code.bit_range(enc_range::$range) as $ty
         }
     };
 }
 
 impl Instr {
-    pub const ENC_FUNCT_RANGE: Range<usize> = 0..6;
-    pub const ENC_SHAMT_RANGE: Range<usize> = 6..11;
-    pub const ENC_RD_RANGE: Range<usize> = 11..16;
-    pub const ENC_RT_RANGE: Range<usize> = 16..21;
-    pub const ENC_RS_RANGE: Range<usize> = 21..26;
-    pub const ENC_IMM_RANGE: Range<usize> = 0..16;
-    pub const ENC_TARGET_RANGE: Range<usize> = 0..26;
-    pub const ENC_OP_RANGE: Range<usize> = 26..32;
+    def_decode_instr_part!(decode_op, OP, u8);
+    def_decode_instr_part!(decode_target, TARGET, u32);
+    def_decode_instr_part!(decode_imm, IMM, u16);
+    def_decode_instr_part!(decode_rs, RS, u8);
+    def_decode_instr_part!(decode_rt, RT, u8);
+    def_decode_instr_part!(decode_rd, RD, u8);
+    def_decode_instr_part!(decode_shamt, SHAMT, u8);
+    def_decode_instr_part!(decode_funct, FUNCT, u8);
+}
 
-    def_decode_instr_part!(decode_op, ENC_OP_RANGE, u8);
-    def_decode_instr_part!(decode_target, ENC_TARGET_RANGE, u32);
-    def_decode_instr_part!(decode_imm, ENC_IMM_RANGE, u16);
-    def_decode_instr_part!(decode_rs, ENC_RS_RANGE, u8);
-    def_decode_instr_part!(decode_rt, ENC_RT_RANGE, u8);
-    def_decode_instr_part!(decode_rd, ENC_RD_RANGE, u8);
-    def_decode_instr_part!(decode_shamt, ENC_SHAMT_RANGE, u8);
-    def_decode_instr_part!(decode_funct, ENC_FUNCT_RANGE, u8);
+mod enc_range {
+    use std::ops::Range;
+
+    pub const FUNCT: Range<usize> = 0..6;
+    pub const SHAMT: Range<usize> = 6..11;
+    pub const RD: Range<usize> = 11..16;
+    pub const RT: Range<usize> = 16..21;
+    pub const RS: Range<usize> = 21..26;
+    pub const IMM: Range<usize> = 0..16;
+    pub const TARGET: Range<usize> = 0..26;
+    pub const OP: Range<usize> = 26..32;
 }
 
 impl OpKind {

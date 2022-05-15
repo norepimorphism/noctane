@@ -3,20 +3,37 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod menu_bar;
+mod window;
+
+use i18n_embed::{
+    DesktopLanguageRequester,
+    fluent::{FluentLanguageLoader, fluent_language_loader},
+    I18nEmbedError,
+};
+use rust_embed::RustEmbed;
+use window::Windows;
 
 pub fn run() {
-    boing::Ui::run(|ui| {
-        menu_bar::setup(ui).unwrap();
+    let lang_loader = setup_i18n().unwrap();
+    let boing = boing::Ui::new().unwrap();
+    let mut windows = Windows::new(&boing);
 
-        let window = ui.create_window(
-            "Noctane",
-            256,
-            144,
-            true,
-            true,
-        )
-        .unwrap();
-        window.show();
-    })
-    .unwrap();
+    menu_bar::setup(&lang_loader, &boing, &mut windows);
+    windows.main().show().unwrap();
+    boing.run();
+}
+
+fn setup_i18n() -> Result<FluentLanguageLoader, I18nEmbedError> {
+    #[derive(RustEmbed)]
+    #[folder = "i18n"]
+    struct Localizations;
+
+    let lang_loader = fluent_language_loader!();
+    i18n_embed::select(
+        &lang_loader,
+        &Localizations,
+        &DesktopLanguageRequester::requested_languages(),
+    )?;
+
+    Ok(lang_loader)
 }

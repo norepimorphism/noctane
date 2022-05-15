@@ -2,58 +2,107 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod about;
+use crate::window::Windows;
+use i18n_embed::fluent::FluentLanguageLoader;
 
-use boing::Ui;
-
-pub fn setup(ui: &Ui) -> Result<(), boing::Error> {
-    setup_file_menu(ui)?;
-    setup_edit_menu(ui)?;
-    setup_view_menu(ui)?;
-    setup_help_menu(ui)?;
-
-    Ok(())
+pub fn setup<'b>(
+    lang_loader: &FluentLanguageLoader,
+    boing: &'b boing::Ui,
+    windows: &mut Windows<'b>,
+) {
+    let mut ctx = Context { lang_loader, boing, windows };
+    file_menu::setup(&mut ctx);
+    edit_menu::setup(&mut ctx);
+    view_menu::setup(&mut ctx);
+    help_menu::setup(&mut ctx);
 }
 
-fn setup_file_menu(ui: &Ui) -> Result<(), boing::Error> {
-    let menu = ui.create_menu("File")?;
-    menu.append_item("Open ISO...")?;
-    menu.append_quit_item()?;
-
-    Ok(())
+struct Context<'l, 'b, 'w> {
+    pub lang_loader: &'l FluentLanguageLoader,
+    pub boing: &'b boing::Ui,
+    pub windows: &'w mut Windows<'b>,
 }
 
-fn setup_edit_menu(ui: &Ui) -> Result<(), boing::Error> {
-    let menu = ui.create_menu("Edit")?;
-    menu.append_preferences_item()?;
+mod file_menu {
+    use i18n_embed_fl::fl;
 
-    Ok(())
+    use super::Context;
+
+    pub(super) fn setup(ctx: &mut Context) {
+        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_file_title")).unwrap();
+        setup_open_iso(ctx, &menu);
+        menu.push_separator();
+        setup_quit(ctx, &menu);
+    }
+
+    fn setup_open_iso(ctx: &mut Context, menu: &boing::Menu) {
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_open-iso_title")).unwrap();
+        item.on_clicked(|_| {
+            // TODO
+        });
+    }
+
+    fn setup_quit(ctx: &mut Context, menu: &boing::Menu) {
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_quit_title")).unwrap();
+        item.on_clicked(|_| {
+            // TODO
+        });
+    }
 }
 
-fn setup_view_menu(ui: &Ui) -> Result<(), boing::Error> {
-    let _ = ui.create_menu("View")?;
+mod edit_menu {
+    use i18n_embed_fl::fl;
 
-    Ok(())
+    use super::Context;
+
+    pub(super) fn setup(ctx: &mut Context) {
+        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_edit_title")).unwrap();
+        setup_prefs(ctx, &menu);
+    }
+
+    fn setup_prefs(ctx: &mut Context, menu: &boing::Menu) {
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_prefs_title")).unwrap();
+        item.on_clicked(|_| ctx.windows.prefs().show().unwrap());
+    }
 }
 
-fn setup_help_menu(ui: &Ui) -> Result<(), boing::Error> {
-    let mut menu = ui.create_menu("Help")?;
-    setup_website_item(ui, &mut menu)?;
-    about::setup_item(ui, &mut menu)?;
+mod view_menu {
+    use i18n_embed_fl::fl;
 
-    Ok(())
+    use super::Context;
+
+    pub(super) fn setup(ctx: &mut Context) {
+        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_view_title")).unwrap();
+        setup_log(ctx, &menu);
+    }
+
+    fn setup_log(ctx: &mut Context, menu: &boing::Menu) {
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_log_title")).unwrap();
+        item.on_clicked(|_| ctx.windows.log().show().unwrap());
+    }
 }
 
-fn setup_website_item(ui: &Ui, menu: &mut boing::Menu) -> Result<(), boing::Error> {
-    static REPO_URL: &str = "https://github.com/norepimorphism/noctane";
+mod help_menu {
+    use i18n_embed_fl::fl;
 
-    let item = menu.append_item("Website")?;
-    item.on_clicked(
-        ui,
-        |_| {
-            open::that(REPO_URL).unwrap();
-        },
-    );
+    use super::Context;
 
-    Ok(())
+    pub(super) fn setup(ctx: &mut Context) {
+        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_help_title")).unwrap();
+        setup_website(ctx, &menu);
+        menu.push_separator();
+        setup_about(ctx, &menu);
+    }
+
+    fn setup_website(ctx: &mut Context, menu: &boing::Menu) {
+        static REPO_URL: &str = "https://github.com/norepimorphism/noctane";
+
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_website_title")).unwrap();
+        item.on_clicked(|_| open::that(REPO_URL).unwrap());
+    }
+
+    fn setup_about(ctx: &mut Context, menu: &boing::Menu) {
+        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_about_title")).unwrap();
+        item.on_clicked(|_| ctx.windows.about().show().unwrap());
+    }
 }
