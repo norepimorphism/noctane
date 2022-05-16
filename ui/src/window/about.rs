@@ -1,5 +1,3 @@
-use rust_embed::RustEmbed;
-
 use super::Descriptor;
 
 pub(super) const DESCRIPTOR: Descriptor = Descriptor {

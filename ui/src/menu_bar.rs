@@ -38,7 +38,15 @@ mod file_menu {
     fn setup_open_iso(ctx: &mut Context, menu: &boing::Menu) {
         let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_open-iso_title")).unwrap();
         item.on_clicked(|_| {
-            // TODO
+            let iso_path = native_dialog::FileDialog::new()
+                .add_filter("CD-ROM Image", &["iso"])
+                .show_open_single_file()
+                .unwrap();
+
+            if let Some(iso_path) = iso_path {
+                let iso = std::fs::File::open(iso_path).unwrap();
+                noctane_cdrom_drive::Volume::read(iso).unwrap();
+            }
         });
     }
 

@@ -2,13 +2,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-[workspace]
-members = [
-    "cdrom-drive",
-    "cpu",
-    "gpu",
-    "ui"
-]
+[package]
+name = "noctane-cdrom-drive"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
 
-[profile.release]
-lto = "true"
+[dependencies]
+nom = "7.1"
+tracing = "0.1"

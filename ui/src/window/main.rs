@@ -6,6 +6,6 @@ pub(super) const DESCRIPTOR: Descriptor = Descriptor {
     setup,
 };
 
-fn setup(boing: &boing::Ui, window: &mut boing::Window) {
+fn setup(_: &boing::Ui, window: &mut boing::Window) {
     window.set_resizeable(false);
 }
