@@ -59,7 +59,7 @@ impl Volume {
         // simultaneously. Fortunately, there are some tools that can aid us in parsing. We will be
         // drawing from *nom*'s repetoire of parser combinators.
 
-        // System sectors 0..3 [are zeroed], so we can skip them. The first meaningful data starts
+        // System sectors 0..4 [are zeroed], so we can skip them. The first meaningful data starts
         // at sector 4: the license string. It looks ASCII to me, so we will parse it as UTF-8.
         //
         // [are zeroed]: https://psx-spx.consoledev.net/cdromdrive/#system-area-prior-to-volume-descriptors
@@ -71,6 +71,11 @@ impl Volume {
             .map_err(Error::FromUtf8)
             .map(String::from)?;
         tracing::debug!("license: {}", license);
+
+        // The PlayStation logo spans across sectors 5..12.
+        let logo =
+
+        // System sectors 12..16 are zeroed, so we can skip them, too.
 
         todo!()
     }

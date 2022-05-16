@@ -16,6 +16,10 @@ impl Volume {
 
         self.data.get(start..end).ok_or_else(|| crate::Error::MissingSector { index })
     }
+
+    pub fn sectors(&self, range: Range) -> Result<&[u8], crate::Error> {
+
+    }
 }
 
 /*
