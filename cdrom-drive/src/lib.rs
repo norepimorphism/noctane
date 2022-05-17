@@ -7,31 +7,41 @@
 //
 // [here]: https://www.ecma-international.org/publications-and-standards/standards/ecma-119/
 
-mod raw;
+#![feature(cstr_from_bytes_until_nul)]
+
+mod volume;
 
 use std::io::{self, Read};
+
+use serde::de::Deserialize as _;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    /// An expected logical sector is missing from the CD-ROM image.
-    MissingSector { index: usize },
+    Nul(std::ffi::NulError),
+    IntoString(std::ffi::IntoStringError),
     FromUtf8(std::str::Utf8Error),
+    Deserialize(volume::Error),
+    ExpectedLogicalSector,
+    ExpectedVolumeDescriptor,
+    InvalidStandardId,
+    IncompatibleVersion,
 }
 
-pub struct Volume {
-    // descs: Vec<LogicalSector>,
-}
+pub struct FileSystem(());
 
-impl Volume {
-    /// Attempts to read a volume with logical sectors of the standard size 2048.
-    pub fn read(vol: impl Read) -> Result<Self, crate::Error> {
+impl FileSystem {
+    /// Attempts to read a file system with logical sectors of the standard size 2048.
+    pub fn from_reader(reader: impl Read) -> Result<Self, crate::Error> {
         // 2^11 = 2048.
-        Self::read_with_sector_size_exp(vol, 11)
+        Self::from_reader_with_sector_size_exp(reader, 11)
     }
 
-    /// Attempts to read a volume with logical sectors of the size 2^`n`.
-    pub fn read_with_sector_size_exp(mut vol: impl Read, n: u32) -> Result<Self, crate::Error> {
+    /// Attempts to read a file system with logical sectors of the size 2^`n`.
+    pub fn from_reader_with_sector_size_exp(
+        mut reader: impl Read,
+        n: u32,
+    ) -> Result<Self, crate::Error> {
         let logical_sector_size = 2usize.pow(n);
         tracing::debug!("logical_sector_size: {}", logical_sector_size);
 
@@ -40,43 +50,58 @@ impl Volume {
         // minimum size is (17 * 2^n).
         let mut data = Vec::with_capacity(17 * logical_sector_size);
 
-        let data_len = vol.read_to_end(&mut data).map_err(crate::Error::Io)?;
+        let data_len = reader.read_to_end(&mut data).map_err(crate::Error::Io)?;
         tracing::debug!("data_len: {}", data_len);
 
         assert_eq!(data_len, data.len());
 
-        // This is semantically a copy but shouldn't actually compile into one.
-        let raw = raw::Volume::new(logical_sector_size, data);
+        let mut sectors = data.chunks_exact(logical_sector_size).skip(16);
 
-        // AFAIK, we're pretty much on our own for deserializing a CD-ROM image---we can't use
-        // zero-copy (de)serialization libraries (e.g., *rkyv*) as fields in a CD-ROM aren't
-        // necessarily aligned to word boundaries, and using *serde* would be a mess. Instead, we
-        // go the old-fashioned way: read the entire image into a buffer, and manually copy the bits
-        // and pieces we need into a custom structure.
-        //
-        // As an optimization (because we're working with large files here), we will not utilize any
-        // internal representations (IRs). That is, the CD-ROM image is deserialized and parsed
-        // simultaneously. Fortunately, there are some tools that can aid us in parsing. We will be
-        // drawing from *nom*'s repetoire of parser combinators.
+        // We are now in the data section. We will make no assumptions regarding the location of
+        // logical sectors, treating this CD-ROM image as just that: a generic CD rather than a
+        // specialized PSX game disc.
 
-        // System sectors 0..4 [are zeroed], so we can skip them. The first meaningful data starts
-        // at sector 4: the license string. It looks ASCII to me, so we will parse it as UTF-8.
-        //
-        // [are zeroed]: https://psx-spx.consoledev.net/cdromdrive/#system-area-prior-to-volume-descriptors
+        loop {
+            // First up are the volume descriptors. We will process these until we hit a descriptor
+            // set terminator.
 
-        // `String::from_utf8` requires a `Vec` of the entire input, but it's likely that only part
-        // of the sector contains valid ASCII. We use `str::from_utf8` in the hopes that a full copy
-        // isn't necessary.
-        let license = std::str::from_utf8(raw.sector(4)?)
-            .map_err(Error::FromUtf8)
-            .map(String::from)?;
-        tracing::debug!("license: {}", license);
+            let desc = sectors
+                .next()
+                .ok_or(Error::ExpectedLogicalSector)?;
+            let mut de = volume::Deserializer::from_bytes(desc);
 
-        // The PlayStation logo spans across sectors 5..12.
-        let logo =
+            let header = volume::DescriptorHeader::deserialize(&mut de)
+                .map_err(Error::Deserialize)?;
+            tracing::info!("found volume descriptor: {:?}", header);
 
-        // System sectors 12..16 are zeroed, so we can skip them, too.
+            if header.std_id != *b"CD001" {
+                return Err(Error::InvalidStandardId);
+            }
 
-        todo!()
+            match header.kind {
+                volume::DescriptorKind::BootRecord => {
+                    let desc = volume::BootRecord::deserialize(&mut de)
+                        .map_err(Error::Deserialize)?;
+                    tracing::debug!("boot record: {:#?}", desc);
+                }
+                volume::DescriptorKind::Primary => {
+                    let desc = volume::PrimaryDescriptor::deserialize(&mut de)
+                        .map_err(Error::Deserialize)?;
+                    tracing::debug!("primary descriptor: {:#?}", desc);
+                }
+                volume::DescriptorKind::Partition => {
+                    let desc = volume::PartitionDescriptor::deserialize(&mut de)
+                        .map_err(Error::Deserialize)?;
+                    tracing::debug!("partition descriptor: {:#?}", desc);
+                }
+                volume::DescriptorKind::SetTerminator => {
+                    // A set terminator indicates that the volume descriptor set ends here.
+                    break;
+                }
+                _ => todo!(),
+            }
+        }
+
+        Ok(Self(()))
     }
 }

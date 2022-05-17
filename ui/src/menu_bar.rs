@@ -45,7 +45,7 @@ mod file_menu {
 
             if let Some(iso_path) = iso_path {
                 let iso = std::fs::File::open(iso_path).unwrap();
-                noctane_cdrom_drive::Volume::read(iso).unwrap();
+                noctane_cdrom_drive::FileSystem::from_reader(iso).unwrap();
             }
         });
     }
