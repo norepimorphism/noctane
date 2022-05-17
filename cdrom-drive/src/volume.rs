@@ -64,8 +64,10 @@ macro_rules! def_deserialize_middle_endian {
             const TYPE_SIZE: usize = std::mem::size_of::<$ty>();
 
             let it = self.input
+                // Get both the little- and big-endian representations.
                 .get(0..(TYPE_SIZE * 2))
                 .ok_or(Error::$exp)
+                // Extract the correct representation.
                 .map(|it| cut_middle_endian(it))
                 .map(|it| <[u8; TYPE_SIZE]>::try_from(it).expect("type size mismatch"))
                 .map(|it| <$ty>::from_ne_bytes(it))?;
@@ -126,6 +128,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
         visitor.visit_u8(*it)
     }
+    
+    // While the spec. indicates that either little-, big- or middle-endian representations
+    // for multi-byte integers may be used, I have only seen them in middle-endian. It is
+    // probably erroneous to assume that of all integer fields, but it works for now.
 
     def_deserialize_middle_endian! {
         fn: deserialize_u16<'de> -> Result<u16, ExpectedU16>,
@@ -146,6 +152,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
+        // A struct is essentially a named tuple.
         self.deserialize_tuple(fields.len(), visitor)
     }
 
@@ -220,17 +227,14 @@ pub enum DescriptorKind {
 
 #[derive(Deserialize)]
 pub struct StrBuf<const SIZE: usize> {
+    // TODO: We shouldn't need to copy this array; this is a limitation of *serde*.
     #[serde(with = "serde_arrays")]
     inner: [u8; SIZE],
 }
 
 impl<const SIZE: usize> StrBuf<SIZE> {
     pub fn to_str(&self) -> Result<&str, crate::Error> {
-        // This is OK because a- and d-characters are encoded in a restricted set of ASCII.
-        // Assuming the input is valid ASCII, a UTF-8 representation should be equivalent. If it
-        // isn't valid ASCII, the output will probably look garbled, but it was going to look
-        // garbled anyway. ¯\_(ツ)_/¯
-        std::str::from_utf8(&self.inner).map_err(crate::Error::DecodeUtf8)
+        parse_ascii(&self.inner)
     }
 }
 
@@ -252,8 +256,7 @@ pub struct PaddedPStr<'a> {
 
 impl PaddedPStr<'_> {
     pub fn to_str(&self) -> Result<&str, crate::Error> {
-        // See [`StrBuf::to_str`].
-        std::str::from_utf8(self.inner).map_err(crate::Error::DecodeUtf8)
+        parse_ascii(self.inner)
     }
 }
 
@@ -265,6 +268,26 @@ impl fmt::Debug for PaddedPStr<'_> {
             <[u8] as fmt::Debug>::fmt(self.inner, f)
         }
     }
+}
+
+fn parse_ascii(bytes: &[u8) -> Result<&sstr, crate::Error> {
+    // This is OK because a- and d-characters are encoded in a restricted set of ASCII.
+    // Assuming the input is valid ASCII, a UTF-8 representation should be equivalent. If it
+    // isn't valid ASCII, the output will probably look garbled, but it was going to look
+    // garbled anyway. ¯\_(ツ)_/¯
+    let string = std::str::from_utf8(&self.inner).map_err(crate::Error::DecodeUtf8)?;
+    
+    // ISO 9660 and ECMA-119 use ASCII code `0x32`, the space, to denote filler characters at
+    // the end of a string buffer. As these are only noise, we will strip them out.
+    //
+    // TOOD: This is inefficient as we are parsing the entire string and then removing
+    // characters from the end. Ideally, we should be able to halt the parsing once a filler
+    // character is reached.
+    if let Some(stripped) = string.strip_suffix(" ") {
+        string = stripped;   
+    }
+    
+    Ok(string)
 }
 
 /// See Section 8.2.
@@ -292,14 +315,14 @@ pub struct PrimaryDescriptor {
     pub logical_block_size: u16,
     pub path_table_size: u32,
     pub l_path_table_addr: u16,
-    pub opt_l_path_table_addr: u16,
+    pub opt_l_path_table_addr: Option<u16>,
     pub m_path_table_addr: u16,
-    pub opt_m_path_table_addr: u16,
-    // This field isn't [`DirectoryRecord`] as that has a variable size, but we know that this field
+    pub opt_m_path_table_addr: Option<u16>,
+    // This field isn't [`EntryRecord`] as that has a variable size, but we know that this field
     // must be exactly 34 bytes, so we should fail if that's not that case.
     #[derivative(Debug = "ignore")]
     #[serde(with = "serde_arrays")]
-    pub root_dir_record: [u8; 34],
+    pub root_dir: [u8; 34],
     pub vol_set_id: StrBuf<128>,
     pub publisher_id: StrBuf<128>,
     pub data_preparer_id: StrBuf<128>,
@@ -307,23 +330,58 @@ pub struct PrimaryDescriptor {
     pub copyright_file_id: StrBuf<37>,
     pub abstract_file_id: StrBuf<37>,
     pub biblio_file_id: StrBuf<37>,
+    pub vol_creation_time: AlphaTimestamp,
+    pub vol_mod_time: AlphaTimestamp,
+    pub vol_expiration_time: AlphaTimestamp,
+    pub vol_effective_time: AlphaTimestamp,
+    pub file_struct_version: u8,
+    #[derivative(Debug = "ignore")]
+    _unused_27: u8,
+    #[derivative(Debug = "ignore")]
+    #[serde(with = "serde_arrays")]
+    pub app_data: [u8; 512],
+    // The rest is reserved according to the standard.
+}
+
+/// See Section 8.4.26.1.
+#[derive(Debug, Deserialize)]
+pub struct AlphaTimestamp {
+    pub year: StrBuf<4>,
+    pub month: StrBuf<2>,
+    pub day: StrBuf<2>,
+    pub hour: StrBuf<2>,
+    pub minute: StrBuf<2>,
+    pub second: StrBuf<2>,
+    pub centisecond: StrBuf<2>,
+    pub gmt_offset: u8,
 }
 
 /// See Section 9.1.
-#[derive(Derivative, Deserialize)]
-#[derivative(Debug)]
-pub struct DirectoryRecord<'a> {
+#[derive(Debug, Deserialize)]
+pub struct EntryRecord<'a> {
     pub len: u8,
     pub ext_attr_len: u8,
     pub extent_addr: u32,
     pub data_len: u32,
-    pub timestamp: [u8; 7],
+    pub timestamp: NumTimestamp,
     pub file_flags: u8,
     pub file_unit_size: u8,
     pub inter_gap_size: u8,
     pub vol_seq_num: u16,
     #[serde(borrow)]
     pub file_id: PaddedPStr<'a>,
+}
+
+/// See Section 9.1.5.
+#[derive(Debug, Deserialize)]
+pub struct NumTimestamp {
+    pub year: u8,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+    pub gmt_offset: u8,
 }
 
 #[derive(Derivative, Deserialize)]
