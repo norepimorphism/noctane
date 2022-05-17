@@ -15,11 +15,11 @@ use std::io::{self, Read};
 
 use serde::de::Deserialize as _;
 
+pub use entry::Entry;
+
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    Nul(std::ffi::NulError),
-    IntoString(std::ffi::IntoStringError),
     DecodeUtf8(std::str::Utf8Error),
     Deserialize(volume::Error),
     ExpectedLogicalSector,
@@ -28,17 +28,61 @@ pub enum Error {
     IncompatibleVersion,
 }
 
-pub struct FileSystem(());
+pub struct FileSystem {
+    pub fn root_dir: Directory,
+}
+
+pub struct Directory {
+    pub meta: entry::Metadata,
+    pub entries: Vec<Entry>,
+}
+
+pub struct File {
+    pub meta: entry::Metadata,
+    pub data: Vec<u8>,
+}
+
+pub mod entry {
+    pub enum Entry {
+        Directory(Directory),
+        File(File),
+    }
+    
+    pub struct Metadata {
+        pub is_hidden: bool,
+        pub is_assoc: bool,
+        pub is_protected: bool,
+        pub attr: Option<Attributes>,
+    }
+
+    pub struct Attributes {
+        pub owner_id: u16,
+        pub group_id: u16,
+        pub perms: Permissions,
+    }
+    
+    pub struct Permissions {
+        pub system: Permission,
+        pub owner: Permission,
+        pub group: Permission,
+        pub all: Permission,
+    }
+    
+    pub struct Permission {
+        pub read: bool,
+        pub execute: bool,
+    }
+}
 
 impl FileSystem {
     /// Attempts to read a file system with logical sectors of the standard size 2048.
     pub fn from_reader(reader: impl Read) -> Result<Self, crate::Error> {
         // 2^11 = 2048.
-        Self::from_reader_with_sector_size_exp(reader, 11)
+        Self::from_reader_with_sector_size(reader, 11)
     }
 
     /// Attempts to read a file system with logical sectors of the size 2^`n`.
-    pub fn from_reader_with_sector_size_exp(
+    pub fn from_reader_with_sector_size(
         mut reader: impl Read,
         n: u32,
     ) -> Result<Self, crate::Error> {
@@ -55,18 +99,19 @@ impl FileSystem {
 
         assert_eq!(data_len, data.len());
 
+        // Split the data into sectors and skip the system area.
         let mut sectors = data.chunks_exact(logical_sector_size).skip(16);
 
-        // We are now in the data section. We will make no assumptions regarding the location of
-        // logical sectors, treating this CD-ROM image as just that: a generic CD rather than a
+        // We are now in the data area. We will make no assumptions regarding the location of
+        // logical sectors, treating this CD-ROM image as just that: a generic CD-ROM rather than a
         // specialized PSX game disc.
 
-        Self::walk_volume_descriptors(&mut sectors)?;
+        Self::process_volume_descriptors(&mut sectors)?;
 
-        Ok(Self(()))
+        todo!()
     }
 
-    fn walk_volume_descriptors<'a>(
+    fn process_volume_descriptors<'a>(
         sectors: &mut impl Iterator<Item = &'a [u8]>,
     ) -> Result<(), Error> {
         loop {
@@ -87,27 +132,23 @@ impl FileSystem {
             }
 
             match header.kind {
-                volume::DescriptorKind::BootRecord => {
-                    Self::handle_boot_record(&mut de)?;
+                volume::DescriptorKind::BootRecord => Self::process_boot_record(&mut de)?,
+                // These are basically the same... right?
+                volume::DescriptorKind::Primary | volume::DescriptorKind::Secondary => {
+                    Self::process_primary_volume_descriptor(&mut de)?;
                 }
-                volume::DescriptorKind::Primary => {
-                    Self::handle_primary_descriptor(&mut de)?;
-                }
-                volume::DescriptorKind::Partition => {
-                    Self::handle_partition_descriptor(&mut de)?;
-                }
+                volume::DescriptorKind::Partition => Self::process_volume_partition_descriptor(&mut de)?,
                 volume::DescriptorKind::SetTerminator => {
                     // A set terminator indicates that the volume descriptor set ends here.
                     break;
                 }
-                _ => todo!(),
             }
         }
 
         Ok(())
     }
 
-    fn handle_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
+    fn process_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::BootRecord::deserialize(de)
             .map_err(Error::Deserialize)?;
         tracing::debug!("boot record: {:#?}", desc);
@@ -115,7 +156,7 @@ impl FileSystem {
         Ok(())
     }
 
-    fn handle_primary_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+    fn process_primary_volume_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::PrimaryDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
         tracing::debug!("primary descriptor: {:#?}", desc);
@@ -128,7 +169,7 @@ impl FileSystem {
         Ok(())
     }
 
-    fn handle_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+    fn process_volume_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::PartitionDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
         tracing::debug!("partition descriptor: {:#?}", desc);
