@@ -1,4 +1,4 @@
-use std::{ffi::CString, fmt};
+use std::fmt;
 
 use derivative::Derivative;
 use serde::{de, Deserialize};
@@ -104,7 +104,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         deserialize_char()
         deserialize_str()
         deserialize_string()
-        deserialize_bytes()
         deserialize_byte_buf()
         deserialize_option()
         deserialize_unit()
@@ -185,6 +184,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             len,
         })
     }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        let len = usize::from(*self.input.get(0).ok_or(Error::ExpectedU8)?);
+        self.input = &self.input[1..];
+
+        let data = self.input.get(..len).ok_or(Error::ExpectedU8)?;
+        self.input = &self.input[len..];
+
+        visitor.visit_borrowed_bytes(data)
+    }
 }
 
 /// See Section 8.1.
@@ -213,19 +225,44 @@ pub struct StrBuf<const SIZE: usize> {
 }
 
 impl<const SIZE: usize> StrBuf<SIZE> {
-    pub fn to_string(&self) -> Result<String, crate::Error> {
-        CString::new(self.inner.as_slice())
-            .map_err(crate::Error::Nul)
-            .and_then(|it| it.into_string().map_err(crate::Error::IntoString))
+    pub fn to_str(&self) -> Result<&str, crate::Error> {
+        // This is OK because a- and d-characters are encoded in a restricted set of ASCII.
+        // Assuming the input is valid ASCII, a UTF-8 representation should be equivalent. If it
+        // isn't valid ASCII, the output will probably look garbled, but it was going to look
+        // garbled anyway. ¯\_(ツ)_/¯
+        std::str::from_utf8(&self.inner).map_err(crate::Error::DecodeUtf8)
     }
 }
 
 impl<const SIZE: usize> fmt::Debug for StrBuf<SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Ok(string) = self.to_string() {
+        if let Ok(string) = self.to_str() {
             write!(f, "\"{}\"", string)
         } else {
             <[u8; SIZE] as fmt::Debug>::fmt(&self.inner, f)
+        }
+    }
+}
+
+/// A Pascal string padded to an even size.
+#[derive(Deserialize)]
+pub struct PaddedPStr<'a> {
+    inner: &'a [u8],
+}
+
+impl PaddedPStr<'_> {
+    pub fn to_str(&self) -> Result<&str, crate::Error> {
+        // See [`StrBuf::to_str`].
+        std::str::from_utf8(self.inner).map_err(crate::Error::DecodeUtf8)
+    }
+}
+
+impl fmt::Debug for PaddedPStr<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Ok(string) = self.to_str() {
+            write!(f, "\"{}\"", string)
+        } else {
+            <[u8] as fmt::Debug>::fmt(self.inner, f)
         }
     }
 }
@@ -258,7 +295,11 @@ pub struct PrimaryDescriptor {
     pub opt_l_path_table_addr: u16,
     pub m_path_table_addr: u16,
     pub opt_m_path_table_addr: u16,
-    pub root_dir_record: DirectoryRecord,
+    // This field isn't [`DirectoryRecord`] as that has a variable size, but we know that this field
+    // must be exactly 34 bytes, so we should fail if that's not that case.
+    #[derivative(Debug = "ignore")]
+    #[serde(with = "serde_arrays")]
+    pub root_dir_record: [u8; 34],
     pub vol_set_id: StrBuf<128>,
     pub publisher_id: StrBuf<128>,
     pub data_preparer_id: StrBuf<128>,
@@ -271,7 +312,7 @@ pub struct PrimaryDescriptor {
 /// See Section 9.1.
 #[derive(Derivative, Deserialize)]
 #[derivative(Debug)]
-pub struct DirectoryRecord {
+pub struct DirectoryRecord<'a> {
     pub len: u8,
     pub ext_attr_len: u8,
     pub extent_addr: u32,
@@ -281,9 +322,8 @@ pub struct DirectoryRecord {
     pub file_unit_size: u8,
     pub inter_gap_size: u8,
     pub vol_seq_num: u16,
-    pub file_id_len: u8,
-    #[derivative(Debug = "ignore")]
-    _unused_10: u8,
+    #[serde(borrow)]
+    pub file_id: PaddedPStr<'a>,
 }
 
 #[derive(Derivative, Deserialize)]

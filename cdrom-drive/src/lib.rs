@@ -20,7 +20,7 @@ pub enum Error {
     Io(io::Error),
     Nul(std::ffi::NulError),
     IntoString(std::ffi::IntoStringError),
-    FromUtf8(std::str::Utf8Error),
+    DecodeUtf8(std::str::Utf8Error),
     Deserialize(volume::Error),
     ExpectedLogicalSector,
     ExpectedVolumeDescriptor,
@@ -61,6 +61,14 @@ impl FileSystem {
         // logical sectors, treating this CD-ROM image as just that: a generic CD rather than a
         // specialized PSX game disc.
 
+        Self::walk_volume_descriptors(&mut sectors)?;
+
+        Ok(Self(()))
+    }
+
+    fn walk_volume_descriptors<'a>(
+        sectors: &mut impl Iterator<Item = &'a [u8]>,
+    ) -> Result<(), Error> {
         loop {
             // First up are the volume descriptors. We will process these until we hit a descriptor
             // set terminator.
@@ -80,19 +88,13 @@ impl FileSystem {
 
             match header.kind {
                 volume::DescriptorKind::BootRecord => {
-                    let desc = volume::BootRecord::deserialize(&mut de)
-                        .map_err(Error::Deserialize)?;
-                    tracing::debug!("boot record: {:#?}", desc);
+                    Self::handle_boot_record(&mut de)?;
                 }
                 volume::DescriptorKind::Primary => {
-                    let desc = volume::PrimaryDescriptor::deserialize(&mut de)
-                        .map_err(Error::Deserialize)?;
-                    tracing::debug!("primary descriptor: {:#?}", desc);
+                    Self::handle_primary_descriptor(&mut de)?;
                 }
                 volume::DescriptorKind::Partition => {
-                    let desc = volume::PartitionDescriptor::deserialize(&mut de)
-                        .map_err(Error::Deserialize)?;
-                    tracing::debug!("partition descriptor: {:#?}", desc);
+                    Self::handle_partition_descriptor(&mut de)?;
                 }
                 volume::DescriptorKind::SetTerminator => {
                     // A set terminator indicates that the volume descriptor set ends here.
@@ -102,6 +104,35 @@ impl FileSystem {
             }
         }
 
-        Ok(Self(()))
+        Ok(())
+    }
+
+    fn handle_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
+        let desc = volume::BootRecord::deserialize(de)
+            .map_err(Error::Deserialize)?;
+        tracing::debug!("boot record: {:#?}", desc);
+
+        Ok(())
+    }
+
+    fn handle_primary_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+        let desc = volume::PrimaryDescriptor::deserialize(de)
+            .map_err(Error::Deserialize)?;
+        tracing::debug!("primary descriptor: {:#?}", desc);
+
+        let mut root_dir_record_de = volume::Deserializer::from_bytes(&desc.root_dir_record);
+        let root_dir_record = volume::DirectoryRecord::deserialize(&mut root_dir_record_de)
+            .map_err(Error::Deserialize)?;
+        tracing::debug!("root_dir_record: {:#?}", root_dir_record);
+
+        Ok(())
+    }
+
+    fn handle_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+        let desc = volume::PartitionDescriptor::deserialize(de)
+            .map_err(Error::Deserialize)?;
+        tracing::debug!("partition descriptor: {:#?}", desc);
+
+        Ok(())
     }
 }
