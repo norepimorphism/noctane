@@ -7,8 +7,6 @@
 //
 // [here]: https://www.ecma-international.org/publications-and-standards/standards/ecma-119/
 
-#![feature(cstr_from_bytes_until_nul)]
-
 mod volume;
 
 use std::io::{self, Read};
@@ -28,36 +26,46 @@ pub enum Error {
     IncompatibleVersion,
 }
 
+/// An ISO 9660 or ECMA-119 fileystem for CD-ROM images.
 pub struct FileSystem {
-    pub fn root_dir: Directory,
+    pub fn root_dirs: Vec<Directory>,
 }
 
+/// A container of entries.
 pub struct Directory {
+    /// Metadata for this directory.
     pub meta: entry::Metadata,
+    /// The contents of this directory.
     pub entries: Vec<Entry>,
 }
 
+
 pub struct File {
+    /// Metadata for this file.
     pub meta: entry::Metadata,
+    /// The contents of this file.
     pub data: Vec<u8>,
 }
 
 pub mod entry {
+    /// A directory or file.
     pub enum Entry {
+        /// A directory.
         Directory(Directory),
+        /// A file.
         File(File),
     }
     
     pub struct Metadata {
-        pub is_hidden: bool,
-        pub is_assoc: bool,
-        pub is_protected: bool,
+        /// Whether or not this entry should be listed.
+        pub is_listed: bool,
         pub attr: Option<Attributes>,
     }
 
     pub struct Attributes {
         pub owner_id: u16,
         pub group_id: u16,
+        pub is_protected: bool,
         pub perms: Permissions,
     }
     
@@ -89,14 +97,15 @@ impl FileSystem {
         let logical_sector_size = 2usize.pow(n);
         tracing::debug!("logical_sector_size: {}", logical_sector_size);
 
-        // There must be a system area, which is 16 logical sectors, and there is likely at least
-        // one logical sector in the data section. Given a logical sector size of 2^n bytes, the
-        // minimum size is (17 * 2^n).
+        // There must be a system area, which is 16 logical sectors, and there must be at least
+        // one logical sector (set terminator) in the data area. Given a logical sector size of
+        // 2^n bytes, the minimum size of the file system is (17 * 2^n).
         let mut data = Vec::with_capacity(17 * logical_sector_size);
 
         let data_len = reader.read_to_end(&mut data).map_err(crate::Error::Io)?;
         tracing::debug!("data_len: {}", data_len);
 
+        // TODO: Is there a valid reason why these would be inequal?
         assert_eq!(data_len, data.len());
 
         // Split the data into sectors and skip the system area.
@@ -125,12 +134,15 @@ impl FileSystem {
 
             let header = volume::DescriptorHeader::deserialize(&mut de)
                 .map_err(Error::Deserialize)?;
+            // TODO: Only log the descriptor type.
             tracing::info!("found volume descriptor: {:?}", header);
 
             if header.std_id != *b"CD001" {
                 return Err(Error::InvalidStandardId);
             }
 
+            // We can use the header of the descriptor to determine which type it is and, in turn,
+            // determine how the data field of the descriptor should be processed.
             match header.kind {
                 volume::DescriptorKind::BootRecord => Self::process_boot_record(&mut de)?,
                 // These are basically the same... right?
@@ -151,6 +163,7 @@ impl FileSystem {
     fn process_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::BootRecord::deserialize(de)
             .map_err(Error::Deserialize)?;
+        // TODO: Remove this.
         tracing::debug!("boot record: {:#?}", desc);
 
         Ok(())
@@ -159,19 +172,30 @@ impl FileSystem {
     fn process_primary_volume_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::PrimaryDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
+        // TODO: Remove this.
         tracing::debug!("primary descriptor: {:#?}", desc);
 
-        let mut root_dir_record_de = volume::Deserializer::from_bytes(&desc.root_dir_record);
-        let root_dir_record = volume::DirectoryRecord::deserialize(&mut root_dir_record_de)
+        let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir_record);
+        let root_dir = volume::DirectoryRecord::deserialize(&mut root_dir_record_de)
             .map_err(Error::Deserialize)?;
+        // TODO: Remove this.
         tracing::debug!("root_dir_record: {:#?}", root_dir_record);
+        
+        validate_root_directory(&root_dir)?;
 
+        Ok(())
+    }
+    
+    fn validate_root_directory(dir: &volume::DirectoryRecord) -> Result(), Error> {
+        
+        
         Ok(())
     }
 
     fn process_volume_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
         let desc = volume::PartitionDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
+        // TODO: Remove this.
         tracing::debug!("partition descriptor: {:#?}", desc);
 
         Ok(())
