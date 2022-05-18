@@ -86,7 +86,7 @@ pub mod entry {
 
 impl FileSystem {
     /// Attempts to read a file system with logical sectors of the standard size 2048.
-    pub fn from_reader(reader: impl Read) -> Result<Self, crate::Error> {
+    pub fn from_reader(reader: impl Read) -> Result<(), crate::Error> {
         // 2^11 = 2048.
         Self::from_reader_with_sector_size(reader, 11)
     }
@@ -95,7 +95,7 @@ impl FileSystem {
     pub fn from_reader_with_sector_size(
         mut reader: impl Read,
         n: u32,
-    ) -> Result<Self, crate::Error> {
+    ) -> Result<(), crate::Error> {
         let logical_sector_size = 2usize.pow(n);
         tracing::debug!("logical_sector_size: {}", logical_sector_size);
 
@@ -119,7 +119,7 @@ impl FileSystem {
 
         Self::process_volume_descriptors(&mut sectors)?;
 
-        todo!()
+        Ok(())
     }
 
     fn process_volume_descriptors<'a>(

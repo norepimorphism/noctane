@@ -21,9 +21,12 @@ pub struct Sink<'b> {
 }
 
 impl<'b> Sink<'b> {
-    pub fn try_refresh(&self) -> anyhow::Result<()> {
+    /// # Safety
+    ///
+    /// You must ensure that the source to this sink has only written valid UTF-8 characters.
+    pub unsafe fn try_refresh(&self) -> anyhow::Result<()> {
         if let Ok(buf) = self.inner.try_recv() {
-            let text = std::str::from_utf8(&buf).unwrap();
+            let text = std::str::from_utf8_unchecked(&buf);
             let _ = self.entry.push_text(text);
         }
 
