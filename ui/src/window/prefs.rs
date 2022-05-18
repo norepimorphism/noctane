@@ -1,16 +1,11 @@
-use super::Descriptor;
+impl<'b> Window<'b> {
+    pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
+        window.set_resizeable(false);
+        window.set_margined(true);
+        window.set_child(create_tab(boing));
 
-pub(super) const DESCRIPTOR: Descriptor = Descriptor {
-    title: "Preferences",
-    size: (480, 360),
-    is_main: false,
-    setup,
-};
-
-fn setup(boing: &boing::Ui, window: &mut boing::Window, _: &boing::MultilineTextEntry) {
-    window.set_resizeable(false);
-    window.set_margined(true);
-    window.set_child(create_tab(boing));
+        Ok(Self(window))
+    }
 }
 
 fn create_tab(boing: &boing::Ui) -> &mut boing::Tab {
@@ -33,3 +28,7 @@ fn create_cpu_page(boing: &boing::Ui) -> &mut boing::Group {
 
     group
 }
+
+pub struct Window<'b>(&'b mut boing::Window<'b>);
+
+super::impl_deref!(Window);
