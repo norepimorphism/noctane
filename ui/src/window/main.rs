@@ -1,12 +1,12 @@
-use super::Descriptor;
+impl<'b> Window<'b> {
+    pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
+        window.set_resizeable(false);
+        window.set_margined(true);
 
-pub(super) const DESCRIPTOR: Descriptor = Descriptor {
-    title: "Noctane",
-    size: (256, 144),
-    is_main: true,
-    setup,
-};
-
-fn setup(_: &boing::Ui, window: &mut boing::Window, _: &boing::MultilineTextEntry) {
-    window.set_resizeable(false);
+        Ok(Self(window))
+    }
 }
+
+pub struct Window<'b>(&'b mut boing::Window<'b>);
+
+super::impl_deref!(Window);
