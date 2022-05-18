@@ -28,8 +28,9 @@ pub fn run() -> Result<(), anyhow::Error> {
     let _log_guard = log::setup(log::Source::new(log_source));
 
     let i18n = create_i18n()?;
-    let mut windows = Windows::new(&boing, log_sink.entry());
-    MenuBar::setup(&i18n, &boing, &mut windows)?;
+    let mut menu_bar = MenuBar::new(&i18n, &boing)?;
+    let mut windows = Windows::new(&boing);
+    menu_bar.setup(&mut windows, &log_sink);
 
     windows.main.show().context("Failed to show main window")?;
 
@@ -41,9 +42,7 @@ pub fn run() -> Result<(), anyhow::Error> {
 
         // SAFETY: *tracing* only writes ACSII logs, so the input to `log_sink` *should* be valid
         // UTF-8.
-        unsafe {
-            log_sink.try_refresh().context("Failed to refresh log sink")?
-        }
+        unsafe { log_sink.try_refresh().context("Failed to refresh log sink")? };
     }
 
     Ok(())
