@@ -6,6 +6,8 @@ mod log;
 mod menu_bar;
 mod window;
 
+use std::cell::Cell;
+
 use anyhow::Context as _;
 use i18n_embed::{
     DesktopLanguageRequester,
@@ -30,11 +32,21 @@ pub fn run() -> Result<(), anyhow::Error> {
     let i18n = create_i18n()?;
     let mut menu_bar = MenuBar::new(&i18n, &boing)?;
     let mut windows = Windows::new(&boing);
-    menu_bar.setup(&mut windows, &log_sink);
+    
+    let should_quit = Cell::new(false);
+    menu_bar.file.open_iso.setup();
+    menu_bar.file.quit.setup(&should_quit);
+    menu_bar.edit.prefs.setup(&windows.prefs);
+    menu_bar.view.log.setup(&windows.log);
+    menu_bar.help.about.setup(&windows.about);
 
     windows.main.show().context("Failed to show main window")?;
 
     loop {
+        if should_quit.get() {
+            break;
+        }
+        
         let should_continue = boing.step();
         if !should_continue {
             break;
