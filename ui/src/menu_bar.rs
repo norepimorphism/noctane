@@ -2,36 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::{cell::Cell, fs::File};
+
 use anyhow::Context as _;
 
 use crate::window::Windows;
 use i18n_embed::fluent::FluentLanguageLoader;
 
-pub struct MenuBar<'b> {
-    pub file: FileMenu<'b>,
-    pub edit: EditMenu<'b>,
-    pub view: ViewMenu<'b>,
-    pub help: HelpMenu<'b>,
-}
-
-pub struct FileMenu<'b> {
-    pub open_iso: &'b mut boing::MenuItem<'b>,
-    pub quit: &'b mut boing::MenuItem<'b>,
-}
-
-pub struct EditMenu<'b> {
-    pub prefs: &'b mut boing::MenuItem<'b>,
-}
-
-pub struct ViewMenu<'b> {
-    pub log: &'b mut boing::MenuItem<'b>,
-}
-
-pub struct HelpMenu<'b> {
-    pub about: &'b mut boing::MenuItem<'b>,
-}
-
-impl MenuBar<'_, '_, '_> {
+impl MenuBar<'_> {
     pub fn new<'b>(
         i18n: &FluentLanguageLoader,
         boing: &'b boing::Ui,
@@ -67,16 +45,17 @@ impl Context<'_, '_> {
         Ok(Self { open_iso, quit })
     }
 
-    fn create_open_iso_item(&mut self, menu: &boing::Menu) -> anyhow::Result<&mut boing::MenuItem> {
+    fn create_open_iso_item(&mut self, menu: &boing::Menu) -> anyhow::Result<OpenIsoItem> {
         menu.push_new_item(self.fl("menu-item_open-iso_title"))
             .context("Failed to append \"Open ISO...\" menu item")
+            .map(OpenIsoItem)
     }
 
-    fn create_quit_item(&mut self, menu: &boing::Menu) -> anyhow::Result<&mut boing::MenuItem> {
+    fn create_quit_item(&mut self, menu: &boing::Menu) -> anyhow::Result<QuitItem> {
         menu.push_new_item(self.fl("menu-item_quit_title"))
             .context("Failed to append \"Quit\" menu item")
+            .map(QuitItem)
     }
-
 
     fn create_edit_menu(&mut self) -> anyhow::Result<EditMenu> {
         let menu = self.boing.create_menu(self.fl("menu_edit_title"))
@@ -86,9 +65,10 @@ impl Context<'_, '_> {
         Ok(Self { prefs })
     }
 
-    fn create_prefs_item(&mut self, menu: &boing::Menu) -> anyhow::Result<&mut boing::MenuItem> {
+    fn create_prefs_item(&mut self, menu: &boing::Menu) -> anyhow::Result<PrefsItem> {
         menu.push_new_item(self.fl("menu-item_prefs_title"))
             .context("Failed to append \"Preferences...\" menu item")
+            .map(PrefsItem)
     }
 
     fn create_view_menu(&mut self) -> anyhow::Result<ViewMenu> {
@@ -99,9 +79,10 @@ impl Context<'_, '_> {
         Ok(Self { log })
     }
 
-    fn create_log_item(&mut self, menu: &boing::Menu) -> anyhow::Result<&mut boing::MenuItem> {
+    fn create_log_item(&mut self, menu: &boing::Menu) -> anyhow::Result<LogItem> {
         menu.push_new_item(self.fl("menu-item_log_title"))
             .context("Failed to append \"Log\" menu item")
+            .map(LogItem)
     }
 
     fn create_help_menu(&mut self) -> anyhow::Result<HelpMenu> {
@@ -123,11 +104,92 @@ impl Context<'_, '_> {
             let _ = open::that(REPO_URL);
         });
 
-        Ok(())
+        Ok()
     }
 
-    fn create_about_item(&mut self, menu: &boing::Menu) -> anyhow::Result<&mut boing::MenuItem> {
+    fn create_about_item(&mut self, menu: &boing::Menu) -> anyhow::Result<AboutItem> {
         menu.push_new_item(self.fl("menu-item_about_title"))
             .context("Failed to append \"About\" menu item")
+            .map(AboutItem)
+    }
+}
+
+pub struct MenuBar<'b> {
+    pub file: FileMenu<'b>,
+    pub edit: EditMenu<'b>,
+    pub view: ViewMenu<'b>,
+    pub help: HelpMenu<'b>,
+}
+
+pub struct FileMenu<'b> {
+    pub open_iso: OpenIsoItem<'b>,
+    pub quit: QuitItem<'b>,
+}
+
+pub struct OpenIsoItem<'b>(&'b mut boing::MenuItem<'b>);
+
+impl OpenIsoItem<'_> {
+   pub  fn setup(&self) {
+        self.0.on_clicked(|_| {
+            if let Ok(Some(iso_path)) = native_dialog::FileDialog::new()
+                .add_filter("CD-ROM Image", &["iso"])
+                .show_open_single_file()
+            {
+                let iso = File::open(iso_path).unwrap();
+                noctane_cdrom::FileSystem::from_reader(iso).unwrap();
+            }
+        });
+    }
+}
+
+pub struct QuitItem<'b>(&'b mut boing::MenuItem<'b>);
+
+impl QuitItem<'_> {
+    pub fn setup(&self, should_quit: &Cell<bool>) {
+        self.0.on_clicked(|_| {
+            should_quit.set(true);
+        });
+    }
+}
+
+pub struct EditMenu<'b> {
+    pub prefs: PrefsItem<'b>,
+}
+
+pub struct PrefsItem<'b>(&'b mut boing::MenuItem<'b>);
+
+impl PrefsItem<'_> {
+    pub fn setup(&self, prefs_window: &boing::Window) {
+        self.0.on_clicked(|_| {
+            let _ = prefs_window.show();
+        });
+    }
+}
+
+pub struct ViewMenu<'b> {
+    pub log: LogItem<'b>,
+}
+
+pub struct LogItem<'b>(&'b mut boing::MenuItem<'b>);
+
+impl LogItem<'_> {
+    pub fn setup(&self, log_window: &boing::Window) {
+        self.0.on_clicked(|_| {
+            let _ = log_window.show();
+        });
+    }
+}
+
+pub struct HelpMenu<'b> {
+    pub about: AboutItem<'b>,
+}
+
+pub struct AboutItem<'b>(&'b mut boing::MenuItem<'b>);
+
+impl AboutItem<'_> {
+    pub fn setup(&self, about_window: &boing::Window) {
+        self.0.on_clicked(|_| {
+            let _ = about_window.show();
+        });
     }
 }
