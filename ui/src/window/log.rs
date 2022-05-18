@@ -1,5 +1,5 @@
 impl<'b> Window<'b> {
-    pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
+    pub fn new(window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
         window.set_resizeable(true);
         window.set_margined(true);
 

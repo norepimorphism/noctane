@@ -137,7 +137,7 @@ impl FileSystem {
             let header = volume::DescriptorHeader::deserialize(&mut de)
                 .map_err(Error::Deserialize)?;
             // TODO: Only log the descriptor type.
-            tracing::info!("found volume descriptor: {:?}", header);
+            tracing::info!("{:?}", header);
 
             if header.std_id != *b"CD001" {
                 return Err(Error::InvalidStandardId);
@@ -166,7 +166,7 @@ impl FileSystem {
         let desc = volume::BootRecord::deserialize(de)
             .map_err(Error::Deserialize)?;
         // TODO: Remove this.
-        tracing::debug!("boot record: {:#?}", desc);
+        tracing::debug!("{:#?}", desc);
 
         Ok(())
     }
@@ -175,13 +175,13 @@ impl FileSystem {
         let desc = volume::PrimaryDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
         // TODO: Remove this.
-        tracing::debug!("primary descriptor: {:#?}", desc);
+        tracing::debug!("{:#?}", desc);
 
         let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir);
         let root_dir = volume::EntryRecord::deserialize(&mut root_dir_de)
             .map_err(Error::Deserialize)?;
         // TODO: Remove this.
-        tracing::debug!("root_dir: {:#?}", root_dir);
+        tracing::debug!("{:#?}", root_dir);
 
         Self::validate_root_directory(&root_dir)?;
 
@@ -196,7 +196,7 @@ impl FileSystem {
         let desc = volume::PartitionDescriptor::deserialize(de)
             .map_err(Error::Deserialize)?;
         // TODO: Remove this.
-        tracing::debug!("partition descriptor: {:#?}", desc);
+        tracing::debug!("{:#?}", desc);
 
         Ok(())
     }

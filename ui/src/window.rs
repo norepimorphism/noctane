@@ -6,53 +6,51 @@ mod prefs;
 use anyhow::Context as _;
 
 impl<'b> Windows<'b> {
-    pub fn new(boing: &'b boing::Ui) -> Self {
-        Self {
-            about: Window::new(
+    pub fn new(boing: &'b boing::Ui) -> anyhow::Result<Self> {
+        Ok(Self {
+            about: about::Window::new(
                 boing,
                 Descriptor {
                     title: "About Noctane",
                     size: (256, 144),
                     is_main: false,
                 }
-                .create_window(boing),
-            ),
-            log: Window::new(
-                boing,
+                .create_window(boing)?,
+            )?,
+            log: log::Window::new(
                 Descriptor {
                     title: "Log",
                     size: (480, 360),
                     is_main: false,
                 }
-                .create_window(boing),
-            ),
-            main: Window::new(
-                boing,
+                .create_window(boing)?,
+            )?,
+            main: main::Window::new(
                 Descriptor {
                     title: "Noctane",
                     size: (256, 144),
                     is_main: true,
                 }
-                .create_window(boing),
-            ),
-            prefs: Window::new(
+                .create_window(boing)?,
+            )?,
+            prefs: prefs::Window::new(
                 boing,
                 Descriptor {
                     title: "Preferences",
                     size: (480, 360),
                     is_main: false,
                 }
-                .create_window(boing),
-            ),
-        }
+                .create_window(boing)?,
+            )?,
+        })
     }
 }
 
 pub struct Windows<'b> {
-    pub about: Window<'b>,
-    pub log: Window<'b>,
-    pub main: Window<'b>,
-    pub prefs: Window<'b>,
+    pub about: about::Window<'b>,
+    pub log: log::Window<'b>,
+    pub main: main::Window<'b>,
+    pub prefs: prefs::Window<'b>,
 }
 
 struct Descriptor {
@@ -83,13 +81,13 @@ macro_rules! impl_deref {
             type Target = boing::Window<'b>;
 
             fn deref(&self) -> &Self::Target {
-                self.inner
+                self.0
             }
         }
 
         impl std::ops::DerefMut for $ty<'_> {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                self.inner
+                self.0
             }
         }
     };

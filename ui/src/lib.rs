@@ -29,10 +29,15 @@ pub fn run() -> Result<(), anyhow::Error> {
     // Logging ceases when this guard dies.
     let _log_guard = log::setup(log::Source::new(log_source));
 
-    let i18n = create_i18n()?;
-    let mut menu_bar = MenuBar::new(&i18n, &boing)?;
-    let mut windows = Windows::new(&boing);
-    
+    let i18n = create_i18n()
+        .context("Failed to setup i18n")?;
+    let mut menu_bar = MenuBar::new(&i18n, &boing)
+        .context("Failed to create menu bar")?;
+
+    let windows = Windows::new(&boing)
+        .context("Failed to create windows")?;
+    windows.log.set_child(log_sink.entry());
+
     let should_quit = Cell::new(false);
     menu_bar.file.open_iso.setup();
     menu_bar.file.quit.setup(&should_quit);
@@ -40,13 +45,13 @@ pub fn run() -> Result<(), anyhow::Error> {
     menu_bar.view.log.setup(&windows.log);
     menu_bar.help.about.setup(&windows.about);
 
-    windows.main.show().context("Failed to show main window")?;
+    windows.main.show();
 
     loop {
         if should_quit.get() {
             break;
         }
-        
+
         let should_continue = boing.step();
         if !should_continue {
             break;

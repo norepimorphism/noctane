@@ -6,17 +6,16 @@ use std::{cell::Cell, fs::File};
 
 use anyhow::Context as _;
 
-use crate::window::Windows;
 use i18n_embed::fluent::FluentLanguageLoader;
 
-impl MenuBar<'_> {
-    pub fn new<'b>(
-        i18n: &FluentLanguageLoader,
+impl<'b> MenuBar<'b> {
+    pub fn new<'l>(
+        i18n: &'l FluentLanguageLoader,
         boing: &'b boing::Ui,
     ) -> anyhow::Result<Self> {
-        let mut ctx = Context { i18n, boing };
+        let mut ctx = Context::<'l, 'b> { i18n, boing };
 
-        Ok(MenuBar {
+        Ok(Self {
             file: ctx.create_file_menu()?,
             edit: ctx.create_edit_menu()?,
             view: ctx.create_view_menu()?,
@@ -30,72 +29,72 @@ struct Context<'l, 'b> {
     boing: &'b boing::Ui,
 }
 
-impl Context<'_, '_> {
+impl<'l, 'b> Context<'l, 'b> {
     fn fl(&self, id: &str) -> String {
         self.i18n.get(id)
     }
 
-    fn create_file_menu(&mut self) -> anyhow::Result<FileMenu> {
+    fn create_file_menu(&mut self) -> anyhow::Result<FileMenu<'b>> {
         let menu = self.boing.create_menu(self.fl("menu_file_title"))
             .context("Failed to create \"File\" menu")?;
         let open_iso = self.create_open_iso_item(menu)?;
         menu.push_separator();
-        let quit = self.setup_quit_item(menu)?;
+        let quit = self.create_quit_item(menu)?;
 
-        Ok(Self { open_iso, quit })
+        Ok(FileMenu { open_iso, quit })
     }
 
-    fn create_open_iso_item(&mut self, menu: &boing::Menu) -> anyhow::Result<OpenIsoItem> {
+    fn create_open_iso_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<OpenIsoItem<'b>> {
         menu.push_new_item(self.fl("menu-item_open-iso_title"))
             .context("Failed to append \"Open ISO...\" menu item")
             .map(OpenIsoItem)
     }
 
-    fn create_quit_item(&mut self, menu: &boing::Menu) -> anyhow::Result<QuitItem> {
+    fn create_quit_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<QuitItem<'b>> {
         menu.push_new_item(self.fl("menu-item_quit_title"))
             .context("Failed to append \"Quit\" menu item")
             .map(QuitItem)
     }
 
-    fn create_edit_menu(&mut self) -> anyhow::Result<EditMenu> {
+    fn create_edit_menu(&mut self) -> anyhow::Result<EditMenu<'b>> {
         let menu = self.boing.create_menu(self.fl("menu_edit_title"))
             .context("Failed to create \"Edit\" menu")?;
         let prefs = self.create_prefs_item(menu)?;
 
-        Ok(Self { prefs })
+        Ok(EditMenu { prefs })
     }
 
-    fn create_prefs_item(&mut self, menu: &boing::Menu) -> anyhow::Result<PrefsItem> {
+    fn create_prefs_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<PrefsItem<'b>> {
         menu.push_new_item(self.fl("menu-item_prefs_title"))
             .context("Failed to append \"Preferences...\" menu item")
             .map(PrefsItem)
     }
 
-    fn create_view_menu(&mut self) -> anyhow::Result<ViewMenu> {
+    fn create_view_menu(&mut self) -> anyhow::Result<ViewMenu<'b>> {
         let menu = self.boing.create_menu(self.fl("menu_view_title"))
             .context("Failed to create \"View\" menu")?;
         let log = self.create_log_item(menu)?;
 
-        Ok(Self { log })
+        Ok(ViewMenu { log })
     }
 
-    fn create_log_item(&mut self, menu: &boing::Menu) -> anyhow::Result<LogItem> {
+    fn create_log_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<LogItem<'b>> {
         menu.push_new_item(self.fl("menu-item_log_title"))
             .context("Failed to append \"Log\" menu item")
             .map(LogItem)
     }
 
-    fn create_help_menu(&mut self) -> anyhow::Result<HelpMenu> {
+    fn create_help_menu(&mut self) -> anyhow::Result<HelpMenu<'b>> {
         let menu = self.boing.create_menu(self.fl("menu_help_title"))
             .context("Failed to create \"Help\" menu")?;
         self.setup_website_item(menu)?;
         menu.push_separator();
         let about = self.create_about_item(menu)?;
 
-        Ok(Self { about })
+        Ok(HelpMenu { about })
     }
 
-    fn setup_website_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+    fn setup_website_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<()> {
         static REPO_URL: &str = "https://github.com/norepimorphism/noctane";
 
         let item = menu.push_new_item(self.fl("menu-item_website_title"))
@@ -104,10 +103,10 @@ impl Context<'_, '_> {
             let _ = open::that(REPO_URL);
         });
 
-        Ok()
+        Ok(())
     }
 
-    fn create_about_item(&mut self, menu: &boing::Menu) -> anyhow::Result<AboutItem> {
+    fn create_about_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<AboutItem<'b>> {
         menu.push_new_item(self.fl("menu-item_about_title"))
             .context("Failed to append \"About\" menu item")
             .map(AboutItem)
@@ -129,7 +128,7 @@ pub struct FileMenu<'b> {
 pub struct OpenIsoItem<'b>(&'b mut boing::MenuItem<'b>);
 
 impl OpenIsoItem<'_> {
-   pub  fn setup(&self) {
+   pub fn setup(&mut self) {
         self.0.on_clicked(|_| {
             if let Ok(Some(iso_path)) = native_dialog::FileDialog::new()
                 .add_filter("CD-ROM Image", &["iso"])
@@ -144,8 +143,8 @@ impl OpenIsoItem<'_> {
 
 pub struct QuitItem<'b>(&'b mut boing::MenuItem<'b>);
 
-impl QuitItem<'_> {
-    pub fn setup(&self, should_quit: &Cell<bool>) {
+impl<'b> QuitItem<'b> {
+    pub fn setup(&mut self, should_quit: &'b Cell<bool>) {
         self.0.on_clicked(|_| {
             should_quit.set(true);
         });
@@ -158,8 +157,8 @@ pub struct EditMenu<'b> {
 
 pub struct PrefsItem<'b>(&'b mut boing::MenuItem<'b>);
 
-impl PrefsItem<'_> {
-    pub fn setup(&self, prefs_window: &boing::Window) {
+impl<'b> PrefsItem<'b> {
+    pub fn setup(&mut self, prefs_window: &'b boing::Window<'b>) {
         self.0.on_clicked(|_| {
             let _ = prefs_window.show();
         });
@@ -172,8 +171,8 @@ pub struct ViewMenu<'b> {
 
 pub struct LogItem<'b>(&'b mut boing::MenuItem<'b>);
 
-impl LogItem<'_> {
-    pub fn setup(&self, log_window: &boing::Window) {
+impl<'b> LogItem<'b> {
+    pub fn setup(&mut self, log_window: &'b boing::Window<'b>) {
         self.0.on_clicked(|_| {
             let _ = log_window.show();
         });
@@ -186,8 +185,8 @@ pub struct HelpMenu<'b> {
 
 pub struct AboutItem<'b>(&'b mut boing::MenuItem<'b>);
 
-impl AboutItem<'_> {
-    pub fn setup(&self, about_window: &boing::Window) {
+impl<'b> AboutItem<'b> {
+    pub fn setup(&mut self, about_window: &'b boing::Window<'b>) {
         self.0.on_clicked(|_| {
             let _ = about_window.show();
         });

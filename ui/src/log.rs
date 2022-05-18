@@ -72,6 +72,8 @@ pub fn setup(source: Source) -> tracing_appender::non_blocking::WorkerGuard {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_ansi(false)
+        .with_level(false)
+        .without_time()
         .with_writer(writer)
         .init();
 
