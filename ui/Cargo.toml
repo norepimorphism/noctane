@@ -9,13 +9,14 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow = "1.0"
 boing = { git = "https://github.com/norepimorphism/boing" }
-derive_builder = "0.11"
+crossbeam-channel = "0.5"
 fluent = "0.16"
 i18n-embed = { version = "0.13", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.6"
 native-dialog = "0.6"
-noctane-cdrom-drive = { path = "../cdrom-drive" }
+noctane-cdrom = { path = "../cdrom" }
 open = "2.1"
 png = "0.17"
 rust-embed = "6.4"

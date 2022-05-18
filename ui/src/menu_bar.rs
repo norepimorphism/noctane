@@ -2,115 +2,140 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::Context as _;
+
 use crate::window::Windows;
 use i18n_embed::fluent::FluentLanguageLoader;
 
-pub fn setup<'b>(
-    lang_loader: &FluentLanguageLoader,
+impl MenuBar<'_, '_, '_> {
+    pub fn setup<'b>(
+        i18n: &FluentLanguageLoader,
+        boing: &'b boing::Ui,
+        windows: &mut Windows<'b>,
+    ) -> anyhow::Result<()> {
+        let mut this = MenuBar { i18n, boing, windows };
+        this.setup_file_menu()?;
+        this.setup_edit_menu()?;
+        this.setup_view_menu()?;
+        this.setup_help_menu()?;
+
+        Ok(())
+    }
+}
+
+pub struct MenuBar<'l, 'b, 'w> {
     boing: &'b boing::Ui,
-    windows: &mut Windows<'b>,
-) {
-    let mut ctx = Context { lang_loader, boing, windows };
-    file_menu::setup(&mut ctx);
-    edit_menu::setup(&mut ctx);
-    view_menu::setup(&mut ctx);
-    help_menu::setup(&mut ctx);
+    windows: &'w mut Windows<'b>,
+    i18n: &'l FluentLanguageLoader,
 }
 
-struct Context<'l, 'b, 'w> {
-    pub lang_loader: &'l FluentLanguageLoader,
-    pub boing: &'b boing::Ui,
-    pub windows: &'w mut Windows<'b>,
-}
-
-mod file_menu {
-    use i18n_embed_fl::fl;
-
-    use super::Context;
-
-    pub(super) fn setup(ctx: &mut Context) {
-        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_file_title")).unwrap();
-        setup_open_iso(ctx, &menu);
-        menu.push_separator();
-        setup_quit(ctx, &menu);
+impl MenuBar<'_, '_, '_> {
+    fn fl(&self, id: &str) -> String {
+        self.i18n.get(id)
     }
 
-    fn setup_open_iso(ctx: &mut Context, menu: &boing::Menu) {
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_open-iso_title")).unwrap();
+    fn setup_file_menu(&mut self) -> anyhow::Result<()> {
+        let menu = self.boing.create_menu(self.fl("menu_file_title"))
+            .context("Failed to create \"File\" menu")?;
+        self.setup_open_iso_item(menu)?;
+        menu.push_separator();
+        self.setup_quit_item(menu)?;
+
+        Ok(())
+    }
+
+    fn setup_open_iso_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+        let item = menu.push_new_item(self.fl("menu-item_open-iso_title"))
+            .context("Failed to append \"Open ISO...\" menu item")?;
         item.on_clicked(|_| {
-            let iso_path = native_dialog::FileDialog::new()
+            if let Ok(Some(iso_path)) = native_dialog::FileDialog::new()
                 .add_filter("CD-ROM Image", &["iso"])
                 .show_open_single_file()
-                .unwrap();
-
-            if let Some(iso_path) = iso_path {
+            {
                 let iso = std::fs::File::open(iso_path).unwrap();
-                noctane_cdrom_drive::FileSystem::from_reader(iso).unwrap();
+                noctane_cdrom::FileSystem::from_reader(iso).unwrap();
             }
         });
+
+        Ok(())
     }
 
-    fn setup_quit(ctx: &mut Context, menu: &boing::Menu) {
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_quit_title")).unwrap();
+    fn setup_quit_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+        let item = menu.push_new_item(self.fl("menu-item_quit_title"))
+            .context("Failed to append \"Quit\" menu item")?;
         item.on_clicked(|_| {
             // TODO
         });
-    }
-}
 
-mod edit_menu {
-    use i18n_embed_fl::fl;
-
-    use super::Context;
-
-    pub(super) fn setup(ctx: &mut Context) {
-        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_edit_title")).unwrap();
-        setup_prefs(ctx, &menu);
+        Ok(())
     }
 
-    fn setup_prefs(ctx: &mut Context, menu: &boing::Menu) {
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_prefs_title")).unwrap();
-        item.on_clicked(|_| ctx.windows.prefs().show().unwrap());
-    }
-}
 
-mod view_menu {
-    use i18n_embed_fl::fl;
+    fn setup_edit_menu(&mut self) -> anyhow::Result<()> {
+        let menu = self.boing.create_menu(self.fl("menu_edit_title"))
+            .context("Failed to create \"Edit\" menu")?;
+        self.setup_prefs_item(menu)?;
 
-    use super::Context;
-
-    pub(super) fn setup(ctx: &mut Context) {
-        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_view_title")).unwrap();
-        setup_log(ctx, &menu);
+        Ok(())
     }
 
-    fn setup_log(ctx: &mut Context, menu: &boing::Menu) {
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_log_title")).unwrap();
-        item.on_clicked(|_| ctx.windows.log().show().unwrap());
+    fn setup_prefs_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+        let item = menu.push_new_item(self.fl("menu-item_prefs_title"))
+            .context("Failed to append \"Preferences...\" menu item")?;
+        item.on_clicked(|_| {
+            let _ = self.windows.prefs.show();
+        });
+
+        Ok(())
     }
-}
 
-mod help_menu {
-    use i18n_embed_fl::fl;
+    fn setup_view_menu(&mut self) -> anyhow::Result<()> {
+        let menu = self.boing.create_menu(self.fl("menu_view_title"))
+            .context("Failed to create \"View\" menu")?;
+        self.setup_log_item(menu)?;
 
-    use super::Context;
+        Ok(())
+    }
 
-    pub(super) fn setup(ctx: &mut Context) {
-        let menu = ctx.boing.create_menu(fl!(ctx.lang_loader, "menu_help_title")).unwrap();
-        setup_website(ctx, &menu);
+    fn setup_log_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+        let item = menu.push_new_item(self.fl("menu-item_log_title"))
+            .context("Failed to append \"Log\" menu item")?;
+        item.on_clicked(|_| {
+            let _ = self.windows.log.show();
+        });
+
+        Ok(())
+    }
+
+    fn setup_help_menu(&mut self) -> anyhow::Result<()> {
+        let menu = self.boing.create_menu(self.fl("menu_help_title"))
+            .context("Failed to create \"Help\" menu")?;
+        self.setup_website_item(menu)?;
         menu.push_separator();
-        setup_about(ctx, &menu);
+        self.setup_about_item(menu)?;
+
+        Ok(())
     }
 
-    fn setup_website(ctx: &mut Context, menu: &boing::Menu) {
+    fn setup_website_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
         static REPO_URL: &str = "https://github.com/norepimorphism/noctane";
 
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_website_title")).unwrap();
-        item.on_clicked(|_| open::that(REPO_URL).unwrap());
+        let item = menu.push_new_item(self.fl("menu-item_website_title"))
+            .context("Failed to append \"Website\" menu item")?;
+        item.on_clicked(|_| {
+            let _ = open::that(REPO_URL);
+        });
+
+        Ok(())
     }
 
-    fn setup_about(ctx: &mut Context, menu: &boing::Menu) {
-        let item = menu.push_new_item(fl!(ctx.lang_loader, "menu-item_about_title")).unwrap();
-        item.on_clicked(|_| ctx.windows.about().show().unwrap());
+    fn setup_about_item(&mut self, menu: &boing::Menu) -> anyhow::Result<()> {
+        let item = menu.push_new_item(self.fl("menu-item_about_title"))
+            .context("Failed to append \"About\" menu item")?;
+        item.on_clicked(|_| {
+            let _ = self.windows.about.show();
+        });
+
+        Ok(())
     }
 }

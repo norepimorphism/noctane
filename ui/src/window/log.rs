@@ -1,20 +1,28 @@
 use super::Descriptor;
 
-pub(super) const DESCRIPTOR: Descriptor = Descriptor {
-    title: "Log",
-    size: (480, 360),
-    setup,
-};
+impl<'b> Window<'b> {
+    pub fn new(boing: &'b boing::Ui) -> anyhow::Result<Self> {
+        const DESCRIPTOR: Descriptor = Descriptor {
+            title: "Log",
+            size: (480, 360),
+            is_main: false,
+        };
 
-fn setup(boing: &boing::Ui, window: &mut boing::Window) {
-    window.set_resizeable(true);
-    window.set_margined(true);
-    window.set_child(create_log(boing));
+        let window = DESCRIPTOR.create_window(boing)?;
+        window.set_resizeable(true);
+        window.set_margined(true);
+
+        // let writer = Writer::new(boing);
+        // window.set_child(writer.entry);
+
+        Ok(Self {
+            inner: window,
+        })
+    }
 }
 
-fn create_log(boing: &boing::Ui) -> &mut boing::MultilineTextEntry {
-    let entry = boing.create_non_wrapping_multiline_text_entry().unwrap();
-    entry.set_read_only(true);
-
-    entry
+pub struct Window<'b> {
+    inner: &'b mut boing::Window<'b>,
 }
+
+super::impl_deref!(Window);

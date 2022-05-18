@@ -28,7 +28,7 @@ pub enum Error {
 
 /// An ISO 9660 or ECMA-119 fileystem for CD-ROM images.
 pub struct FileSystem {
-    pub fn root_dirs: Vec<Directory>,
+    pub root_dirs: Vec<Directory>,
 }
 
 /// A container of entries.
@@ -48,6 +48,8 @@ pub struct File {
 }
 
 pub mod entry {
+    use crate::{Directory, File};
+
     /// A directory or file.
     pub enum Entry {
         /// A directory.
@@ -55,7 +57,7 @@ pub mod entry {
         /// A file.
         File(File),
     }
-    
+
     pub struct Metadata {
         /// Whether or not this entry should be listed.
         pub is_listed: bool,
@@ -68,14 +70,14 @@ pub mod entry {
         pub is_protected: bool,
         pub perms: Permissions,
     }
-    
+
     pub struct Permissions {
         pub system: Permission,
         pub owner: Permission,
         pub group: Permission,
         pub all: Permission,
     }
-    
+
     pub struct Permission {
         pub read: bool,
         pub execute: bool,
@@ -175,20 +177,18 @@ impl FileSystem {
         // TODO: Remove this.
         tracing::debug!("primary descriptor: {:#?}", desc);
 
-        let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir_record);
-        let root_dir = volume::DirectoryRecord::deserialize(&mut root_dir_record_de)
+        let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir);
+        let root_dir = volume::EntryRecord::deserialize(&mut root_dir_de)
             .map_err(Error::Deserialize)?;
         // TODO: Remove this.
-        tracing::debug!("root_dir_record: {:#?}", root_dir_record);
-        
-        validate_root_directory(&root_dir)?;
+        tracing::debug!("root_dir: {:#?}", root_dir);
+
+        Self::validate_root_directory(&root_dir)?;
 
         Ok(())
     }
-    
-    fn validate_root_directory(dir: &volume::DirectoryRecord) -> Result(), Error> {
-        
-        
+
+    fn validate_root_directory(_: &volume::EntryRecord) -> Result<(), Error> {
         Ok(())
     }
 

@@ -128,7 +128,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
         visitor.visit_u8(*it)
     }
-    
+
     // While the spec. indicates that either little-, big- or middle-endian representations
     // for multi-byte integers may be used, I have only seen them in middle-endian. It is
     // probably erroneous to assume that of all integer fields, but it works for now.
@@ -270,23 +270,21 @@ impl fmt::Debug for PaddedPStr<'_> {
     }
 }
 
-fn parse_ascii(bytes: &[u8) -> Result<&sstr, crate::Error> {
+fn parse_ascii(bytes: &[u8]) -> Result<&str, crate::Error> {
     // This is OK because a- and d-characters are encoded in a restricted set of ASCII.
     // Assuming the input is valid ASCII, a UTF-8 representation should be equivalent. If it
     // isn't valid ASCII, the output will probably look garbled, but it was going to look
     // garbled anyway. ¯\_(ツ)_/¯
-    let string = std::str::from_utf8(&self.inner).map_err(crate::Error::DecodeUtf8)?;
-    
+    let string = std::str::from_utf8(bytes).map_err(crate::Error::DecodeUtf8)?;
+
     // ISO 9660 and ECMA-119 use ASCII code `0x32`, the space, to denote filler characters at
     // the end of a string buffer. As these are only noise, we will strip them out.
     //
     // TOOD: This is inefficient as we are parsing the entire string and then removing
     // characters from the end. Ideally, we should be able to halt the parsing once a filler
     // character is reached.
-    if let Some(stripped) = string.strip_suffix(" ") {
-        string = stripped;   
-    }
-    
+    let string = string.trim_end_matches(" ");
+
     Ok(string)
 }
 
@@ -315,9 +313,11 @@ pub struct PrimaryDescriptor {
     pub logical_block_size: u16,
     pub path_table_size: u32,
     pub l_path_table_addr: u16,
-    pub opt_l_path_table_addr: Option<u16>,
+    // TODO: Make this `Option`.
+    pub opt_l_path_table_addr: u16,
     pub m_path_table_addr: u16,
-    pub opt_m_path_table_addr: Option<u16>,
+    // TODO: Make this `Option`.
+    pub opt_m_path_table_addr: u16,
     // This field isn't [`EntryRecord`] as that has a variable size, but we know that this field
     // must be exactly 34 bytes, so we should fail if that's not that case.
     #[derivative(Debug = "ignore")]

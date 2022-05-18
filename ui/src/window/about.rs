@@ -1,23 +1,36 @@
 use super::Descriptor;
 
-pub(super) const DESCRIPTOR: Descriptor = Descriptor {
-    title: "About Noctane",
-    size: (256, 144),
-    setup,
-};
+impl<'b> Window<'b> {
+    pub fn new(boing: &'b boing::Ui) -> anyhow::Result<Self> {
+        const DESCRIPTOR: Descriptor = Descriptor {
+            title: "About Noctane",
+            size: (256, 144),
+            is_main: false,
+        };
 
-fn setup(boing: &boing::Ui, window: &mut boing::Window) {
-    window.set_resizeable(true);
-    window.set_margined(true);
+        let window = DESCRIPTOR.create_window(boing)?;
+        window.set_resizeable(false);
+        window.set_margined(true);
 
-    let y_axis = boing.create_vertical_axis().unwrap();
-    y_axis.set_padded(true);
-    y_axis.push_new_child(boing.create_horizontal_separator().unwrap(), false);
-    y_axis.push_new_child(boing.create_label("Noctane").unwrap(), false);
-    y_axis.push_new_child(create_version_label(boing), false);
+        let y_axis = boing.create_vertical_axis().unwrap();
+        y_axis.set_padded(true);
+        y_axis.push_new_child(boing.create_horizontal_separator().unwrap(), false);
+        y_axis.push_new_child(boing.create_label("Noctane").unwrap(), false);
+        y_axis.push_new_child(create_version_label(boing), false);
 
-    window.set_child(y_axis);
+        window.set_child(y_axis);
+
+        Ok(Self {
+            inner: window,
+        })
+    }
 }
+
+pub struct Window<'b> {
+    inner: &'b mut boing::Window<'b>,
+}
+
+super::impl_deref!(Window);
 
 // fn create_logo(boing: &boing::Ui) -> &mut boing::Image {
 //     #[derive(RustEmbed)]
