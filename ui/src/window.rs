@@ -6,39 +6,46 @@ mod prefs;
 use anyhow::Context as _;
 
 impl<'b> Windows<'b> {
-    pub fn new(boing: &'b boing::Ui, log_entry: &'b boing::MultilineTextEntry<'b>) -> Self {
+    pub fn new(boing: &'b boing::Ui) -> Self {
         Self {
-            about: Window::new(boing, about::DESCRIPTOR, log_entry),
-            log: Window::new(boing, log::DESCRIPTOR, log_entry),
-            main: Window::new(boing, main::DESCRIPTOR, log_entry),
-            prefs: Window::new(boing, prefs::DESCRIPTOR, log_entry),
+            about: Window::new(
+                boing,
+                Descriptor {
+                    title: "About Noctane",
+                    size: (256, 144),
+                    is_main: false,
+                }
+                .create_window(boing),
+            ),
+            log: Window::new(
+                boing,
+                Descriptor {
+                    title: "Log",
+                    size: (480, 360),
+                    is_main: false,
+                }
+                .create_window(boing),
+            ),
+            main: Window::new(
+                boing,
+                Descriptor {
+                    title: "Noctane",
+                    size: (256, 144),
+                    is_main: true,
+                }
+                .create_window(boing),
+            ),
+            prefs: Window::new(
+                boing,
+                Descriptor {
+                    title: "Preferences",
+                    size: (480, 360),
+                    is_main: false,
+                }
+                .create_window(boing),
+            ),
         }
     }
-}
-
-struct Descriptor {
-    title: &'static str,
-    size: (u16, u16),
-    is_main: bool,
-    setup: fn(&boing::Ui, &mut boing::Window, &boing::MultilineTextEntry),
-}
-
-impl<'b> Window<'b> {
-    fn new(boing: &'b boing::Ui, desc: Descriptor, log_entry: &'b boing::MultilineTextEntry<'b>) -> Self {
-        Self {
-            boing,
-            desc,
-            log_entry,
-            inner: None,
-        }
-    }
-}
-
-pub struct Window<'b> {
-    boing: &'b boing::Ui,
-    desc: Descriptor,
-    log_entry: &'b boing::MultilineTextEntry<'b>,
-    inner: Option<&'b mut boing::Window<'b>>,
 }
 
 pub struct Windows<'b> {
@@ -48,29 +55,44 @@ pub struct Windows<'b> {
     pub prefs: Window<'b>,
 }
 
-impl Window<'_> {
-    pub fn show(&mut self) -> anyhow::Result<()> {
-        if let Some(ref window) = self.inner {
-            window.show();
+struct Descriptor {
+    title: &'static str,
+    size: (u16, u16),
+    is_main: bool,
+}
 
-            Ok(())
-        } else {
-            let desc = &self.desc;
-            let window = self.boing.create_window(
-                desc.title,
-                desc.size.0,
-                desc.size.1,
-                desc.is_main,
-                desc.is_main,
-            )
-            .with_context(|| format!("Failed to show \"{}\" window", desc.title))?;
-
-            (desc.setup)(self.boing, window, self.log_entry);
-            window.show();
-
-            self.inner = Some(window);
-
-            Ok(())
-        }
+impl Descriptor {
+    fn create_window<'b>(
+        &self,
+        boing: &'b boing::Ui,
+    ) -> anyhow::Result<&'b mut boing::Window<'b>> {
+        boing.create_window(
+            self.title,
+            self.size.0,
+            self.size.1,
+            self.is_main,
+            self.is_main,
+        )
+        .with_context(|| format!("Failed to create \"{}\" window", self.title))
     }
 }
+
+macro_rules! impl_deref {
+    ($ty:ident) => {
+        impl<'b> std::ops::Deref for $ty<'b> {
+            type Target = boing::Window<'b>;
+
+            fn deref(&self) -> &Self::Target {
+                self.inner
+            }
+        }
+
+        impl std::ops::DerefMut for $ty<'_> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                self.inner
+            }
+        }
+    };
+}
+
+use impl_deref;
