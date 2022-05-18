@@ -1,14 +1,12 @@
-use super::Descriptor;
+impl<'b> Window<'b> {
+    pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
+        window.set_resizeable(true);
+        window.set_margined(true);
 
-pub(super) const DESCRIPTOR: Descriptor = Descriptor {
-    title: "Log",
-    size: (480, 360),
-    is_main: false,
-    setup,
-};
-
-fn setup(boing: &boing::Ui, window: &mut boing::Window, log_entry: &boing::MultilineTextEntry) {
-    window.set_resizeable(true);
-    window.set_margined(true);
-    window.set_child(log_entry);
+        Ok(Self(window))
+    }
 }
+
+pub struct Window<'b>(&'b mut boing::Window<'b>);
+
+super::impl_deref!(Window);
