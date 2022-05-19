@@ -28,7 +28,19 @@ pub enum Error {
 
 /// An ISO 9660 or ECMA-119 fileystem for CD-ROM images.
 pub struct FileSystem {
+    pub boot_records: Vec<Region>,
+    pub partitions: Vec<Region>,
     pub root_dirs: Vec<Directory>,
+}
+
+/// Miscellaneous volume space.
+pub struct Region {
+    /// The identifier of this region.
+    pub id: String,
+    /// The identifier of the system that produced this region.
+    pub system_id: String,
+    /// The contents of this region.
+    pub data: Vec<u8>,
 }
 
 /// A container of entries.
@@ -59,7 +71,7 @@ pub mod entry {
     }
 
     pub struct Metadata {
-        /// Whether or not this entry should be listed.
+        /// Whether or not this entry should be listed to users.
         pub is_listed: bool,
         pub attr: Option<Attributes>,
     }
@@ -117,87 +129,80 @@ impl FileSystem {
         // logical sectors, treating this CD-ROM image as just that: a generic CD-ROM rather than a
         // specialized PSX game disc.
 
-        Self::process_volume_descriptors(&mut sectors)?;
-
-        Ok(())
-    }
-
-    fn process_volume_descriptors<'a>(
-        sectors: &mut impl Iterator<Item = &'a [u8]>,
-    ) -> Result<(), Error> {
-        loop {
-            // First up are the volume descriptors. We will process these until we hit a descriptor
-            // set terminator.
-
-            let desc = sectors
-                .next()
-                .ok_or(Error::ExpectedLogicalSector)?;
-            let mut de = volume::Deserializer::from_bytes(desc);
-
-            let header = volume::DescriptorHeader::deserialize(&mut de)
-                .map_err(Error::Deserialize)?;
-            // TODO: Only log the descriptor type.
-            tracing::info!("{:?}", header);
-
-            if header.std_id != *b"CD001" {
-                return Err(Error::InvalidStandardId);
-            }
-
-            // We can use the header of the descriptor to determine which type it is and, in turn,
-            // determine how the data field of the descriptor should be processed.
-            match header.kind {
-                volume::DescriptorKind::BootRecord => Self::process_boot_record(&mut de)?,
-                // These are basically the same... right?
-                volume::DescriptorKind::Primary | volume::DescriptorKind::Secondary => {
-                    Self::process_primary_volume_descriptor(&mut de)?;
-                }
-                volume::DescriptorKind::Partition => Self::process_volume_partition_descriptor(&mut de)?,
-                volume::DescriptorKind::SetTerminator => {
-                    // A set terminator indicates that the volume descriptor set ends here.
-                    break;
-                }
-            }
+        for desc in iter_volume_descriptors(&mut sectors) {
+            
         }
 
         Ok(())
     }
+}
 
-    fn process_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
-        let desc = volume::BootRecord::deserialize(de)
+struct VolumeDescriptor<'a> {
+    kind: volume::DescriptorHeader,
+    de: volume::Deserializer<'a>,
+}
+
+fn iter_volume_descriptors<'a>(
+    sectors: &mut impl Iterator<Item = &'a [u8]>,
+) -> impl 'a + Iterator<Item = Result<VolumeDescriptor<'a>, Error>> {
+    std::iter::from_fn(|| {
+        let desc = sectors
+            .next()
+            .ok_or(Error::ExpectedLogicalSector)?;
+        let mut de = volume::Deserializer::from_bytes(desc);
+
+        let header = volume::DescriptorHeader::deserialize(&mut de)
             .map_err(Error::Deserialize)?;
-        // TODO: Remove this.
-        tracing::debug!("{:#?}", desc);
+        // TODO: Only log the descriptor type.
+        tracing::info!("{:?}", header);
 
-        Ok(())
-    }
+        if header.std_id != *b"CD001" {
+            return Some(Err(Error::InvalidStandardId));
+        }
+        
+        if matches!(header.kind, volume::DescriptorKind::SetTerminator {
+            return None;
+        }
+        
+        Some(Ok(Self { kind: header.kind, de })
+    })
+}
 
-    fn process_primary_volume_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
-        let desc = volume::PrimaryDescriptor::deserialize(de)
-            .map_err(Error::Deserialize)?;
-        // TODO: Remove this.
-        tracing::debug!("{:#?}", desc);
+fn process_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
+    let desc = volume::BootRecord::deserialize(de)
+        .map_err(Error::Deserialize)?;
+    // TODO: Remove this.
+    tracing::debug!("{:#?}", desc);
 
-        let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir);
-        let root_dir = volume::EntryRecord::deserialize(&mut root_dir_de)
-            .map_err(Error::Deserialize)?;
-        // TODO: Remove this.
-        tracing::debug!("{:#?}", root_dir);
+    Ok(())
+}
 
-        Self::validate_root_directory(&root_dir)?;
+fn process_primary_volume_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+    let desc = volume::PrimaryDescriptor::deserialize(de)
+        .map_err(Error::Deserialize)?;
+    // TODO: Remove this.
+    tracing::debug!("{:#?}", desc);
 
-        Ok(())
-    }
+    let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir);
+    let root_dir = volume::EntryRecord::deserialize(&mut root_dir_de)
+        .map_err(Error::Deserialize)?;
+    // TODO: Remove this.
+    tracing::debug!("{:#?}", root_dir);
 
-    fn validate_root_directory(_: &volume::EntryRecord) -> Result<(), Error> {
-        Ok(())
-    }
+    Self::validate_root_directory(&root_dir)?;
 
-    fn process_volume_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
-        let desc = volume::PartitionDescriptor::deserialize(de)
-            .map_err(Error::Deserialize)?;
-        // TODO: Remove this.
-        tracing::debug!("{:#?}", desc);
+    Ok(())
+}
 
-        Ok(())
-    }
+fn validate_root_directory(_: &volume::EntryRecord) -> Result<(), Error> {
+    Ok(())
+}
+
+fn process_volume_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
+    let desc = volume::PartitionDescriptor::deserialize(de)
+        .map_err(Error::Deserialize)?;
+    // TODO: Remove this.
+    tracing::debug!("{:#?}", desc);
+
+    Ok(())
 }
