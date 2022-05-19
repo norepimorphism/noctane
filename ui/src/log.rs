@@ -27,6 +27,7 @@ impl<'b> Sink<'b> {
     pub unsafe fn try_refresh(&self) -> anyhow::Result<()> {
         if let Ok(buf) = self.inner.try_recv() {
             let text = std::str::from_utf8_unchecked(&buf);
+            print!("{}", text);
             let _ = self.entry.push_text(text);
         }
 

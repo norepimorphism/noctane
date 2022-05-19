@@ -14,14 +14,19 @@ use std::io::{self, Read};
 use serde::de::Deserialize as _;
 
 pub use entry::Entry;
+use volume::Volume;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
     DecodeUtf8(std::str::Utf8Error),
-    Deserialize(volume::Error),
+    Deserialize(volume::DeserializeError),
+    IntegerOverflow,
     ExpectedLogicalSector,
     ExpectedVolumeDescriptor,
+    ExpectedLogicalBlock,
+    ExpectedPathTable,
+    ExpectedEntryId,
     InvalidStandardId,
     IncompatibleVersion,
 }
@@ -98,7 +103,7 @@ pub mod entry {
 
 impl FileSystem {
     /// Attempts to read a file system with logical sectors of the standard size 2048.
-    pub fn from_reader(reader: impl Read) -> Result<(), crate::Error> {
+    pub fn from_reader(reader: impl Read) -> Result<Self, crate::Error> {
         // 2^11 = 2048.
         Self::from_reader_with_sector_size(reader, 11)
     }
@@ -107,7 +112,7 @@ impl FileSystem {
     pub fn from_reader_with_sector_size(
         mut reader: impl Read,
         n: u32,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<Self, crate::Error> {
         let logical_sector_size = 2usize.pow(n);
         tracing::debug!("logical_sector_size: {}", logical_sector_size);
 
@@ -122,87 +127,76 @@ impl FileSystem {
         // TODO: Is there a valid reason why these would be inequal?
         assert_eq!(data_len, data.len());
 
-        // Split the data into sectors and skip the system area.
-        let mut sectors = data.chunks_exact(logical_sector_size).skip(16);
+        let vol = Volume::new(logical_sector_size, data);
+        let mut boot_records = Vec::new();
+        let mut partitions = Vec::new();
+        let mut root_dirs = Vec::new();
 
-        // We are now in the data area. We will make no assumptions regarding the location of
-        // logical sectors, treating this CD-ROM image as just that: a generic CD-ROM rather than a
-        // specialized PSX game disc.
+        for desc in vol.descriptors() {
+            match desc? {
+                volume::Descriptor::BootRecord(desc) => {
+                    boot_records.push(Region {
+                        id: desc.boot_id.to_str()?.into(),
+                        system_id: desc.boot_sys_id.to_str()?.into(),
+                        data: desc.data.into(),
+                    });
+                }
+                volume::Descriptor::Partition(desc) => {
+                    let start: usize = u32::from(desc.vol_part_addr)
+                        .try_into()
+                        .map_err(|_| Error::IntegerOverflow)?;
+                    let size: usize = u32::from(desc.vol_part_size)
+                        .try_into()
+                        .map_err(|_| Error::IntegerOverflow)?;
 
-        for desc in iter_volume_descriptors(&mut sectors) {
-            
+                    let data = vol
+                        .bytes()
+                        .get(start..(start + size))
+                        .ok_or(Error::ExpectedLogicalSector)
+                        .map(|it| it.to_vec())?;
+
+                    partitions.push(Region {
+                        id: desc.vol_part_id.to_str()?.into(),
+                        system_id: desc.sys_id.to_str()?.into(),
+                        data,
+                    });
+                }
+                volume::Descriptor::Primary(desc) => {
+                    tracing::debug!("{:#?}", desc);
+
+                    let mut de = volume::Deserializer::from_bytes(&desc.root_dir);
+                    let root_dir = volume::EntryRecord::deserialize(&mut de)
+                        .map_err(Error::Deserialize)?;
+                    let root_dir_addr: usize = u32::from(root_dir.extent_addr)
+                        .try_into()
+                        .map_err(|_| Error::IntegerOverflow)?;
+
+                    let block = vol
+                        .blocks(u16::from(desc.logical_block_size).into())
+                        .nth(root_dir_addr)
+                        .ok_or(Error::ExpectedPathTable)?;
+
+                    let mut de = volume::Deserializer::from_bytes(block);
+                    let root_dir = volume::EntryRecord::deserialize(&mut de)
+                        .map_err(Error::Deserialize)?;
+                    tracing::debug!("{:#?}", root_dir);
+
+                    while let Ok(entry) = volume::EntryRecord::deserialize(&mut de) {
+                        if entry.len == 0 {
+                            break;
+                        }
+
+                        tracing::debug!(
+                            " - /{}\n  {} bytes\n  {}",
+                            entry.file_id.to_str().unwrap(),
+                            u32::from(entry.data_len),
+                            entry.timestamp,
+                        );
+                    }
+                }
+            }
         }
 
-        Ok(())
+        Ok(Self { boot_records, partitions, root_dirs })
     }
-}
-
-struct VolumeDescriptor<'a> {
-    kind: volume::DescriptorHeader,
-    de: volume::Deserializer<'a>,
-}
-
-fn iter_volume_descriptors<'a>(
-    sectors: &mut impl Iterator<Item = &'a [u8]>,
-) -> impl 'a + Iterator<Item = Result<VolumeDescriptor<'a>, Error>> {
-    std::iter::from_fn(|| {
-        let desc = sectors
-            .next()
-            .ok_or(Error::ExpectedLogicalSector)?;
-        let mut de = volume::Deserializer::from_bytes(desc);
-
-        let header = volume::DescriptorHeader::deserialize(&mut de)
-            .map_err(Error::Deserialize)?;
-        // TODO: Only log the descriptor type.
-        tracing::info!("{:?}", header);
-
-        if header.std_id != *b"CD001" {
-            return Some(Err(Error::InvalidStandardId));
-        }
-        
-        if matches!(header.kind, volume::DescriptorKind::SetTerminator {
-            return None;
-        }
-        
-        Some(Ok(Self { kind: header.kind, de })
-    })
-}
-
-fn process_boot_record(de: &mut volume::Deserializer) -> Result<(), Error> {
-    let desc = volume::BootRecord::deserialize(de)
-        .map_err(Error::Deserialize)?;
-    // TODO: Remove this.
-    tracing::debug!("{:#?}", desc);
-
-    Ok(())
-}
-
-fn process_primary_volume_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
-    let desc = volume::PrimaryDescriptor::deserialize(de)
-        .map_err(Error::Deserialize)?;
-    // TODO: Remove this.
-    tracing::debug!("{:#?}", desc);
-
-    let mut root_dir_de = volume::Deserializer::from_bytes(&desc.root_dir);
-    let root_dir = volume::EntryRecord::deserialize(&mut root_dir_de)
-        .map_err(Error::Deserialize)?;
-    // TODO: Remove this.
-    tracing::debug!("{:#?}", root_dir);
-
-    Self::validate_root_directory(&root_dir)?;
-
-    Ok(())
-}
-
-fn validate_root_directory(_: &volume::EntryRecord) -> Result<(), Error> {
-    Ok(())
-}
-
-fn process_volume_partition_descriptor(de: &mut volume::Deserializer) -> Result<(), Error> {
-    let desc = volume::PartitionDescriptor::deserialize(de)
-        .map_err(Error::Deserialize)?;
-    // TODO: Remove this.
-    tracing::debug!("{:#?}", desc);
-
-    Ok(())
 }

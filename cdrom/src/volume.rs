@@ -4,8 +4,100 @@ use derivative::Derivative;
 use serde::{de, Deserialize};
 use serde_repr::Deserialize_repr;
 
+use crate::Error;
+
+impl Volume {
+    pub fn new(logical_sector_size: usize, data: Vec<u8>) -> Self {
+        Self { logical_sector_size, data }
+    }
+}
+
 #[derive(Debug)]
-pub enum Error {
+pub struct Volume {
+    logical_sector_size: usize,
+    data: Vec<u8>,
+}
+
+impl Volume {
+    pub fn descriptors(&self) -> impl '_ + Iterator<Item = Result<Descriptor, Error>> {
+        let mut sectors = self
+            .sectors()
+            // Skip the system area.
+            .skip(16);
+
+        std::iter::from_fn(move || {
+            let desc = match sectors.next() {
+                Some(it) => it,
+                None => {
+                    return Some(Err(Error::ExpectedVolumeDescriptor));
+                }
+            };
+
+            let mut de = Deserializer::from_bytes(desc);
+
+            let header = match DescriptorHeader::deserialize(&mut de) {
+                Ok(it) => it,
+                Err(e) => {
+                    return Some(Err(Error::Deserialize(e)));
+                }
+            };
+            // TODO: Only log the descriptor type.
+            tracing::info!("{:?}", header);
+
+            if header.std_id != *b"CD001" {
+                return Some(Err(Error::InvalidStandardId));
+            }
+
+            match header.kind {
+                DescriptorKind::BootRecord => {
+                    match BootRecord::deserialize(&mut de) {
+                        Ok(it) => Some(Ok(Descriptor::BootRecord(it))),
+                        Err(e) => Some(Err(Error::Deserialize(e))),
+                    }
+                }
+                // These are basically the same... right?
+                DescriptorKind::Primary | DescriptorKind::Secondary => {
+                    match PrimaryDescriptor::deserialize(&mut de) {
+                        Ok(it) => Some(Ok(Descriptor::Primary(it))),
+                        Err(e) => Some(Err(Error::Deserialize(e))),
+                    }
+                }
+                DescriptorKind::Partition => {
+                    match PartitionDescriptor::deserialize(&mut de) {
+                        Ok(it) => Some(Ok(Descriptor::Partition(it))),
+                        Err(e) => Some(Err(Error::Deserialize(e))),
+                    }
+                }
+                DescriptorKind::SetTerminator => {
+                    // A set terminator indicates that the volume descriptor set ends here.
+                    None
+                }
+            }
+        })
+    }
+
+    pub fn sectors(&self) -> impl Iterator<Item = &[u8]> {
+        self.data.chunks_exact(self.logical_sector_size)
+    }
+
+    pub fn blocks(&self, logical_block_size: usize) -> impl Iterator<Item = &[u8]> {
+        self.data.chunks_exact(logical_block_size)
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+}
+
+#[derive(Debug)]
+pub enum Descriptor {
+    BootRecord(BootRecord),
+    Partition(PartitionDescriptor),
+    Primary(PrimaryDescriptor),
+}
+
+#[derive(Debug)]
+pub enum DeserializeError {
     Message(String),
     ExpectedU8,
     ExpectedU16,
@@ -13,7 +105,7 @@ pub enum Error {
     ExpectedU64,
 }
 
-impl de::Error for Error {
+impl de::Error for DeserializeError {
     fn custom<T>(msg: T) -> Self
     where
         T:fmt::Display,
@@ -22,9 +114,9 @@ impl de::Error for Error {
     }
 }
 
-impl de::StdError for Error {}
+impl de::StdError for DeserializeError {}
 
-impl fmt::Display for Error {
+impl fmt::Display for DeserializeError {
     fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
         todo!()
     }
@@ -36,14 +128,26 @@ impl<'de> Deserializer<'de> {
     }
 }
 
+#[derive(Debug)]
 pub struct Deserializer<'de> {
     input: &'de [u8],
+}
+
+impl Deserializer<'_> {
+    pub fn take(&mut self, len: usize) -> Option<&[u8]> {
+        let result = self.input.get(len..);
+        if result.is_some() {
+            self.input = &self.input[len..];
+        }
+
+        result
+    }
 }
 
 macro_rules! def_deserialize_unimpl {
     ($lt:lifetime $($fn:ident($($arg:ty),* $(,)?))*) => {
         $(
-            fn $fn<V>(self, $(_: $arg,)* _: V) -> Result<V::Value, Error>
+            fn $fn<V>(self, $(_: $arg,)* _: V) -> Result<V::Value, DeserializeError>
             where
                 V: de::Visitor<$lt>,
             {
@@ -58,7 +162,7 @@ macro_rules! def_deserialize_native_endian {
         fn: $fn:ident<$lt:lifetime> -> Result<$ty:ty, $exp:ident $(,)?>,
         visit: $visit:ident $(,)?
     ) => {
-        fn $fn<V>(self, visitor: V) -> Result<V::Value, Error>
+        fn $fn<V>(self, visitor: V) -> Result<V::Value, DeserializeError>
         where
             V: de::Visitor<$lt>,
         {
@@ -66,7 +170,7 @@ macro_rules! def_deserialize_native_endian {
 
             let it = self.input
                 .get(0..TYPE_SIZE)
-                .ok_or(Error::$exp)
+                .ok_or(DeserializeError::$exp)
                 .map(|it| <[u8; TYPE_SIZE]>::try_from(it).expect("type size mismatch"))
                 .map(|it| <$ty>::from_ne_bytes(it))?;
             self.input = &self.input[TYPE_SIZE..];
@@ -77,7 +181,7 @@ macro_rules! def_deserialize_native_endian {
 }
 
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
-    type Error = Error;
+    type Error = DeserializeError;
 
     def_deserialize_unimpl! {
         'de
@@ -109,7 +213,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        let it = self.input.get(0).ok_or(Error::ExpectedU8)?;
+        let it = self.input.get(0).ok_or(DeserializeError::ExpectedU8)?;
         self.input = &self.input[1..];
 
         visitor.visit_u8(*it)
@@ -157,12 +261,12 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         }
 
         impl<'de> de::SeqAccess<'de> for Access<'_, 'de> {
-            type Error = Error;
+            type Error = DeserializeError;
 
             fn next_element_seed<T>(
                 &mut self,
                 seed: T,
-            ) -> Result<Option<T::Value>, Error>
+            ) -> Result<Option<T::Value>, DeserializeError>
             where
                 T: de::DeserializeSeed<'de>,
             {
@@ -187,10 +291,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: de::Visitor<'de>,
     {
-        let len = usize::from(*self.input.get(0).ok_or(Error::ExpectedU8)?);
+        let len = usize::from(*self.input.get(0).ok_or(DeserializeError::ExpectedU8)?);
         self.input = &self.input[1..];
 
-        let data = self.input.get(..len).ok_or(Error::ExpectedU8)?;
+        let data = self.input.get(..len).ok_or(DeserializeError::ExpectedU8)?;
         self.input = &self.input[len..];
 
         visitor.visit_borrowed_bytes(data)
@@ -224,7 +328,7 @@ pub struct StrBuf<const SIZE: usize> {
 }
 
 impl<const SIZE: usize> StrBuf<SIZE> {
-    pub fn to_str(&self) -> Result<&str, crate::Error> {
+    pub fn to_str(&self) -> Result<&str, Error> {
         parse_ascii(&self.inner)
     }
 }
@@ -246,7 +350,7 @@ pub struct PaddedPStr<'a> {
 }
 
 impl PaddedPStr<'_> {
-    pub fn to_str(&self) -> Result<&str, crate::Error> {
+    pub fn to_str(&self) -> Result<&str, Error> {
         parse_ascii(self.inner)
     }
 }
@@ -261,12 +365,12 @@ impl fmt::Debug for PaddedPStr<'_> {
     }
 }
 
-fn parse_ascii(bytes: &[u8]) -> Result<&str, crate::Error> {
+fn parse_ascii(bytes: &[u8]) -> Result<&str, Error> {
     // This is OK because a- and d-characters are encoded in a restricted set of ASCII.
     // Assuming the input is valid ASCII, a UTF-8 representation should be equivalent. If it
     // isn't valid ASCII, the output will probably look garbled, but it was going to look
     // garbled anyway. ¯\_(ツ)_/¯
-    let string = std::str::from_utf8(bytes).map_err(crate::Error::DecodeUtf8)?;
+    let string = std::str::from_utf8(bytes).map_err(Error::DecodeUtf8)?;
 
     // ISO 9660 and ECMA-119 use ASCII code `0x32`, the space, to denote filler characters at
     // the end of a string buffer. As these are only noise, we will strip them out.
@@ -279,6 +383,7 @@ fn parse_ascii(bytes: &[u8]) -> Result<&str, crate::Error> {
     Ok(string)
 }
 
+#[derive(Clone, Copy)]
 pub struct DualEndian<T>(T);
 
 impl<T: fmt::Debug> fmt::Debug for DualEndian<T> {
@@ -319,7 +424,7 @@ macro_rules! impl_deserialize_for_dual_endian {
                         // ISO 9660 and ECMA-119 specify that dual-endian integers are serialized
                         // first in little-endian and second in big-endian. For example, `0x1234`
                         // in left-to-write order is serialized so: `34 12 12 34`.
-                        // 
+                        //
                         // [`Deserializer`] deserializes multi-byte integers with `from_ne_bytes`.
                         // On big-endian hosts, that's a no-op, and on little-endian hosts, that
                         // reverses the byte order---however, for dual-endian integers, it's
@@ -363,6 +468,8 @@ impl_deserialize_for_dual_endian! {
 pub struct BootRecord {
     pub boot_sys_id: StrBuf<32>,
     pub boot_id: StrBuf<32>,
+    #[serde(with = "serde_arrays")]
+    pub data: [u8; 2048 - 64],
 }
 
 /// See Section 8.4.
@@ -426,6 +533,21 @@ pub struct AlphaTimestamp {
     pub gmt_offset: u8,
 }
 
+impl fmt::Display for AlphaTimestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}/{} {}:{}:{}",
+            self.month.to_str().unwrap_or("MM"),
+            self.day.to_str().unwrap_or("DD"),
+            self.year.to_str().unwrap_or("YYYY"),
+            self.hour.to_str().unwrap_or("HH"),
+            self.minute.to_str().unwrap_or("MM"),
+            self.second.to_str().unwrap_or("SS"),
+        )
+    }
+}
+
 /// See Section 9.1.
 #[derive(Debug, Deserialize)]
 pub struct EntryRecord<'a> {
@@ -452,6 +574,21 @@ pub struct NumTimestamp {
     pub minute: u8,
     pub second: u8,
     pub gmt_offset: u8,
+}
+
+impl fmt::Display for NumTimestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}/{} {}:{}:{}",
+            self.month,
+            self.day,
+            1900 + u32::from(self.year),
+            self.hour,
+            self.minute,
+            self.second,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
