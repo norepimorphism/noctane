@@ -454,6 +454,15 @@ pub struct NumTimestamp {
     pub gmt_offset: u8,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PathTableRecord {
+    pub entry_id_len: u8,
+    pub ext_attr_len: u8,
+    pub extent_addr: u32,
+    pub parent_num: u8,
+    // The entry identifier and padding follow.
+}
+
 #[derive(Derivative, Deserialize)]
 #[derivative(Debug)]
 pub struct PartitionDescriptor {
