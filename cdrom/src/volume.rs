@@ -313,6 +313,23 @@ macro_rules! impl_deserialize_for_dual_endian {
                     where
                         E: de::Error,
                     {
+                        // As it turns out, we only need to cast the value to `$ty`. Here's why
+                        // that works:
+                        //
+                        // ISO 9660 and ECMA-119 specify that dual-endian integers are serialized
+                        // first in little-endian and second in big-endian. For example, `0x1234`
+                        // in left-to-write order is serialized so: `34 12 12 34`.
+                        // 
+                        // [`Deserializer`] deserializes multi-byte integers with `from_ne_bytes`.
+                        // On big-endian hosts, that's a no-op, and on little-endian hosts, that
+                        // reverses the byte order---however, for dual-endian integers, it's
+                        // effectively a no-op as well, as `34 12 12 34` reversed is still
+                        // `34 12 12 34`. Thus, regardless of endian, the integer is stored in
+                        // memory as `0x34121234`.
+                        //
+                        // As you can see, we can simply extract the original value `0x1234` by
+                        // applying a bitmask to capture the last two bytes; this is performed
+                        // implicitly with an `as` cast.
                         Ok(DualEndian(v as $ty))
                     }
                 }
