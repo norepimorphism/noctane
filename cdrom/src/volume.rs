@@ -10,6 +10,7 @@ pub enum Error {
     ExpectedU8,
     ExpectedU16,
     ExpectedU32,
+    ExpectedU64,
 }
 
 impl de::Error for Error {
@@ -52,7 +53,7 @@ macro_rules! def_deserialize_unimpl {
     };
 }
 
-macro_rules! def_deserialize_middle_endian {
+macro_rules! def_deserialize_native_endian {
     (
         fn: $fn:ident<$lt:lifetime> -> Result<$ty:ty, $exp:ident $(,)?>,
         visit: $visit:ident $(,)?
@@ -64,29 +65,15 @@ macro_rules! def_deserialize_middle_endian {
             const TYPE_SIZE: usize = std::mem::size_of::<$ty>();
 
             let it = self.input
-                // Get both the little- and big-endian representations.
-                .get(0..(TYPE_SIZE * 2))
+                .get(0..TYPE_SIZE)
                 .ok_or(Error::$exp)
-                // Extract the correct representation.
-                .map(|it| cut_middle_endian(it))
                 .map(|it| <[u8; TYPE_SIZE]>::try_from(it).expect("type size mismatch"))
                 .map(|it| <$ty>::from_ne_bytes(it))?;
-            self.input = &self.input[(TYPE_SIZE * 2)..];
+            self.input = &self.input[TYPE_SIZE..];
 
             visitor.$visit(it)
         }
     };
-}
-
-fn cut_middle_endian(ser: &[u8]) -> &[u8] {
-    let half_len = ser.len() / 2;
-    assert_eq!(0, half_len % 2);
-
-    if cfg!(target_endian = "little") {
-        &ser[..half_len]
-    } else {
-        &ser[half_len..]
-    }
 }
 
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
@@ -100,7 +87,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         deserialize_i16()
         deserialize_i32()
         deserialize_i64()
-        deserialize_u64()
         deserialize_f32()
         deserialize_f64()
         deserialize_char()
@@ -133,14 +119,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     // for multi-byte integers may be used, I have only seen them in middle-endian. It is
     // probably erroneous to assume that of all integer fields, but it works for now.
 
-    def_deserialize_middle_endian! {
+    def_deserialize_native_endian! {
         fn: deserialize_u16<'de> -> Result<u16, ExpectedU16>,
         visit: visit_u16,
     }
 
-    def_deserialize_middle_endian! {
+    def_deserialize_native_endian! {
         fn: deserialize_u32<'de> -> Result<u32, ExpectedU32>,
         visit: visit_u32,
+    }
+
+    def_deserialize_native_endian! {
+        fn: deserialize_u64<'de> -> Result<u64, ExpectedU64>,
+        visit: visit_u64,
     }
 
     fn deserialize_struct<V>(
@@ -280,12 +271,74 @@ fn parse_ascii(bytes: &[u8]) -> Result<&str, crate::Error> {
     // ISO 9660 and ECMA-119 use ASCII code `0x32`, the space, to denote filler characters at
     // the end of a string buffer. As these are only noise, we will strip them out.
     //
-    // TOOD: This is inefficient as we are parsing the entire string and then removing
+    // TODE: This is inefficient as we are parsing the entire string and then removing
     // characters from the end. Ideally, we should be able to halt the parsing once a filler
     // character is reached.
     let string = string.trim_end_matches(" ");
 
     Ok(string)
+}
+
+pub struct DualEndian<T>(T);
+
+impl<T: fmt::Debug> fmt::Debug for DualEndian<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+macro_rules! impl_deserialize_for_dual_endian {
+    (
+        ty: $dual_ty:ty => $ty:ty,
+        visit: $visit:ident,
+        de: $de:ident $(,)?
+    ) => {
+        impl<'de> de::Deserialize<'de> for DualEndian<$ty> {
+            fn deserialize<D>(de: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                const BITS: usize = std::mem::size_of::<$ty>() * 8;
+
+                struct Visitor;
+
+                impl<'de> de::Visitor<'de> for Visitor {
+                    type Value = DualEndian<$ty>;
+
+                    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                        write!(f, "a {}-bit dual-endian integer", BITS)
+                    }
+
+                    fn $visit<E>(self, v: $dual_ty) -> Result<Self::Value, E>
+                    where
+                        E: de::Error,
+                    {
+                        Ok(DualEndian(v as $ty))
+                    }
+                }
+
+                de.$de(Visitor)
+            }
+        }
+
+        impl From<DualEndian<$ty>> for $ty {
+            fn from(value: DualEndian<$ty>) -> Self {
+                value.0
+            }
+        }
+    };
+}
+
+impl_deserialize_for_dual_endian! {
+    ty: u32 => u16,
+    visit: visit_u32,
+    de: deserialize_u32,
+}
+
+impl_deserialize_for_dual_endian! {
+    ty: u64 => u32,
+    visit: visit_u64,
+    de: deserialize_u64,
 }
 
 /// See Section 8.2.
@@ -305,19 +358,19 @@ pub struct PrimaryDescriptor {
     pub vol_id: StrBuf<32>,
     #[derivative(Debug = "ignore")]
     _unused_3: [u8; 8],
-    pub vol_space_size: u32,
+    pub vol_space_size: DualEndian<u32>,
     #[derivative(Debug = "ignore")]
     _unused_5: [u8; 32],
-    pub vol_set_size: u16,
-    pub vol_seq_num: u16,
-    pub logical_block_size: u16,
-    pub path_table_size: u32,
-    pub l_path_table_addr: u16,
+    pub vol_set_size: DualEndian<u16>,
+    pub vol_seq_num: DualEndian<u16>,
+    pub logical_block_size: DualEndian<u16>,
+    pub path_table_size: DualEndian<u32>,
+    pub l_path_table_addr: DualEndian<u16>,
     // TODO: Make this `Option`.
-    pub opt_l_path_table_addr: u16,
-    pub m_path_table_addr: u16,
+    pub opt_l_path_table_addr: DualEndian<u16>,
+    pub m_path_table_addr: DualEndian<u16>,
     // TODO: Make this `Option`.
-    pub opt_m_path_table_addr: u16,
+    pub opt_m_path_table_addr: DualEndian<u16>,
     // This field isn't [`EntryRecord`] as that has a variable size, but we know that this field
     // must be exactly 34 bytes, so we should fail if that's not that case.
     #[derivative(Debug = "ignore")]
@@ -361,13 +414,13 @@ pub struct AlphaTimestamp {
 pub struct EntryRecord<'a> {
     pub len: u8,
     pub ext_attr_len: u8,
-    pub extent_addr: u32,
-    pub data_len: u32,
+    pub extent_addr: DualEndian<u32>,
+    pub data_len: DualEndian<u32>,
     pub timestamp: NumTimestamp,
     pub file_flags: u8,
     pub file_unit_size: u8,
     pub inter_gap_size: u8,
-    pub vol_seq_num: u16,
+    pub vol_seq_num: DualEndian<u16>,
     #[serde(borrow)]
     pub file_id: PaddedPStr<'a>,
 }
@@ -391,6 +444,6 @@ pub struct PartitionDescriptor {
     _unused_0: u8,
     pub sys_id: StrBuf<32>,
     pub vol_part_id: StrBuf<32>,
-    pub vol_part_addr: u32,
-    pub vol_part_size: u32,
+    pub vol_part_addr: DualEndian<u32>,
+    pub vol_part_size: DualEndian<u32>,
 }
