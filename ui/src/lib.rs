@@ -46,6 +46,9 @@ pub fn run() -> Result<(), anyhow::Error> {
     menu_bar.help.about.setup(&windows.about);
 
     windows.main.show();
+    if cfg!(debug_assertions) {
+        windows.log.show();
+    }
 
     loop {
         if should_quit.get() {

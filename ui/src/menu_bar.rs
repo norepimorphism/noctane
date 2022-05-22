@@ -135,10 +135,38 @@ impl OpenIsoItem<'_> {
                 .show_open_single_file()
             {
                 let iso = File::open(iso_path).unwrap();
-                noctane_cdrom::FileSystem::from_reader(iso).unwrap();
+                let fs = noctane_cdrom::FileSystem::from_reader(iso).unwrap();
+                for (i, dir) in fs.root_dirs.into_iter().enumerate() {
+                    for (path, file) in recurse_cdrom_directory(format!("{}:", i), dir) {
+                        tracing::debug!("{}\t\t{}", path, file.meta.timestamp);
+                    }
+                }
             }
         });
     }
+}
+
+fn recurse_cdrom_directory(
+    current_path: String,
+    dir: noctane_cdrom::Directory,
+) -> Vec<(String, noctane_cdrom::File)> {
+    let mut files = Vec::new();
+
+    for entry in dir.entries {
+        match entry {
+            noctane_cdrom::Entry::Directory(dir) => {
+                files.append(&mut recurse_cdrom_directory(
+                    format!("{}/{}", current_path, dir.meta.name),
+                    dir,
+                ));
+            }
+            noctane_cdrom::Entry::File(file) => {
+                files.push((format!("{}/{}", current_path, file.meta.name), file));
+            }
+        }
+    }
+
+    files
 }
 
 pub struct QuitItem<'b>(&'b mut boing::MenuItem<'b>);
