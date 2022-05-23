@@ -9,3 +9,5 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+noctane-cpu = { path = "../cpu" }
+noctane-mem = { path = "../mem" }

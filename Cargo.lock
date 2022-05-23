@@ -862,6 +862,10 @@ dependencies = [
 [[package]]
 name = "noctane"
 version = "0.1.0"
+dependencies = [
+ "noctane-cpu",
+ "noctane-mem",
+]
 
 [[package]]
 name = "noctane-cdrom"
@@ -880,6 +884,7 @@ version = "0.1.0"
 dependencies = [
  "bit",
  "noctane-mem",
+ "tracing",
 ]
 
 [[package]]
@@ -901,6 +906,7 @@ dependencies = [
  "i18n-embed",
  "i18n-embed-fl",
  "native-dialog",
+ "noctane",
  "noctane-cdrom",
  "open",
  "png",

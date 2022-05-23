@@ -13,16 +13,24 @@ impl File {
         self.pc
     }
 
-    pub fn set_pc(&mut self, value: u32) {
-        self.pc = value;
+    pub fn pc_mut(&mut self) -> &mut u32 {
+        &mut self.pc
     }
 
     pub fn hi(&self) -> u32 {
         self.hi
     }
 
-    pub fn set_hi(&mut self, value: u32) {
-        self.hi = value;
+    pub fn hi_mut(&mut self) -> &mut u32 {
+        &mut self.hi
+    }
+
+    pub fn lo(&self) -> u32 {
+        self.lo
+    }
+
+    pub fn lo_mut(&mut self) -> &mut u32 {
+        &mut self.lo
     }
 
     pub fn gpr(&self, index: usize) -> u32 {

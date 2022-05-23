@@ -11,5 +11,6 @@ license = "MPL-2.0"
 [dependencies]
 bit = "0.1"
 noctane-mem = { path = "../mem" }
+tracing = "0.1"
 
 [dev-dependencies]

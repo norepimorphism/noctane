@@ -127,8 +127,8 @@ pub struct FileMenu<'b> {
 
 pub struct OpenIsoItem<'b>(&'b mut boing::MenuItem<'b>);
 
-impl OpenIsoItem<'_> {
-   pub fn setup(&mut self) {
+impl<'b> OpenIsoItem<'b> {
+   pub fn setup(&'b mut self, noctane: &'b mut noctane::Core) {
         self.0.on_clicked(|_| {
             if let Ok(Some(iso_path)) = native_dialog::FileDialog::new()
                 .add_filter("CD-ROM Image", &["iso"])
@@ -140,6 +140,10 @@ impl OpenIsoItem<'_> {
                     for (path, file) in recurse_cdrom_directory(format!("{}:", i), dir) {
                         tracing::debug!("{}\t\t{}", path, file.meta.timestamp);
                     }
+                }
+
+                for _ in 0..2 {
+                    noctane.cpu_mut().execute_next_instr();
                 }
             }
         });

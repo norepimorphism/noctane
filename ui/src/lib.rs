@@ -19,6 +19,7 @@ use window::Windows;
 use menu_bar::MenuBar;
 
 pub fn run() -> Result<(), anyhow::Error> {
+    let mut noctane = noctane::Core::new();
     let boing = boing::Ui::new()
         .context("Failed to initialize GUI")?;
 
@@ -39,7 +40,7 @@ pub fn run() -> Result<(), anyhow::Error> {
     windows.log.set_child(log_sink.entry());
 
     let should_quit = Cell::new(false);
-    menu_bar.file.open_iso.setup();
+    menu_bar.file.open_iso.setup(&mut noctane);
     menu_bar.file.quit.setup(&should_quit);
     menu_bar.edit.prefs.setup(&windows.prefs);
     menu_bar.view.log.setup(&windows.log);
