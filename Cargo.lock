@@ -860,6 +860,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "noctane"
+version = "0.1.0"
+
+[[package]]
 name = "noctane-cdrom"
 version = "0.1.0"
 dependencies = [
@@ -875,10 +879,15 @@ name = "noctane-cpu"
 version = "0.1.0"
 dependencies = [
  "bit",
+ "noctane-mem",
 ]
 
 [[package]]
 name = "noctane-gpu"
+version = "0.1.0"
+
+[[package]]
+name = "noctane-mem"
 version = "0.1.0"
 
 [[package]]

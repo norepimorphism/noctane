@@ -5,8 +5,10 @@
 [workspace]
 members = [
     "cdrom",
+    "core",
     "cpu",
     "gpu",
+    "mem",
     "ui"
 ]
 

@@ -3,13 +3,9 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 [package]
-name = "noctane-cpu"
+name = "noctane-mem"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-bit = "0.1"
-noctane-mem = { path = "../mem" }
-
-[dev-dependencies]

@@ -11,12 +11,32 @@ fn main() {
         .0
         .into_iter()
         .enumerate()
-        .for_each(|(i, enc_instr)| {
-            let enc_instr = u32::from_le_bytes(*enc_instr);
+        .for_each(|(i, bytes)| {
+            let enc_instr = u32::from_le_bytes(*bytes);
 
-            print!("{:08x}: ", i * 4);
+            print!(
+                "{:08x}   {}   {}",
+                i * 4,
+                bytes
+                    .iter()
+                    .map(|byte| format!("{:02x}", byte))
+                    .collect::<Vec<String>>()
+                    .join(" "),
+                bytes
+                    .iter()
+                    .map(|byte| {
+                        if byte.is_ascii_graphic() {
+                            unsafe { char::from_u32_unchecked(u32::from(*byte)) }
+                        } else {
+                            '.'
+                        }
+                    })
+                    .map(|byte| format!("{}", byte))
+                    .collect::<String>(),
+            );
+
             if let Some(instr) = Instr::decode(enc_instr) {
-                println!("{}", instr.asm())
+                println!("   {}", instr.asm())
             } else {
                 println!();
             }
