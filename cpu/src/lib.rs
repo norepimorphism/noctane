@@ -11,12 +11,6 @@ pub use cpu::Cpu;
 pub use instr::Instr;
 
 impl Cpu {
-    pub fn cycle_pipeline(&mut self) {
-        for _ in 0..5 {
-            self.execute_next_instr();
-        }
-    }
-
     pub fn execute_instr(&mut self, instr: Instr) {
         self.advance_pipeline(|| instr)
     }

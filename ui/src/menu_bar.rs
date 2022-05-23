@@ -142,9 +142,22 @@ impl<'b> OpenIsoItem<'b> {
                     }
                 }
 
-                for _ in 0..2 {
+                let reg = noctane.cpu_mut().reg_mut();
+                reg.set_gpr(1, 9);
+                reg.set_gpr(2, 10);
+
+                let instr = noctane_cpu::Instr::Add(noctane_cpu::instr::RType {
+                    rs: 1,
+                    rt: 2,
+                    rd: 3,
+                    shamt: 0,
+                    funct: 0,
+                });
+                noctane.cpu_mut().execute_instr(instr);
+                for _ in 0..10 {
                     noctane.cpu_mut().execute_next_instr();
                 }
+                tracing::debug!("{}", noctane.cpu().reg());
             }
         });
     }

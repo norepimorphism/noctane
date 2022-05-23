@@ -18,6 +18,7 @@ i18n-embed-fl = "0.6"
 native-dialog = "0.6"
 noctane = { path = "../core" }
 noctane-cdrom = { path = "../cdrom" }
+noctane-cpu = { path = "../cpu" }
 open = "2.1"
 png = "0.17"
 rust-embed = "6.4"

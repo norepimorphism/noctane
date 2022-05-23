@@ -908,6 +908,7 @@ dependencies = [
  "native-dialog",
  "noctane",
  "noctane-cdrom",
+ "noctane-cpu",
  "open",
  "png",
  "rust-embed",

@@ -16,10 +16,10 @@ impl Cpu {
             i_cache: InstrCache::default(),
             mem,
             pipe: instr::Pipeline {
-                if_: None,
                 rd: None,
                 alu: None,
                 mem: None,
+                wb: None,
             },
             reg: reg::File::default(),
         }
@@ -153,18 +153,20 @@ impl Cpu {
     /// Processes the current stage, and then advances to the next stage, of each queued
     /// instruction.
     pub fn advance_pipeline(&mut self, fetch_instr: impl FnOnce() -> Instr) {
-        if let Some(instr) = self.pipe.mem.as_mut() {
-            instr.write_back(&mut self.reg);
+        if let Some(mut state) = self.pipe.wb.take() {
+            state.write_back(&mut self.reg);
         }
-        if let Some(instr) = self.pipe.alu.as_mut() {
-            self.pipe.mem = Some(instr.access_mem(()));
+        if let Some(mut state) = self.pipe.mem.take() {
+            state.access_mem();
+            self.pipe.wb = Some(state);
         }
-        if let Some(instr) = self.pipe.rd.as_mut() {
-            self.pipe.alu = Some(instr.operate(()));
+        if let Some(mut state) = self.pipe.alu.take() {
+            state.operate();
+            self.pipe.mem = Some(state);
         }
-        if let Some(instr) = self.pipe.if_.as_mut() {
-            self.pipe.rd = Some(instr.read_reg(&self.reg));
+        if let Some(instr) = self.pipe.rd.take() {
+            self.pipe.alu = Some(instr::State::read(instr, &self.reg));
         }
-        self.pipe.if_ = Some(fetch_instr());
+        self.pipe.rd = Some(fetch_instr());
     }
 }
