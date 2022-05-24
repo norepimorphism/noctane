@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#![feature(test)]
+
+extern crate test;
+
 use std::{cell::{Ref, RefCell, RefMut}, rc::Rc};
 
 pub use noctane_cpu::Cpu;
@@ -36,5 +40,22 @@ impl Core {
 
     pub fn mem_mut(&mut self) -> RefMut<Memory> {
         self.mem.borrow_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test::Bencher;
+
+    use super::*;
+
+    #[bench]
+    fn bench_cpu_execute_next_instr(b: &mut Bencher) {
+        let mut core = Core::new();
+        let cpu = core.cpu_mut();
+
+        b.iter(|| {
+            cpu.execute_next_instr();
+        })
     }
 }

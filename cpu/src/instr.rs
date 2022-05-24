@@ -5,6 +5,8 @@
 pub mod asm;
 pub mod decode;
 
+use std::fmt;
+
 pub use asm::Asm;
 use crate::cpu::reg;
 
@@ -18,12 +20,86 @@ use crate::cpu::reg;
 /// 3. Arithmetic/Logic Unit (ALU)
 /// 4. Memory access (MEM)
 /// 5. Write Back (WB)
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Pipeline {
-    pub rd: Option<Instr>,
-    pub alu: Option<State>,
-    pub mem: Option<State>,
-    pub wb: Option<State>,
+    rd: Option<Instr>,
+    slots: [Option<State>; Self::SLOT_COUNT],
+    needle: usize,
+}
+
+impl fmt::Display for Pipeline {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "1. {}",
+            self.rd.map_or_else(
+                || String::from("(none)"),
+                |state| state.asm().to_string(),
+            ),
+        )?;
+
+        for slot in 1..=Self::SLOT_COUNT {
+            let idx = Self::needle_plus(self.needle, slot);
+            writeln!(
+                f,
+                "{}. {}",
+                slot + 1,
+                self.slots[idx].map_or_else(
+                    || String::from("(none)"),
+                    |state| state.to_string(),
+                ),
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Pipeline {
+    /// The number of unique pipestages.
+    const STAGE_COUNT: usize = 4;
+    /// The number of instruction state slots.
+    const SLOT_COUNT: usize = Self::STAGE_COUNT - 1;
+
+    pub fn advance(
+        &mut self,
+        reg: &mut reg::File,
+        fetch_instr: impl FnOnce() -> Instr,
+    ) {
+        let needle = self.needle;
+        let slots = self.slots.as_mut_ptr();
+
+        let rd = &mut self.rd;
+        let alu = unsafe { &mut *slots.add(Self::needle_plus(needle, 2)) };
+        let mem = unsafe { &mut *slots.add(Self::needle_plus(needle, 1)) };
+        let wb = unsafe { &mut *slots.add(needle) };
+
+        if let Some(mut state) = wb.take() {
+            state.write_back(reg);
+        }
+        if let Some(mut state) = mem.take() {
+            state.access_mem();
+            *wb = Some(state);
+        }
+        if let Some(mut state) = alu.take() {
+            state.operate();
+            *mem = Some(state);
+        }
+        if let Some(instr) = rd.take() {
+            *alu = Some(State::read(instr, reg));
+        }
+        *rd = Some(fetch_instr());
+
+        self.advance_needle();
+    }
+
+    fn needle_plus(needle: usize, index: usize) -> usize {
+        (needle + index) % Self::SLOT_COUNT
+    }
+
+    fn advance_needle(&mut self) {
+        self.needle = Self::needle_plus(self.needle, 1);
+    }
 }
 
 macro_rules! def_instr_and_op_kind {
@@ -37,10 +113,16 @@ macro_rules! def_instr_and_op_kind {
                     $(
                         $kind:tt($($arg:tt)?)
                     ),* $(,)?
-                ],
-                $alu_fn:expr,
-                $mem_fn:expr,
-                $wb_fn:expr $(,)?
+                ]
+                $(
+                    , operate: $alu_fn:expr
+                )?
+                $(
+                    , access_mem: $mem_fn:expr
+                )?
+                $(
+                    , write_back: $wb_fn:expr
+                )? $(,)?
             } $(,)?
         ),*
     ) => {
@@ -74,7 +156,6 @@ macro_rules! def_instr_and_op_kind {
             pub fn asm(&self) -> Asm {
                 match *self {
                     $(
-                        // TODO
                         #[allow(unused_variables)]
                         Self::$variant_name(inner) => {
                             Asm {
@@ -110,11 +191,28 @@ macro_rules! def_instr_and_op_kind {
             )*
         }
 
+        impl fmt::Display for State {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                match self {
+                    $(
+                        Self::$variant_name(_) => {
+                            f.write_str(stringify!($variant_name))
+                        }
+                    )*
+                }
+            }
+        }
+
         impl State {
             pub fn operate(&mut self) {
                 match self {
                     $(
-                        Self::$variant_name(it) => $alu_fn(it),
+                        #[allow(unused_variables)]
+                        Self::$variant_name(it) => {
+                            $(
+                                $alu_fn(it);
+                            )?
+                        }
                     )*
                 }
             }
@@ -122,7 +220,12 @@ macro_rules! def_instr_and_op_kind {
             pub fn access_mem(&mut self) {
                 match self {
                     $(
-                        Self::$variant_name(it) => $mem_fn(it),
+                        #[allow(unused_variables)]
+                        Self::$variant_name(it) => {
+                            $(
+                                $mem_fn(it);
+                            )?
+                        }
                     )*
                 }
             }
@@ -130,7 +233,12 @@ macro_rules! def_instr_and_op_kind {
             pub fn write_back(&mut self, reg: &mut reg::File) {
                 match self {
                     $(
-                        Self::$variant_name(it) => $wb_fn(it, reg),
+                        Self::$variant_name(it) => {
+                            it.write(reg);
+                            $(
+                                $wb_fn(it, reg);
+                            )?
+                        }
                     )*
                 }
             }
@@ -194,6 +302,12 @@ pub struct IState {
     imm: u16,
 }
 
+impl IState {
+    fn write(&self, reg: &mut reg::File) {
+        self.rt.write(reg);
+    }
+}
+
 impl JState {
     pub fn read(instr: JType, _: &reg::File) -> Self {
         Self { target: instr.target }
@@ -203,6 +317,10 @@ impl JState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JState {
     target: u32,
+}
+
+impl JState {
+    fn write(&self, _: &mut reg::File) {}
 }
 
 impl RState {
@@ -226,26 +344,38 @@ pub struct RState {
     funct: u8,
 }
 
+impl RState {
+    fn write(&self, reg: &mut reg::File) {
+        self.rd.write(reg);
+    }
+}
+
 impl DestReg {
     fn new(index: u8) -> Self {
-        Self { index: index.into(), pending: 0 }
+        Self { index: index.into(), pending: None }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DestReg {
     index: usize,
-    pending: u32,
+    pending: Option<u32>,
 }
 
 impl DestReg {
     fn update(&mut self, value: u32) {
-        self.pending = value;
+        self.pending = Some(value);
     }
 
     fn write(&self, reg: &mut reg::File) {
-        reg.set_gpr(self.index, self.pending);
+        if let Some(value) = self.pending {
+            reg.set_gpr(self.index, value);
+        }
     }
+}
+
+fn sign_extend(value: u16) -> u32 {
+    ((value as i16) as i32) as u32
 }
 
 def_instr_and_op_kind!(
@@ -253,162 +383,129 @@ def_instr_and_op_kind!(
         name: Add,
         type: R,
         asm: ["add" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             let (result, overflowed) = state.rs.overflowing_add(state.rt);
-            state.rd.update(result);
-
             if overflowed {
-                // TODO: Generate an exception.
+                // TODO: Generate an  integer overflow exception.
+            } else {
+                // `rd` is only modified when an exception doesn't occur.
+                state.rd.update(result);
             }
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: Addi,
         type: I,
         asm: ["addi" %(rt), %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut IState| {
+            let (result, overflowed) = state.rs.overflowing_add(sign_extend(state.imm));
+            if overflowed {
+                // TODO: Generate an integer overflow exception.
+            } else {
+                // `rt` is only modified when an exception doesn't occur.
+                state.rt.update(result);
+            }
+        },
     },
     {
         name: Addiu,
         type: I,
         asm: ["addiu" %(rt), %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut IState| {
+            // This operation is unsigned, so no need to test for overflow.
+            state.rt.update(state.rs.wrapping_add(sign_extend(state.imm)));
+        },
     },
     {
         name: Addu,
         type: R,
         asm: ["addu" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             // This operation is unsigned, so no need to test for overflow.
             state.rd.update(state.rs.wrapping_add(state.rt));
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: And,
         type: R,
         asm: ["and" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             state.rd.update(state.rs & state.rt);
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: Andi,
         type: I,
         asm: ["andi" %(rt), %(rs), #(s)],
-        |state: &mut IState| {
+        operate: |state: &mut IState| {
             state.rt.update(state.rs & u32::from(state.imm));
-        },
-        |_| {},
-        |state: &mut IState, reg| {
-            state.rt.write(reg);
         },
     },
     {
         name: BCond,
         type: I,
         asm: ["bcond" %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Beq,
         type: I,
         asm: ["beq" %(rs), %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Bgtz,
         type: I,
         asm: ["bgtz" %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Blez,
         type: I,
         asm: ["blez" %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Bne,
         type: I,
         asm: ["bne" %(rs), %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Break,
         type: I,
         asm: ["break"],
-        |_| {
+        operate: |_| {
             // TODO: Generate a breakpoint exception.
         },
-        |_| {},
-        |_, _| {},
     },
     {
         name: Cop0,
         type: I,
         asm: ["cop0"],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Cop1,
         type: I,
         asm: ["cop1"],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Cop2,
         type: I,
         asm: ["cop2"],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Cop3,
         type: I,
         asm: ["cop3"],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Div,
         type: R,
         asm: ["div"  %(rs), %(rt)],
-        |_| {},
-        |_| {},
-        |state: &RState, reg: &mut reg::File| {
-            *reg.lo_mut() = state.rs.wrapping_div(state.rt);
+        write_back: |state: &RState, reg: &mut reg::File| {
+            // Note: the ALU operations should technically be performed in the ALU stage, but it's
+            // OK to do it here as there are no programmer-visible effects (e.g., exceptions) in
+            // doing so.
+
+            // Note: MIPS I specifies that division by 0 is undefined, but to be safe, we'll
+            // hardcode it to the fairly-reasonable value of 0.
+            *reg.lo_mut() = state.rs.checked_div(state.rt).unwrap_or(0);
             *reg.hi_mut() = state.rs % state.rt;
         },
     },
@@ -416,434 +513,300 @@ def_instr_and_op_kind!(
         name: Divu,
         type: R,
         asm: ["divu"  %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        write_back: |state: &RState, reg: &mut reg::File| {
+            // See `Div`.
+            *reg.lo_mut() = state.rs.checked_div(state.rt).unwrap_or(0);
+            *reg.hi_mut() = state.rs % state.rt;
+        },
     },
     {
         name: J,
         type: J,
         asm: ["j" *()],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Jal,
         type: J,
         asm: ["jal" *()],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Jalr,
         type: R,
         asm: ["jalr" %(rs), %(rd)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Jr,
         type: R,
         asm: ["jr" %(rs)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lb,
         type: I,
         asm: ["lb" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lbu,
         type: I,
         asm: ["lbu" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lh,
         type: I,
         asm: ["lh" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lhu,
         type: I,
         asm: ["lhu" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lui,
         type: I,
         asm: ["lui" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lw,
         type: I,
         asm: ["lw" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwc0,
         type: I,
         asm: ["lwc0" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwc1,
         type: I,
         asm: ["lwc1" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwc2,
         type: I,
         asm: ["lwc2" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwc3,
         type: I,
         asm: ["lwc3" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwl,
         type: I,
         asm: ["lwl" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Lwr,
         type: I,
         asm: ["lwr" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Mfhi,
         type: R,
         asm: ["mfhi" %(rd)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Mflo,
         type: R,
         asm: ["mflo" %(rd)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Mthi,
         type: R,
         asm: ["mthi" %(rd)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Mtlo,
         type: R,
         asm: ["mtlo" %(rd)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Mult,
         type: R,
         asm: ["mult" %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Multu,
         type: R,
         asm: ["multu"  %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Nor,
         type: R,
         asm: ["nor" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             state.rd.update(!(state.rs | state.rt));
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: Or,
         type: R,
         asm: ["or" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             state.rd.update(state.rs | state.rt);
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: Ori,
         type: I,
         asm: ["ori" %(rt), %(rs), #(s)],
-        |state: &mut IState| {
+        operate: |state: &mut IState| {
             state.rt.update(state.rs | u32::from(state.imm));
-        },
-        |_| {},
-        |state: &mut IState, reg| {
-            state.rt.write(reg);
         },
     },
     {
         name: Sb,
         type: I,
         asm: ["sb" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Sh,
         type: I,
         asm: ["sh" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Sll,
         type: R,
         asm: ["sll" %(rd), %(rt), ^()],
-        |state| {
-            // TODO
-        },
-        |_| {},
-        |state, _| {
-            // TODO
+        operate: |state: &mut RState| {
+            state.rd.update(state.rt << state.shamt);
         },
     },
     {
         name: Sllv,
         type: R,
         asm: ["sllv" %(rd), %(rt), %(rs)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update(state.rt << (state.rs & 0b11111));
+        },
     },
     {
         name: Slt,
         type: R,
         asm: ["slt" %(rd), %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update(((state.rs as i32) < (state.rt as i32)) as u32);
+        },
     },
     {
         name: Slti,
         type: I,
         asm: ["slti" %(rt), %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut IState| {
+            state.rt.update(((state.rs as i32) < (sign_extend(state.imm) as i32)) as u32);
+        },
     },
     {
         name: Sltiu,
         type: I,
         asm: ["sltiu" %(rt), %(rs), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut IState| {
+            state.rt.update((state.rs < sign_extend(state.imm)) as u32);
+        },
     },
     {
         name: Sltu,
         type: R,
         asm: ["sltu" %(rd), %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update((state.rs < state.rt) as u32);
+        },
     },
     {
         name: Sra,
         type: R,
         asm: ["sra" %(rd), %(rt), ^()],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Srav,
         type: R,
         asm: ["srav"  %(rd), %(rt), %(rs)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Srl,
         type: R,
         asm: ["srl" %(rd), %(rt), ^()],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update(state.rt >> state.shamt);
+        },
     },
     {
         name: Srlv,
         type: R,
         asm: ["srlv"  %(rd), %(rt), %(rs)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
-    },
-    {
-        name: Srv,
-        type: I,
-        asm: ["srv"],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update(state.rt >> (state.shamt & 0b11111));
+        },
     },
     {
         name: Sub,
         type: R,
         asm: ["sub" %(rd), %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Subu,
         type: R,
         asm: ["subu" %(rd), %(rs), %(rt)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
+        operate: |state: &mut RState| {
+            state.rd.update(state.rs.wrapping_sub(state.rt));
+        },
     },
     {
         name: Sw,
         type: I,
         asm: ["sw" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swc0,
         type: I,
         asm: ["swc0" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swc1,
         type: I,
         asm: ["swc1" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swc2,
         type: I,
         asm: ["swc2" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swc3,
         type: I,
         asm: ["swc3" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swl,
         type: I,
         asm: ["swl" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Swr,
         type: I,
         asm: ["swr" %(rt), #(s)],
-        |state| todo!(),
-        |state| todo!(),
-        |state, _| todo!(),
     },
     {
         name: Syscall,
         type: I,
         asm: ["syscall"],
-        |_| {
+        operate: |_| {
             // TODO: Generate a system call exception.
         },
-        |_| {},
-        |_, _| {},
     },
     {
         name: Xor,
         type: R,
         asm: ["xor" %(rd), %(rs), %(rt)],
-        |state: &mut RState| {
+        operate: |state: &mut RState| {
             state.rd.update(state.rs ^ state.rt);
-        },
-        |_| {},
-        |state: &mut RState, reg| {
-            state.rd.write(reg);
         },
     },
     {
         name: Xori,
         type: I,
         asm: ["xori" %(rt), %(rs), #(s)],
-        |state: &mut IState| {
+        operate: |state: &mut IState| {
             state.rt.update(state.rs ^ u32::from(state.imm));
-        },
-        |_| {},
-        |state: &mut IState, reg| {
-            state.rt.write(reg);
         },
     },
 );

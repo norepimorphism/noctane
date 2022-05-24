@@ -11,3 +11,5 @@ license = "MPL-2.0"
 [dependencies]
 noctane-cpu = { path = "../cpu" }
 noctane-mem = { path = "../mem" }
+tracing = "0.1"
+tracing-subscriber = "0.3"

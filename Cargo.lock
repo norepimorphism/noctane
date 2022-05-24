@@ -865,6 +865,8 @@ version = "0.1.0"
 dependencies = [
  "noctane-cpu",
  "noctane-mem",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

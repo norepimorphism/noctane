@@ -14,3 +14,7 @@ members = [
 
 [profile.release]
 lto = "yes"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
