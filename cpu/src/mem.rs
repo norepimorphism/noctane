@@ -1,23 +1,13 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
-#![feature(slice_as_chunks)]
-
-impl Memory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 impl Default for Memory {
     fn default() -> Self {
-        Self { buf: [0; 8192] }
+        Self {
+            buf: box [0; 0x80000],
+        }
     }
 }
 
 pub struct Memory {
-    buf: [u8; 8192],
+    buf: Box<[u8; 0x80000]>,
 }
 
 impl Memory {

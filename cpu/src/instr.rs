@@ -10,7 +10,7 @@ use std::fmt;
 use const_queue::ConstQueue;
 
 pub use asm::Asm;
-use crate::cpu::{ExceptionKind, reg};
+use crate::{Mmu, cpu::{ExceptionKind, reg}};
 
 pub type ExcQueue = ConstQueue::<ExceptionKind, 5>;
 
@@ -97,26 +97,27 @@ impl Pipeline {
 
     pub fn advance(
         &mut self,
+        mmu: &mut Mmu,
         reg: &mut reg::File,
         fetch_instr: impl FnOnce() -> Instr,
     ) {
         let needle = self.needle;
         let slots = self.slots.as_mut_ptr();
 
-        let rd = &mut self.rd;
+        let rd_stage = &mut self.rd;
 
         // SAFETY: These exclusive borrows are not aliasing, but Rust doesn't know that.
-        let alu = unsafe { &mut *slots.add(Self::needle_plus(needle, 2)) };
-        let mem = unsafe { &mut *slots.add(Self::needle_plus(needle, 1)) };
-        let wb = unsafe { &mut *slots.add(needle) };
+        let alu_stage = unsafe { &mut *slots.add(Self::needle_plus(needle, 2)) };
+        let mem_stage = unsafe { &mut *slots.add(Self::needle_plus(needle, 1)) };
+        let wb_stage = unsafe { &mut *slots.add(needle) };
 
         let mut should_fetch = true;
 
-        if let Some(mut state) = wb.take() {
+        if let Some(mut state) = wb_stage.take() {
             state.write_back(reg);
         }
-        if let Some(mut state) = mem.take() {
-            state.access_mem();
+        if let Some(mut state) = mem_stage.take() {
+            state.access_mmu(mmu);
 
             if state.will_jump {
                 // The instruction represented by `state` prepares to jump; it is expected to do so
@@ -132,17 +133,17 @@ impl Pipeline {
                 should_fetch = false;
             }
 
-            *wb = Some(state);
+            *wb_stage = Some(state);
         }
-        if let Some(mut state) = alu.take() {
+        if let Some(mut state) = alu_stage.take() {
             state.operate();
-            *mem = Some(state);
+            *mem_stage = Some(state);
         }
-        if let Some(instr) = rd.take() {
-            *alu = Some(State::read(instr, reg));
+        if let Some(instr) = rd_stage.take() {
+            *alu_stage = Some(State::read(instr, reg));
         }
         if should_fetch {
-            *rd = Some(fetch_instr());
+            *rd_stage = Some(fetch_instr());
         }
 
         self.advance_needle();
@@ -173,7 +174,7 @@ macro_rules! def_instr_and_op_kind {
                     , operate: $alu_fn:expr
                 )?
                 $(
-                    , access_mem: $mem_fn:expr
+                    , access_mmu: $mem_fn:expr
                 )?
                 $(
                     , write_back: $wb_fn:expr
@@ -284,13 +285,13 @@ macro_rules! def_instr_and_op_kind {
                 }
             }
 
-            pub fn access_mem(&mut self) {
+            pub fn access_mmu(&mut self, mmu: &mut Mmu) {
                 match self.opx {
                     $(
                         #[allow(unused_assignments, unused_mut, unused_variables)]
                         opx::State::$variant_name(ref mut opx) => {
                             $(
-                                $mem_fn(&mut self.exc, opx, &mut self.will_jump);
+                                $mem_fn(&mut self.exc, opx, mmu, &mut self.will_jump);
                             )?
                         }
                     )*
@@ -571,9 +572,9 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["bne" %(rs), %(rt), #(s)],
         operate: |_, opx: &mut opx::Bne| {
-
+            // TODO
         },
-        access_mem: |_, opx: &mut opx::Bne, will_jump: &mut bool| {
+        access_mmu: |_, opx: &mut opx::Bne, _, will_jump: &mut bool| {
             *will_jump = opx.rs.value() != opx.rt.value();
         },
     },
@@ -634,7 +635,7 @@ def_instr_and_op_kind!(
         name: J,
         type: j,
         asm: ["j" *()],
-        access_mem: |_, _, will_jump: &mut bool| {
+        access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
         write_back: |_, opx: &mut opx::J, reg: &mut reg::File| {
@@ -645,7 +646,7 @@ def_instr_and_op_kind!(
         name: Jal,
         type: j,
         asm: ["jal" *()],
-        access_mem: |_, _, will_jump: &mut bool| {
+        access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
         write_back: |_, opx: &mut opx::Jal, reg: &mut reg::File| {
@@ -656,7 +657,7 @@ def_instr_and_op_kind!(
         name: Jalr,
         type: r,
         asm: ["jalr" %(rs), %(rd)],
-        access_mem: |_, _, will_jump: &mut bool| {
+        access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
         write_back: |_, opx: &mut opx::Jalr, reg: &mut reg::File| {
@@ -667,7 +668,7 @@ def_instr_and_op_kind!(
         name: Jr,
         type: r,
         asm: ["jr" %(rs)],
-        access_mem: |_, _, will_jump: &mut bool| {
+        access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
         write_back: |_, opx: &mut opx::Jr, reg: &mut reg::File| {

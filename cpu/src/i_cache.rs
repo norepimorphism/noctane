@@ -85,7 +85,7 @@ impl InstrCache {
         value: u32,
         write_on_miss: impl FnOnce(),
     ) {
-        tracing::debug!("Updating cache ({:?})", addr);
+        // tracing::debug!("Updating cache ({:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx] = value;
         write_on_miss();
     }
@@ -96,7 +96,16 @@ enum AccessResult<'a> {
     Miss(&'a mut u32),
 }
 
-#[derive(Clone, Copy, Default)]
+impl Default for Entry {
+    fn default() -> Self {
+        Self {
+            tag: !0,
+            line: [0; 4],
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct Entry {
     tag: u32,
     line: [u32; 4],

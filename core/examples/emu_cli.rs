@@ -13,16 +13,16 @@ fn main() {
 
     let mut core = noctane::Core::new();
 
-    // Fill instruction cache with first 256 instructions of ROM.
-    for addr in 0..=255u8 {
-        let instr = u32::from_le_bytes(rom.as_chunks::<4>().0[usize::from(addr)]);
-        let addr = 0xffff_0000 | (u32::from(addr) * 4);
-        core.cpu_mut().write_phys_i_mem(addr, instr);
+    // Fill memory with ROM.
+    for (addr, instr) in rom.as_chunks::<4>().0.into_iter().enumerate() {
+        let instr = u32::from_le_bytes(*instr);
+        let addr = (addr * 4) as u32;
+        core.cpu_mut().mmu_mut().write_phys_instr(addr, instr);
     }
 
-    for _ in 0..256 {
+    loop {
         let pc = core.cpu_mut().reg().pc();
-        let enc_instr = core.cpu_mut().read_phys_i_mem(pc);
+        let enc_instr = core.cpu_mut().mmu_mut().read_phys_instr(pc);
         let enc_instr_bytes = enc_instr.to_be_bytes();
 
         print!(
@@ -53,6 +53,4 @@ fn main() {
 
         core.cpu_mut().execute_next_instr();
     }
-
-    println!("{}", core.cpu().reg());
 }

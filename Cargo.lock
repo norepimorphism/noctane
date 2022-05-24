@@ -870,7 +870,6 @@ name = "noctane"
 version = "0.1.0"
 dependencies = [
  "noctane-cpu",
- "noctane-mem",
  "tracing",
  "tracing-subscriber",
 ]
@@ -892,16 +891,11 @@ version = "0.1.0"
 dependencies = [
  "bit",
  "const_queue",
- "noctane-mem",
  "tracing",
 ]
 
 [[package]]
 name = "noctane-gpu"
-version = "0.1.0"
-
-[[package]]
-name = "noctane-mem"
 version = "0.1.0"
 
 [[package]]

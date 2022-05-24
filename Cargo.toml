@@ -8,7 +8,6 @@ members = [
     "core",
     "cpu",
     "gpu",
-    "mem",
     "ui"
 ]
 

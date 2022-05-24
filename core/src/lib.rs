@@ -9,20 +9,17 @@ extern crate test;
 use std::{cell::{Ref, RefCell, RefMut}, rc::Rc};
 
 pub use noctane_cpu::Cpu;
-pub use noctane_mem::Memory;
 
 impl Core {
     pub fn new() -> Self {
-        let mem = Rc::new(RefCell::new(Memory::new()));
-        let cpu = Cpu::new(mem.clone());
+        let cpu = Cpu::new();
 
-        Self { cpu, mem }
+        Self { cpu }
     }
 }
 
 pub struct Core {
     cpu: Cpu,
-    mem: Rc<RefCell<Memory>>,
 }
 
 impl Core {
@@ -32,14 +29,6 @@ impl Core {
 
     pub fn cpu_mut(&mut self) -> &mut Cpu {
         &mut self.cpu
-    }
-
-    pub fn mem(&self) -> Ref<Memory> {
-        self.mem.borrow()
-    }
-
-    pub fn mem_mut(&mut self) -> RefMut<Memory> {
-        self.mem.borrow_mut()
     }
 }
 

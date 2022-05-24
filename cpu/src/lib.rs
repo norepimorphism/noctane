@@ -2,13 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(slice_as_chunks)]
+#![feature(box_syntax, slice_as_chunks)]
 
 pub mod cpu;
+pub mod i_cache;
 pub mod instr;
+pub mod mem;
+pub mod mmu;
 
 pub use cpu::Cpu;
+pub use i_cache::InstrCache;
 pub use instr::Instr;
+pub use mem::Memory;
+pub use mmu::Mmu;
 
 impl Cpu {
     pub fn execute_instr(&mut self, instr: Instr) {
@@ -22,7 +28,7 @@ impl Cpu {
 
     pub fn fetch_opcode(&mut self) -> u32 {
         let pc = self.reg().pc();
-        let op = self.read_virt_i_mem(pc);
+        let op = self.mmu_mut().read_virt_instr(pc);
 
         // Increment PC.
         *self.reg_mut().pc_mut() = pc.wrapping_add(4);
