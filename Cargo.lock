@@ -283,6 +283,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const_queue"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e315f29565cbe77a0f7b4eacc27d4dddc5f113a0df7809a111354e4e956748e9"
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -885,6 +891,7 @@ name = "noctane-cpu"
 version = "0.1.0"
 dependencies = [
  "bit",
+ "const_queue",
  "noctane-mem",
  "tracing",
 ]

@@ -37,7 +37,9 @@ impl Cpu {
                 //
                 // A Reserved Instruction (RI) exception is made, and the first instruction in the
                 // exception handler is fetched.
-                todo!()
+
+                // TODO
+                Instr::Sll(instr::RType { rd: 0, rs: 0, rt: 0, shamt: 0, funct: 0 })
             },
         ));
     }

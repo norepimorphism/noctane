@@ -152,3 +152,12 @@ impl Cpu {
         self.pipe.advance(&mut self.reg, fetch_instr);
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExceptionKind {
+    Syscall = 8,
+    Breakpoint = 9,
+    ReservedInstr = 10,
+    UnusableCop = 11,
+    IntegerOverflow = 12,
+}

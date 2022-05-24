@@ -56,8 +56,6 @@ impl InstrCache {
         addr: &Address,
         read_on_miss: impl FnOnce() -> u32,
     ) -> u32 {
-        tracing::debug!("Accessing cache ({:?})", addr);
-
         match self.access(addr) {
             AccessResult::Hit(value) => value,
             AccessResult::Miss(old) => {
@@ -75,12 +73,8 @@ impl InstrCache {
 
         // When the cache is isolated, all cache accesses are hits.
         if self.is_isolated || entry.test_hit(&addr) {
-            tracing::debug!("Cache hit");
-
             AccessResult::Hit(entry.line[addr.word_idx])
         } else {
-            tracing::debug!("Cache miss");
-
             AccessResult::Miss(&mut entry.line[addr.word_idx])
         }
     }

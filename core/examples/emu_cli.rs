@@ -20,14 +20,14 @@ fn main() {
         core.cpu_mut().write_phys_i_mem(addr, instr);
     }
 
-    for addr in 0..256 {
+    for _ in 0..256 {
         let pc = core.cpu_mut().reg().pc();
         let enc_instr = core.cpu_mut().read_phys_i_mem(pc);
         let enc_instr_bytes = enc_instr.to_be_bytes();
 
         print!(
             "{:08x}   {}   {}",
-            addr * 4,
+            pc,
             enc_instr_bytes
                 .iter()
                 .map(|byte| format!("{:02x}", byte))
@@ -45,13 +45,14 @@ fn main() {
                 .map(|byte| format!("{}", byte))
                 .collect::<String>(),
         );
-
         if let Some(instr) = noctane_cpu::Instr::decode(enc_instr) {
-            println!("   {}", instr.asm())
+            println!("   {}", instr.asm());
         } else {
             println!();
         }
 
         core.cpu_mut().execute_next_instr();
     }
+
+    println!("{}", core.cpu().reg());
 }
