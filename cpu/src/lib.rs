@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(concat_idents, slice_as_chunks)]
+#![feature(slice_as_chunks)]
 
 pub mod cpu;
 pub mod instr;
@@ -39,7 +39,7 @@ impl Cpu {
                 // exception handler is fetched.
 
                 // TODO
-                Instr::Sll(instr::RType { rd: 0, rs: 0, rt: 0, shamt: 0, funct: 0 })
+                Instr::Sll(instr::r::Instr { rd: 0, rs: 0, rt: 0, shamt: 0, funct: 0 })
             },
         ));
     }

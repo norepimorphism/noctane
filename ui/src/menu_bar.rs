@@ -146,7 +146,7 @@ impl<'b> OpenIsoItem<'b> {
                 reg.set_gpr(1, 9);
                 reg.set_gpr(2, 10);
 
-                let instr = noctane_cpu::Instr::Add(noctane_cpu::instr::RType {
+                let instr = noctane_cpu::Instr::Add(noctane_cpu::instr::r::Instr {
                     rs: 1,
                     rt: 2,
                     rd: 3,

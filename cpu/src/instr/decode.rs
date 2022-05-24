@@ -5,24 +5,24 @@
 use bit::BitIndex as _;
 use super::{
     Instr,
-    IType,
-    JType,
-    OpKind,
-    RType,
+    i,
+    j,
+    opx,
+    r,
 };
 
 impl Instr {
     pub const OP_SPECIAL: u8 = 0;
 
-    pub fn try_decode_op_kind(code: u32) -> Option<OpKind> {
+    pub fn try_decode_op_kind(code: u32) -> Option<opx::Kind> {
         let op = Self::decode_op(code);
 
         if op == Self::OP_SPECIAL {
             let funct = Self::decode_funct(code);
 
-            OpKind::try_decode_special(funct)
+            opx::Kind::try_decode_special(funct)
         } else {
-            OpKind::try_decode_normal(op)
+            opx::Kind::try_decode_normal(op)
         }
     }
 }
@@ -60,7 +60,7 @@ mod enc_range {
     pub const OP: Range<usize> = 26..32;
 }
 
-impl OpKind {
+impl opx::Kind {
     pub fn try_decode_normal(code: u8) -> Option<Self> {
         match code {
             0b000_000 => {
@@ -174,7 +174,7 @@ impl OpKind {
     }
 }
 
-impl IType {
+impl i::Instr {
     pub fn decode(code: u32) -> Self {
         Self {
             rs: Instr::decode_rs(code),
@@ -184,7 +184,7 @@ impl IType {
     }
 }
 
-impl JType {
+impl j::Instr {
     pub fn decode(code: u32) -> Self {
         Self {
             target: Instr::decode_target(code),
@@ -192,7 +192,7 @@ impl JType {
     }
 }
 
-impl RType {
+impl r::Instr {
     pub fn decode(code: u32) -> Self {
         Self {
             rs: Instr::decode_rs(code),
