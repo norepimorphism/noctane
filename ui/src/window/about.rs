@@ -1,14 +1,13 @@
 impl<'b> Window<'b> {
     pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
-        window.set_resizeable(false);
-        window.set_margined(true);
-
         let y_axis = boing.create_vertical_axis().unwrap();
         y_axis.set_padded(true);
         y_axis.push_new_child(boing.create_horizontal_separator().unwrap(), false);
         y_axis.push_new_child(boing.create_label("Noctane").unwrap(), false);
         y_axis.push_new_child(create_version_label(boing), false);
 
+        window.set_resizeable(false);
+        window.set_margined(true);
         window.set_child(y_axis);
 
         Ok(Self(window))

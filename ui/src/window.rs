@@ -1,4 +1,5 @@
 mod about;
+pub mod game;
 mod log;
 mod main;
 mod prefs;
@@ -26,6 +27,7 @@ impl<'b> Windows<'b> {
                 .create_window(boing)?,
             )?,
             main: main::Window::new(
+                boing,
                 Descriptor {
                     title: "Noctane",
                     size: (256, 144),
