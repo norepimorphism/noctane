@@ -1,3 +1,5 @@
+use rust_embed::RustEmbed;
+
 impl<'b> Window<'b> {
     pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
         let y_axis = boing.create_vertical_axis().unwrap();
@@ -14,35 +16,28 @@ impl<'b> Window<'b> {
     }
 }
 
-pub struct Window<'b>(&'b mut boing::Window<'b>);
+fn create_logo(boing: &boing::Ui) -> &mut boing::Image {
+    #[derive(RustEmbed)]
+    #[folder = "images"]
+    struct Images;
 
-super::impl_deref!(Window);
+    let image = boing.create_image(94.0, 22.0).unwrap();
+    image.push(
+        &mut Images::get("noctane.bin").unwrap().data.into_owned(),
+        94,
+        22,
+        4,
+    );
 
-// fn create_logo(boing: &boing::Ui) -> &mut boing::Image {
-//     #[derive(RustEmbed)]
-//     #[folder = "images"]
-//     struct Images;
-
-//     let png = Images::get("noctane.png").unwrap().data.into_owned();
-//     let mut reader = png::Decoder::new(png.as_slice()).read_info().unwrap();
-
-//     let (color_type, bit_depth) = reader.output_color_type();
-//     assert_eq!(png::ColorType::Rgba, color_type);
-//     assert_eq!(png::BitDepth::Eight, bit_depth);
-
-//     let mut buf = Vec::new();
-//     buf.resize(reader.output_buffer_size(), 0);
-
-//     let buf = Box::leak(buf.into_boxed_slice());
-//     reader.next_frame(buf).unwrap();
-
-//     let image = boing.create_image(94.0, 22.0).unwrap();
-
-//     image
-// }
+    image
+}
 
 fn create_version_label(boing: &boing::Ui) -> &mut boing::Label {
     let version = env!("CARGO_PKG_VERSION");
 
     boing.create_label(format!("Version {}", version)).unwrap()
 }
+
+pub struct Window<'b>(&'b mut boing::Window<'b>);
+
+super::impl_deref!(Window);

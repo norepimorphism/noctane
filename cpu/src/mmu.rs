@@ -65,8 +65,12 @@ macro_rules! def_write_instr {
 }
 
 impl Mmu {
-    def_read_instr! { fn read_virt_instr + read_phys_instr () -> u32 = read + read_32 }
-    def_write_instr! { fn write_virt_instr + write_phys_instr (u32) = write + write_32 }
+    def_read_instr! { fn read_virt_kuseg_instr + read_phys_kuseg_instr () -> u32 = read + read_kuseg_32 }
+    def_read_instr! { fn read_virt_kseg0_instr + read_phys_kseg0_instr () -> u32 = read + read_kseg0_32 }
+    def_read_instr! { fn read_virt_kseg1_instr + read_phys_kseg1_instr () -> u32 = read + read_kseg1_32 }
+    def_write_instr! { fn write_virt_kuseg_instr + write_phys_kuseg_instr (u32) = write + write_kuseg_32 }
+    def_write_instr! { fn write_virt_kseg0_instr + write_phys_kseg0_instr (u32) = write + write_kseg0_32 }
+    def_write_instr! { fn write_virt_kseg1_instr + write_phys_kseg1_instr (u32) = write + write_kseg1_32 }
 
     /// Translates the given virtual address to a physical address.
     pub fn translate_vaddr(&self, vaddr: u32) -> u32 {

@@ -13,15 +13,18 @@ anyhow = "1.0"
 boing = { git = "https://github.com/norepimorphism/boing" }
 crossbeam-channel = "0.5"
 fluent = "0.16"
+futures = "0.3"
 i18n-embed = { version = "0.13", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.6"
+minifb = "0.23"
 native-dialog = "0.6"
 noctane = { path = "../core" }
 noctane-cdrom = { path = "../cdrom" }
 noctane-cpu = { path = "../cpu" }
 open = "2.1"
-png = "0.17"
 rust-embed = "6.4"
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+winapi = "0.3"
+wgpu = "0.12"

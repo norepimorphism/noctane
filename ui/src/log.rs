@@ -66,16 +66,36 @@ impl io::Write for Source {
 }
 
 pub fn setup(source: Source) -> tracing_appender::non_blocking::WorkerGuard {
+    use tracing_subscriber::EnvFilter;
+
+    // These are kinda noisy. If your terminal is spewing with `wgpu` messages, this is the place to
+    // go.
+    static DIRECTIVES: &[&str] = &[
+        "gfx_backend_vulkan=debug",
+        "naga=info",
+        "wgpu_core=info",
+        "wgpu_hal=info",
+    ];
+
     // TODO: This sucks, big time.
     let source = Box::leak(Box::new(source));
 
     let (writer, guard) = tracing_appender::non_blocking(source);
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
         .with_ansi(false)
         .with_level(false)
         .without_time()
         .with_writer(writer)
+        .with_env_filter({
+            // TODO: It would be awesome if these directives could be parsed at compile-time.
+            DIRECTIVES
+                .iter()
+                .map(|it| it.parse().expect("Failed to parse directive '{}': {}"))
+                .fold(EnvFilter::default(), |filter, it| {
+                    filter.add_directive(it)
+                })
+                .add_directive(tracing::Level::DEBUG.into())
+        })
         .init();
 
     guard

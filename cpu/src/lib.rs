@@ -28,7 +28,7 @@ impl Cpu {
 
     pub fn fetch_opcode(&mut self) -> u32 {
         let pc = self.reg().pc();
-        let op = self.mmu_mut().read_virt_instr(pc);
+        let op = self.mmu_mut().read_virt_kuseg_instr(pc);
 
         // Increment PC.
         *self.reg_mut().pc_mut() = pc.wrapping_add(4);

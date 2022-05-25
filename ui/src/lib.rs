@@ -35,7 +35,7 @@ pub fn run() -> Result<(), anyhow::Error> {
     let mut menu_bar = MenuBar::new(&i18n, &boing)
         .context("Failed to create menu bar")?;
 
-    let windows = Windows::new(&boing)
+    let mut windows = Windows::new(&boing)
         .context("Failed to create windows")?;
     windows.log.set_child(log_sink.entry());
 
@@ -59,6 +59,10 @@ pub fn run() -> Result<(), anyhow::Error> {
         let should_continue = boing.step();
         if !should_continue {
             break;
+        }
+
+        if windows.game.is_active() {
+            windows.game.update();
         }
 
         // SAFETY: *tracing* only writes ACSII logs, so the input to `log_sink` *should* be valid
