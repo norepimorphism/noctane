@@ -31,20 +31,3 @@ impl Core {
         &mut self.cpu
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use test::Bencher;
-
-    use super::*;
-
-    #[bench]
-    fn bench_cpu_execute_next_instr(b: &mut Bencher) {
-        let mut core = Core::new();
-        let cpu = core.cpu_mut();
-
-        b.iter(|| {
-            cpu.execute_next_instr();
-        })
-    }
-}
