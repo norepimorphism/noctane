@@ -124,32 +124,38 @@ impl Memory {
     }
 
     fn read_kseg2_32(&mut self, offset: u32) -> Result<u32, Error> {
-        todo!()
+        // TODO
+        Ok(0)
     }
 
     pub fn write_32(&mut self, addr: u32, value: u32) -> Result<(), Error> {
         self.select_access_region_fn(
             addr,
-            |this, offset| this.write_kuseg_32(offset, value),
-            |this, offset| this.write_kseg0_32(offset, value),
+            |this, offset| this.write_kuseg_32(addr, offset, value),
+            |this, offset| this.write_kseg0_32(addr, offset, value),
             |this, offset| this.write_kseg1_32(offset, value),
             |this, offset| this.write_kseg2_32(offset, value),
         )
     }
 
-    fn write_kuseg_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
-        todo!()
+    fn write_kuseg_32(&mut self, addr: u32, offset: u32, value: u32) -> Result<(), Error> {
+        self.write_kseg0_32(addr, offset, value)
     }
 
-    fn write_kseg0_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
-        todo!()
+    fn write_kseg0_32(&mut self, addr: u32, offset: u32, value: u32) -> Result<(), Error> {
+        self.i_cache.write_32(
+            addr,
+            value,
+            || self.bus.write_32(offset, value).map_err(Error::Bus),
+        )
     }
 
     fn write_kseg1_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
-        todo!()
+        self.bus.write_32(offset, value).map_err(Error::Bus)
     }
 
     fn write_kseg2_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
-        todo!()
+        // TODO
+        Ok(())
     }
 }

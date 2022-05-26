@@ -46,22 +46,22 @@ impl Bus {
         }
 
         const MAIN_RAM_BASE_IDX:    usize = make_index(0x0000_0000);
-        const MAIN_RAM_END_IDX:     usize = MAIN_RAM_BASE_IDX + make_index(<Bus>::MAIN_RAM_LEN);
+        const MAIN_RAM_END_IDX:     usize = MAIN_RAM_BASE_IDX + <Bus>::MAIN_RAM_LEN;
 
         const EXP_1_BASE_IDX:       usize = make_index(0x1f00_0000);
-        const EXP_1_END_IDX:        usize = EXP_1_BASE_IDX + make_index(<Bus>::EXP_1_LEN);
+        const EXP_1_END_IDX:        usize = EXP_1_BASE_IDX + <Bus>::EXP_1_LEN;
 
         const IO_BASE_IDX:          usize = make_index(0x1f80_1000);
-        const IO_END_IDX:           usize = IO_BASE_IDX + make_index(<Bus>::IO_LEN);
+        const IO_END_IDX:           usize = IO_BASE_IDX + <Bus>::IO_LEN;
 
         const EXP_2_BASE_IDX:       usize = make_index(0x1f80_2000);
-        const EXP_2_END_IDX:        usize = EXP_2_BASE_IDX + make_index(<Bus>::EXP_2_LEN);
+        const EXP_2_END_IDX:        usize = EXP_2_BASE_IDX + <Bus>::EXP_2_LEN;
 
         const EXP_3_BASE_IDX:       usize = make_index(0x1fa0_0000);
-        const EXP_3_END_IDX:        usize = EXP_3_BASE_IDX + make_index(<Bus>::EXP_3_LEN);
+        const EXP_3_END_IDX:        usize = EXP_3_BASE_IDX + <Bus>::EXP_3_LEN;
 
         const BIOS_BASE_IDX:        usize = make_index(0x1fc0_0000);
-        const BIOS_END_IDX:         usize = BIOS_BASE_IDX + make_index(<Bus>::BIOS_LEN);
+        const BIOS_END_IDX:         usize = BIOS_BASE_IDX + <Bus>::BIOS_LEN;
 
         let idx = make_index(addr as usize);
 
@@ -98,6 +98,8 @@ impl Bus {
                 this.exp_1[idx]
             },
             |_, _| {
+                tracing::debug!("READ IO @ {:08x}", addr);
+
                 // TODO
                 0
             },
@@ -109,6 +111,32 @@ impl Bus {
             },
             |this, idx| {
                 this.bios[idx]
+            },
+        )
+    }
+
+    pub fn write_32(&mut self, addr: u32, value: u32) -> Result<(), Error> {
+        self.select_access_bank_fn(
+            addr,
+            |this, idx| {
+                this.main_ram[idx] = value;
+            },
+            |this, idx| {
+                this.exp_1[idx] = value;
+            },
+            |_, _| {
+                tracing::debug!("WRITE IO @ {:08x} = {:x}", addr, value);
+
+                // TODO
+            },
+            |this, idx| {
+                this.exp_2[idx] = value;
+            },
+            |this, idx| {
+                this.exp_3[idx] = value;
+            },
+            |this, idx| {
+                this.bios[idx] = value;
             },
         )
     }

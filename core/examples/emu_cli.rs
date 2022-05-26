@@ -8,22 +8,24 @@ fn main() {
         .without_time()
         .init();
 
-    let rom_filepath = std::env::args().nth(1).expect("expected ROM filepath");
-    let rom = std::fs::read(rom_filepath).expect("failed to read ROM");
+    let bios_filepath = std::env::args().nth(1).expect("expected ROM filepath");
+    let bios = std::fs::read(bios_filepath).expect("failed to read ROM");
 
     let mut core = noctane::Core::new();
 
-    // Fill memory with ROM.
-    for (addr, instr) in rom.as_chunks::<4>().0.into_iter().enumerate() {
+    // Fill memory with the BIOS.
+    for (addr, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
         let instr = u32::from_le_bytes(*instr);
         let addr = (addr * 4) as u32;
-        core.cpu_mut().mmu_mut().write_32(addr, instr).unwrap();
+        core.cpu_mut().mmu_mut().write_32(0xbfc0_0000 + addr, instr).unwrap();
     }
+
+    *core.cpu_mut().reg_mut().pc_mut() = 0xbfc0_0000;
 
     loop {
         let pc = core.cpu_mut().reg().pc();
         let enc_instr = core.cpu_mut().mmu_mut().read_virt_32(pc).unwrap();
-        let enc_instr_bytes = enc_instr.to_be_bytes();
+        let enc_instr_bytes = enc_instr.to_le_bytes();
 
         print!(
             "{:08x}   {}   {}",

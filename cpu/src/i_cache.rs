@@ -87,19 +87,25 @@ impl InstrCache {
         }
     }
 
-    pub fn write_32(&mut self, addr: u32, value: u32, write_on_miss: impl FnOnce()) {
-        self._write_32(&Address::from_phys(addr), value, write_on_miss);
+    pub fn write_32<E>(
+        &mut self,
+        addr: u32,
+        value: u32,
+        write_on_miss: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        self._write_32(&Address::from_phys(addr), value, write_on_miss)
     }
 
-    fn _write_32(
+    fn _write_32<E>(
         &mut self,
         addr: &Address,
         value: u32,
-        write_on_miss: impl FnOnce(),
-    ) {
+        write_on_miss: impl FnOnce()-> Result<(), E>,
+    ) -> Result<(), E> {
         // tracing::debug!("Updating cache ({:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx] = value;
-        write_on_miss();
+
+        write_on_miss()
     }
 }
 

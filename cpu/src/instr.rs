@@ -136,7 +136,7 @@ impl Pipeline {
             *wb_stage = Some(state);
         }
         if let Some(mut state) = alu_stage.take() {
-            state.operate();
+            state.operate(reg.pc());
             *mem_stage = Some(state);
         }
         if let Some(instr) = rd_stage.take() {
@@ -272,13 +272,13 @@ macro_rules! def_instr_and_op_kind {
         }
 
         impl State {
-            pub fn operate(&mut self) {
+            pub fn operate(&mut self, pc: u32) {
                 match self.opx {
                     $(
                         #[allow(unused_variables)]
                         opx::State::$variant_name(ref mut opx) => {
                             $(
-                                $alu_fn(&mut self.exc, opx);
+                                $alu_fn(&mut self.exc, opx, pc);
                             )?
                         }
                     )*
@@ -480,8 +480,24 @@ macro_rules! gen_opx_state {
     };
 }
 
-fn sign_extend(value: u16) -> u32 {
+fn sign_extend_32(value: u32) -> u32 {
+    (value as i32) as u32
+}
+
+fn sign_extend_16(value: u16) -> u32 {
     ((value as i16) as i32) as u32
+}
+
+fn sign_extend_8(value: u8) -> u32 {
+    ((value as i8) as i32) as u32
+}
+
+fn calc_vaddr(base: u32, offset: u16) -> u32 {
+    sign_extend_16(offset).wrapping_add(base)
+}
+
+fn calc_target(pc: u32, value: u32) -> u32 {
+    (pc & !((1 << 28) - 1)) | (value << 2)
 }
 
 def_instr_and_op_kind!(
@@ -489,7 +505,7 @@ def_instr_and_op_kind!(
         name: Add,
         type: r,
         asm: ["add" %(rd), %(rs), %(rt)],
-        operate: |exc: &mut ExcQueue, opx: &mut opx::Add| {
+        operate: |exc: &mut ExcQueue, opx: &mut opx::Add, _| {
             let (result, overflowed) = opx.rs.value().overflowing_add(opx.rt.value());
             if overflowed {
                 exc.push(ExceptionKind::IntegerOverflow).unwrap();
@@ -503,8 +519,8 @@ def_instr_and_op_kind!(
         name: Addi,
         type: i,
         asm: ["addi" %(rt), %(rs), #(s)],
-        operate: |exc: &mut ExcQueue, opx: &mut opx::Addi| {
-            let (result, overflowed) = opx.rs.value().overflowing_add(sign_extend(opx.imm));
+        operate: |exc: &mut ExcQueue, opx: &mut opx::Addi, _| {
+            let (result, overflowed) = opx.rs.value().overflowing_add(sign_extend_16(opx.imm));
             if overflowed {
                 exc.push(ExceptionKind::IntegerOverflow).unwrap();
             } else {
@@ -517,16 +533,16 @@ def_instr_and_op_kind!(
         name: Addiu,
         type: i,
         asm: ["addiu" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Addiu| {
+        operate: |_, opx: &mut opx::Addiu, _| {
             // This operation is unsigned, so no need to test for overflow.
-            opx.rt.update(opx.rs.value().wrapping_add(sign_extend(opx.imm)));
+            opx.rt.update(opx.rs.value().wrapping_add(sign_extend_16(opx.imm)));
         },
     },
     {
         name: Addu,
         type: r,
         asm: ["addu" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Addu| {
+        operate: |_, opx: &mut opx::Addu, _| {
             // This operation is unsigned, so no need to test for overflow.
             opx.rd.update(opx.rs.value().wrapping_add(opx.rt.value()));
         },
@@ -535,7 +551,7 @@ def_instr_and_op_kind!(
         name: And,
         type: r,
         asm: ["and" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::And| {
+        operate: |_, opx: &mut opx::And, _| {
             opx.rd.update(opx.rs.value() & opx.rt.value());
         },
     },
@@ -543,7 +559,7 @@ def_instr_and_op_kind!(
         name: Andi,
         type: i,
         asm: ["andi" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Andi| {
+        operate: |_, opx: &mut opx::Andi, _| {
             opx.rt.update(opx.rs.value() & u32::from(opx.imm));
         },
     },
@@ -571,7 +587,7 @@ def_instr_and_op_kind!(
         name: Bne,
         type: i,
         asm: ["bne" %(rs), %(rt), #(s)],
-        operate: |_, opx: &mut opx::Bne| {
+        operate: |_, opx: &mut opx::Bne, _| {
             // TODO
         },
         access_mmu: |_, opx: &mut opx::Bne, _, will_jump: &mut bool| {
@@ -582,7 +598,7 @@ def_instr_and_op_kind!(
         name: Break,
         type: i,
         asm: ["break"],
-        operate: |exc: &mut ExcQueue, _| {
+        operate: |exc: &mut ExcQueue, _, _| {
             exc.push(ExceptionKind::Breakpoint).unwrap();
         },
     },
@@ -635,6 +651,9 @@ def_instr_and_op_kind!(
         name: J,
         type: j,
         asm: ["j" *()],
+        operate: |_, opx: &mut opx::J, pc: u32| {
+            opx.target = calc_target(pc, opx.target);
+        },
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
@@ -646,6 +665,9 @@ def_instr_and_op_kind!(
         name: Jal,
         type: j,
         asm: ["jal" *()],
+        operate: |_, opx: &mut opx::Jal, pc: u32| {
+            opx.target = calc_target(pc, opx.target);
+        },
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
@@ -679,21 +701,41 @@ def_instr_and_op_kind!(
         name: Lb,
         type: i,
         asm: ["lb" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Lb, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            let value = sign_extend_8(mmu.read_virt_8(vaddr).unwrap());
+            opx.rt.update(value);
+        },
     },
     {
         name: Lbu,
         type: i,
         asm: ["lbu" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Lbu, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            let value = mmu.read_virt_8(vaddr).unwrap().into();
+            opx.rt.update(value);
+        },
     },
     {
         name: Lh,
         type: i,
         asm: ["lh" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Lh, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            let value = sign_extend_16(mmu.read_virt_16(vaddr).unwrap());
+            opx.rt.update(value);
+        },
     },
     {
         name: Lhu,
         type: i,
         asm: ["lhu" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Lhu, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            let value = mmu.read_virt_16(vaddr).unwrap().into();
+            opx.rt.update(value);
+        },
     },
     {
         name: Lui,
@@ -704,6 +746,11 @@ def_instr_and_op_kind!(
         name: Lw,
         type: i,
         asm: ["lw" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Lw, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            let value = mmu.read_virt_32(vaddr).unwrap();
+            opx.rt.update(value);
+        },
     },
     {
         name: Lwc0,
@@ -769,7 +816,7 @@ def_instr_and_op_kind!(
         name: Nor,
         type: r,
         asm: ["nor" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Nor| {
+        operate: |_, opx: &mut opx::Nor, _| {
             opx.rd.update(!(opx.rs.value() | opx.rt.value()));
         },
     },
@@ -777,7 +824,7 @@ def_instr_and_op_kind!(
         name: Or,
         type: r,
         asm: ["or" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Or| {
+        operate: |_, opx: &mut opx::Or, _| {
             opx.rd.update(opx.rs.value() | opx.rt.value());
         },
     },
@@ -785,7 +832,7 @@ def_instr_and_op_kind!(
         name: Ori,
         type: i,
         asm: ["ori" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Ori| {
+        operate: |_, opx: &mut opx::Ori, _| {
             opx.rt.update(opx.rs.value() | u32::from(opx.imm));
         },
     },
@@ -803,7 +850,7 @@ def_instr_and_op_kind!(
         name: Sll,
         type: r,
         asm: ["sll" %(rd), %(rt), ^()],
-        operate: |_, opx: &mut opx::Sll| {
+        operate: |_, opx: &mut opx::Sll, _| {
             opx.rd.update(opx.rt.value() << opx.shamt);
         },
     },
@@ -811,7 +858,7 @@ def_instr_and_op_kind!(
         name: Sllv,
         type: r,
         asm: ["sllv" %(rd), %(rt), %(rs)],
-        operate: |_, opx: &mut opx::Sllv| {
+        operate: |_, opx: &mut opx::Sllv, _| {
             opx.rd.update(opx.rt.value() << (opx.rs.value() & 0b11111));
         },
     },
@@ -819,7 +866,7 @@ def_instr_and_op_kind!(
         name: Slt,
         type: r,
         asm: ["slt" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Slt| {
+        operate: |_, opx: &mut opx::Slt, _| {
             opx.rd.update(((opx.rs.value() as i32) < (opx.rt.value() as i32)) as u32);
         },
     },
@@ -827,23 +874,23 @@ def_instr_and_op_kind!(
         name: Slti,
         type: i,
         asm: ["slti" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Slti| {
-            opx.rt.update(((opx.rs.value() as i32) < (sign_extend(opx.imm) as i32)) as u32);
+        operate: |_, opx: &mut opx::Slti, _| {
+            opx.rt.update(((opx.rs.value() as i32) < (sign_extend_16(opx.imm) as i32)) as u32);
         },
     },
     {
         name: Sltiu,
         type: i,
         asm: ["sltiu" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Sltiu| {
-            opx.rt.update((opx.rs.value() < sign_extend(opx.imm)) as u32);
+        operate: |_, opx: &mut opx::Sltiu, _| {
+            opx.rt.update((opx.rs.value() < sign_extend_16(opx.imm)) as u32);
         },
     },
     {
         name: Sltu,
         type: r,
         asm: ["sltu" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Sltu| {
+        operate: |_, opx: &mut opx::Sltu, _| {
             opx.rd.update((opx.rs.value() < opx.rt.value()) as u32);
         },
     },
@@ -861,7 +908,7 @@ def_instr_and_op_kind!(
         name: Srl,
         type: r,
         asm: ["srl" %(rd), %(rt), ^()],
-        operate: |_, opx: &mut opx::Srl| {
+        operate: |_, opx: &mut opx::Srl, _| {
             opx.rd.update(opx.rt.value() >> opx.shamt);
         },
     },
@@ -869,7 +916,7 @@ def_instr_and_op_kind!(
         name: Srlv,
         type: r,
         asm: ["srlv"  %(rd), %(rt), %(rs)],
-        operate: |_, opx: &mut opx::Srlv| {
+        operate: |_, opx: &mut opx::Srlv, _| {
             opx.rd.update(opx.rt.value() >> (opx.shamt & 0b11111));
         },
     },
@@ -882,7 +929,7 @@ def_instr_and_op_kind!(
         name: Subu,
         type: r,
         asm: ["subu" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Subu| {
+        operate: |_, opx: &mut opx::Subu, _| {
             opx.rd.update(opx.rs.value().wrapping_sub(opx.rt.value()));
         },
     },
@@ -925,7 +972,7 @@ def_instr_and_op_kind!(
         name: Syscall,
         type: i,
         asm: ["syscall"],
-        operate: |exc: &mut ExcQueue, _| {
+        operate: |exc: &mut ExcQueue, _, _| {
             exc.push(ExceptionKind::Syscall).unwrap();
         },
     },
@@ -933,7 +980,7 @@ def_instr_and_op_kind!(
         name: Xor,
         type: r,
         asm: ["xor" %(rd), %(rs), %(rt)],
-        operate: |_, opx: &mut opx::Xor| {
+        operate: |_, opx: &mut opx::Xor, _| {
             opx.rd.update(opx.rs.value() ^ opx.rt.value());
         },
     },
@@ -941,7 +988,7 @@ def_instr_and_op_kind!(
         name: Xori,
         type: i,
         asm: ["xori" %(rt), %(rs), #(s)],
-        operate: |_, opx: &mut opx::Xori| {
+        operate: |_, opx: &mut opx::Xori, _| {
             opx.rt.update(opx.rs.value() ^ u32::from(opx.imm));
         },
     },
