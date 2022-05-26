@@ -4,73 +4,50 @@
 
 use std::ops::{Deref, DerefMut};
 
-use crate::{InstrCache, Memory, i_cache};
+use crate::mem::{self, Memory};
 
-impl Default for Mmu {
-    fn default() -> Self {
-        Self {
-            i_cache: InstrCache::default(),
-            mem: Memory::default(),
-        }
-    }
+#[derive(Debug)]
+pub enum Error {
+    Memory(mem::Error),
 }
 
-pub struct Mmu {
-    i_cache: InstrCache,
-    mem: Memory,
-}
+#[derive(Default)]
+pub struct Mmu(Memory);
 
-macro_rules! def_read_instr {
+macro_rules! def_read {
     (
-        fn $virt_fn_name:ident + $phys_fn_name:ident () -> $fn_out_ty:ty
-            = $cache_fn_name:ident + $mem_fn_name:ident
+        fn $fn_name:ident() -> $fn_out_ty:ty = $mem_fn_name:ident
     ) => {
-        /// Reads the instruction at the given virtual address.
-        pub fn $virt_fn_name(&mut self, vaddr: u32) -> $fn_out_ty {
+        /// Reads the value at the given virtual address.
+        pub fn $fn_name(&mut self, vaddr: u32) -> Result<$fn_out_ty, Error> {
             let addr = self.translate_vaddr(vaddr);
 
-            self.$phys_fn_name(addr)
-        }
-
-        /// Reads the instruction at the given physical address.
-        pub fn $phys_fn_name(&mut self, addr: u32) -> $fn_out_ty {
-            self.i_cache.$cache_fn_name(
-                &i_cache::Address::from_phys(addr),
-                || self.mem.$mem_fn_name(addr),
-            )
+            self.$mem_fn_name(addr).map_err(Error::Memory)
         }
     };
 }
 
-macro_rules! def_write_instr {
+macro_rules! def_write {
     (
-        fn $virt_fn_name:ident + $phys_fn_name:ident ($fn_in_ty:ty)
-            = $cache_fn_name:ident + $mem_fn_name:ident
+        fn $fn_name:ident($fn_in_ty:ty) = $mem_fn_name:ident
     ) => {
-        /// Writes an instruction to the given virtual address.
-        pub fn $virt_fn_name(&mut self, vaddr: u32, value: $fn_in_ty) {
+        /// Writes a value to the given virtual address.
+        pub fn $fn_name(&mut self, vaddr: u32, value: $fn_in_ty) -> Result<(), Error> {
             let addr = self.translate_vaddr(vaddr);
-            self.$phys_fn_name(addr, value);
-        }
+            self.$mem_fn_name(addr, value).map_err(Error::Memory)?;
 
-        /// Writes an instruction to the given physical address.
-        pub fn $phys_fn_name(&mut self, addr: u32, value: $fn_in_ty) {
-            self.i_cache.$cache_fn_name(
-                &i_cache::Address::from_phys(addr),
-                value,
-                || self.mem.$mem_fn_name(addr, value),
-            );
+            Ok(())
         }
     };
 }
 
 impl Mmu {
-    def_read_instr! { fn read_virt_kuseg_instr + read_phys_kuseg_instr () -> u32 = read + read_kuseg_32 }
-    def_read_instr! { fn read_virt_kseg0_instr + read_phys_kseg0_instr () -> u32 = read + read_kseg0_32 }
-    def_read_instr! { fn read_virt_kseg1_instr + read_phys_kseg1_instr () -> u32 = read + read_kseg1_32 }
-    def_write_instr! { fn write_virt_kuseg_instr + write_phys_kuseg_instr (u32) = write + write_kuseg_32 }
-    def_write_instr! { fn write_virt_kseg0_instr + write_phys_kseg0_instr (u32) = write + write_kseg0_32 }
-    def_write_instr! { fn write_virt_kseg1_instr + write_phys_kseg1_instr (u32) = write + write_kseg1_32 }
+    def_read! { fn read_virt_8() -> u8 = read_8 }
+    def_read! { fn read_virt_16() -> u16 = read_16 }
+    def_read! { fn read_virt_32() -> u32 = read_32 }
+    def_write! { fn write_virt_8(u8) = write_8 }
+    def_write! { fn write_virt_16(u16) = write_16 }
+    def_write! { fn write_virt_32(u32) = write_32 }
 
     /// Translates the given virtual address to a physical address.
     pub fn translate_vaddr(&self, vaddr: u32) -> u32 {
@@ -83,12 +60,12 @@ impl Deref for Mmu {
     type Target = Memory;
 
     fn deref(&self) -> &Self::Target {
-        &self.mem
+        &self.0
     }
 }
 
 impl DerefMut for Mmu {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.mem
+        &mut self.0
     }
 }

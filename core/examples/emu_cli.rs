@@ -17,12 +17,12 @@ fn main() {
     for (addr, instr) in rom.as_chunks::<4>().0.into_iter().enumerate() {
         let instr = u32::from_le_bytes(*instr);
         let addr = (addr * 4) as u32;
-        core.cpu_mut().mmu_mut().write_phys_kseg0_instr(addr, instr);
+        core.cpu_mut().mmu_mut().write_32(addr, instr).unwrap();
     }
 
     loop {
         let pc = core.cpu_mut().reg().pc();
-        let enc_instr = core.cpu_mut().mmu_mut().read_virt_kseg0_instr(pc);
+        let enc_instr = core.cpu_mut().mmu_mut().read_virt_32(pc).unwrap();
         let enc_instr_bytes = enc_instr.to_be_bytes();
 
         print!(

@@ -2,7 +2,7 @@ use std::fmt;
 
 impl Address {
     /// Decomposes a physical address into an instruction cache address.
-    pub fn from_phys(mut addr: u32) -> Self {
+    fn from_phys(mut addr: u32) -> Self {
         // We are only addressing words, so we can silently ignore the byte index.
         addr >>= 2;
 
@@ -24,7 +24,7 @@ impl Address {
 }
 
 #[derive(Clone)]
-pub struct Address {
+struct Address {
     tag: u32,
     entry_idx: usize,
     word_idx: usize,
@@ -51,19 +51,27 @@ pub struct InstrCache {
 }
 
 impl InstrCache {
-    pub fn read(
+    pub fn read_32<E>(
+        &mut self,
+        addr: u32,
+        read_on_miss: impl FnOnce() -> Result<u32, E>,
+    ) -> Result<u32, E> {
+        self._read_32(&Address::from_phys(addr), read_on_miss)
+    }
+
+    fn _read_32<E>(
         &mut self,
         addr: &Address,
-        read_on_miss: impl FnOnce() -> u32,
-    ) -> u32 {
+        read_on_miss: impl FnOnce() -> Result<u32, E>,
+    ) -> Result<u32, E> {
         match self.access(addr) {
-            AccessResult::Hit(value) => value,
+            AccessResult::Hit(value) => Ok(value),
             AccessResult::Miss(old) => {
-                let value = read_on_miss();
+                let value = read_on_miss()?;
                 // Update the cache.
                 *old = value;
 
-                value
+                Ok(value)
             }
         }
     }
@@ -79,7 +87,11 @@ impl InstrCache {
         }
     }
 
-    pub fn write(
+    pub fn write_32(&mut self, addr: u32, value: u32, write_on_miss: impl FnOnce()) {
+        self._write_32(&Address::from_phys(addr), value, write_on_miss);
+    }
+
+    fn _write_32(
         &mut self,
         addr: &Address,
         value: u32,
