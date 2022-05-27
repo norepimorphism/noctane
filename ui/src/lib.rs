@@ -63,6 +63,7 @@ pub fn run() -> Result<(), anyhow::Error> {
 
         if windows.game.is_active() {
             windows.game.update();
+            // windows.game.gfx_mut().render();
         }
 
         // SAFETY: *tracing* only writes ACSII logs, so the input to `log_sink` *should* be valid

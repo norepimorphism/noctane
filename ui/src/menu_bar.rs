@@ -138,7 +138,7 @@ impl<'b> OpenIsoItem<'b> {
                 let fs = noctane_cdrom::FileSystem::from_reader(iso).unwrap();
                 for (i, dir) in fs.root_dirs.into_iter().enumerate() {
                     for (path, file) in recurse_cdrom_directory(format!("{}:", i), dir) {
-                        tracing::debug!("{}\t\t{}", path, file.meta.timestamp);
+                        tracing::debug!("{}\n  {}", path, file.meta.timestamp);
                     }
                 }
 

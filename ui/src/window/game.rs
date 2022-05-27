@@ -27,6 +27,12 @@ pub struct Window {
     gfx: gfx::Renderer,
 }
 
+impl Window {
+    pub fn gfx_mut(&mut self) -> &mut gfx::Renderer {
+        &mut self.gfx
+    }
+}
+
 impl Deref for Window {
     type Target = minifb::Window;
 

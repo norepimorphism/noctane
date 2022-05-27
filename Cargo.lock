@@ -1360,6 +1360,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "noctane-cpu",
+ "noctane-gpu",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1381,12 +1382,16 @@ version = "0.1.0"
 dependencies = [
  "bit",
  "const_queue",
+ "noctane-gpu",
  "tracing",
 ]
 
 [[package]]
 name = "noctane-gpu"
 version = "0.1.0"
+dependencies = [
+ "bit",
+]
 
 [[package]]
 name = "noctane-ui"
