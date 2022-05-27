@@ -11,20 +11,21 @@ fn main() {
     let bios_filepath = std::env::args().nth(1).expect("expected ROM filepath");
     let bios = std::fs::read(bios_filepath).expect("failed to read ROM");
 
-    let mut core = noctane::Core::new();
+    let mut core = noctane::Core::default();
+    let mut cpu = core.cpu();
 
     // Fill memory with the BIOS.
     for (addr, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
         let instr = u32::from_le_bytes(*instr);
         let addr = (addr * 4) as u32;
-        core.cpu_mut().mmu_mut().write_32(0xbfc0_0000 + addr, instr).unwrap();
+        cpu.mmu_mut().write_32(0xbfc0_0000 + addr, instr).unwrap();
     }
 
-    *core.cpu_mut().reg_mut().pc_mut() = 0xbfc0_0000;
+    *cpu.reg_mut().pc_mut() = 0xbfc0_0000;
 
     loop {
-        let pc = core.cpu_mut().reg().pc();
-        let enc_instr = core.cpu_mut().mmu_mut().read_virt_32(pc).unwrap();
+        let pc = cpu.reg().pc();
+        let enc_instr = cpu.mmu_mut().read_virt_32(pc).unwrap();
         let enc_instr_bytes = enc_instr.to_le_bytes();
 
         print!(
@@ -53,6 +54,6 @@ fn main() {
             println!();
         }
 
-        core.cpu_mut().execute_next_instr();
+        cpu.execute_next_instr();
     }
 }

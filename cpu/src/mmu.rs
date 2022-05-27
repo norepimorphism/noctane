@@ -11,8 +11,13 @@ pub enum Error {
     Memory(mem::Error),
 }
 
-#[derive(Default)]
-pub struct Mmu(Memory);
+impl<'c, 'b> Mmu<'c, 'b> {
+    pub fn new(mem: Memory<'c, 'b>) -> Self {
+        Self(mem)
+    }
+}
+
+pub struct Mmu<'c, 'b>(Memory<'c, 'b>);
 
 macro_rules! def_read {
     (
@@ -41,7 +46,7 @@ macro_rules! def_write {
     };
 }
 
-impl Mmu {
+impl Mmu<'_, '_> {
     def_read! { fn read_virt_8() -> u8 = read_8 }
     def_read! { fn read_virt_16() -> u16 = read_16 }
     def_read! { fn read_virt_32() -> u32 = read_32 }
@@ -56,15 +61,15 @@ impl Mmu {
     }
 }
 
-impl Deref for Mmu {
-    type Target = Memory;
+impl<'c, 'b> Deref for Mmu<'c, 'b> {
+    type Target = Memory<'c, 'b>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for Mmu {
+impl DerefMut for Mmu<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

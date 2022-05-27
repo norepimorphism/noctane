@@ -1,35 +1,84 @@
+use noctane_gpu::Gpu;
+
 #[derive(Debug)]
 pub enum Error {
     UnmappedAddress(u32),
 }
 
-impl Default for Bus {
-    fn default() -> Self {
+macro_rules! def_bank {
+    ($name:ident, $len:literal, $addr:literal) => {
+        impl Default for $name {
+            fn default() -> Self {
+                Self([0; Self::LEN])
+            }
+        }
+
+        impl $name {
+            pub const LEN: usize = $len;
+
+            const BASE_IDX: usize = make_index($addr);
+            const END_IDX: usize = $name::BASE_IDX + $name::LEN;
+        }
+
+        pub struct $name([u32; Self::LEN]);
+
+        impl std::ops::Deref for $name {
+            type Target = [u32; Self::LEN];
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::ops::DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+    };
+}
+
+const fn make_index(addr: usize) -> usize {
+    (addr as usize) / std::mem::size_of::<u32>()
+}
+
+def_bank!(MainRam,  0x08_0000, 0x0000_0000);
+def_bank!(Exp1,     0x20_0000, 0x1f00_0000);
+def_bank!(Exp2,     0x00_0800, 0x1f80_2000);
+def_bank!(Exp3,     0x08_0000, 0x1fa0_0000);
+def_bank!(Bios,     0x02_0000, 0x1fc0_0000);
+
+impl<'a> Bus<'a> {
+    pub fn new(
+        main_ram: &'a mut MainRam,
+        exp_1: &'a mut Exp1,
+        gpu: &'a mut Gpu,
+        exp_2: &'a mut Exp2,
+        exp_3: &'a mut Exp3,
+        bios: &'a mut Bios,
+    ) -> Self {
         Self {
-            main_ram: box [0; Self::MAIN_RAM_LEN],
-            exp_1: box [0; Self::EXP_1_LEN],
-            exp_2: box [0; Self::EXP_2_LEN],
-            exp_3: box [0; Self::EXP_3_LEN],
-            bios: box [0; Self::BIOS_LEN],
+            main_ram,
+            exp_1,
+            gpu,
+            exp_2,
+            exp_3,
+            bios,
         }
     }
 }
 
-pub struct Bus {
-    main_ram: Box<[u32; Self::MAIN_RAM_LEN]>,
-    exp_1: Box::<[u32; Self::EXP_1_LEN]>,
-    exp_2: Box::<[u32; Self::EXP_2_LEN]>,
-    exp_3: Box::<[u32; Self::EXP_3_LEN]>,
-    bios: Box<[u32; Self::BIOS_LEN]>,
+pub struct Bus<'a> {
+    pub main_ram: &'a mut MainRam,
+    pub exp_1: &'a mut Exp1,
+    pub gpu: &'a mut Gpu,
+    pub exp_2: &'a mut Exp2,
+    pub exp_3: &'a mut Exp3,
+    pub bios: &'a mut Bios,
 }
 
-impl Bus {
-    const MAIN_RAM_LEN: usize = 0x08_0000;
-    const EXP_1_LEN:    usize = 0x20_0000;
-    const IO_LEN:       usize = 0x00_0800;
-    const EXP_2_LEN:    usize = 0x00_0800;
-    const EXP_3_LEN:    usize = 0x08_0000;
-    const BIOS_LEN:     usize = 0x02_0000;
+impl Bus<'_> {
+    const IO_LEN: usize = 0x00_0800;
 
     fn select_access_bank_fn<T>(
         &mut self,
@@ -41,48 +90,29 @@ impl Bus {
         access_exp_3: impl FnOnce(&mut Self, usize) -> T,
         access_bios: impl FnOnce(&mut Self, usize) -> T,
     ) -> Result<T, Error> {
-        const fn make_index(addr: usize) -> usize {
-            (addr as usize) / std::mem::size_of::<u32>()
-        }
-
-        const MAIN_RAM_BASE_IDX:    usize = make_index(0x0000_0000);
-        const MAIN_RAM_END_IDX:     usize = MAIN_RAM_BASE_IDX + <Bus>::MAIN_RAM_LEN;
-
-        const EXP_1_BASE_IDX:       usize = make_index(0x1f00_0000);
-        const EXP_1_END_IDX:        usize = EXP_1_BASE_IDX + <Bus>::EXP_1_LEN;
-
-        const IO_BASE_IDX:          usize = make_index(0x1f80_1000);
-        const IO_END_IDX:           usize = IO_BASE_IDX + <Bus>::IO_LEN;
-
-        const EXP_2_BASE_IDX:       usize = make_index(0x1f80_2000);
-        const EXP_2_END_IDX:        usize = EXP_2_BASE_IDX + <Bus>::EXP_2_LEN;
-
-        const EXP_3_BASE_IDX:       usize = make_index(0x1fa0_0000);
-        const EXP_3_END_IDX:        usize = EXP_3_BASE_IDX + <Bus>::EXP_3_LEN;
-
-        const BIOS_BASE_IDX:        usize = make_index(0x1fc0_0000);
-        const BIOS_END_IDX:         usize = BIOS_BASE_IDX + <Bus>::BIOS_LEN;
+        const IO_BASE_IDX:  usize = make_index(0x1f80_1000);
+        const IO_END_IDX:   usize = IO_BASE_IDX + <Bus>::IO_LEN;
 
         let idx = make_index(addr as usize);
 
         match idx {
-            MAIN_RAM_BASE_IDX..MAIN_RAM_END_IDX => {
-                Ok(access_main_ram(self, idx - MAIN_RAM_BASE_IDX))
+            MainRam::BASE_IDX..MainRam::END_IDX => {
+                Ok(access_main_ram(self, idx - MainRam::BASE_IDX))
             }
-            EXP_1_BASE_IDX..EXP_1_END_IDX => {
-                Ok(access_exp_1(self, idx - EXP_1_BASE_IDX))
+            Exp1::BASE_IDX..Exp1::END_IDX => {
+                Ok(access_exp_1(self, idx - Exp1::BASE_IDX))
             }
             IO_BASE_IDX..IO_END_IDX => {
                 Ok(access_io(self, idx - IO_BASE_IDX))
             }
-            EXP_2_BASE_IDX..EXP_2_END_IDX => {
-                Ok(access_exp_2(self, idx - EXP_2_BASE_IDX))
+            Exp2::BASE_IDX..Exp2::END_IDX => {
+                Ok(access_exp_2(self, idx - Exp2::BASE_IDX))
             }
-            EXP_3_BASE_IDX..EXP_3_END_IDX => {
-                Ok(access_exp_3(self, idx - EXP_3_BASE_IDX))
+            Exp3::BASE_IDX..Exp3::END_IDX => {
+                Ok(access_exp_3(self, idx - Exp3::BASE_IDX))
             }
-            BIOS_BASE_IDX..BIOS_END_IDX => {
-                Ok(access_bios(self, idx - BIOS_BASE_IDX))
+            Bios::BASE_IDX..Bios::END_IDX => {
+                Ok(access_bios(self, idx - Bios::BASE_IDX))
             }
             _ => Err(Error::UnmappedAddress(addr)),
         }

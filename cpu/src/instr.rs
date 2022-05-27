@@ -10,9 +10,9 @@ use std::fmt;
 use const_queue::ConstQueue;
 
 pub use asm::Asm;
-use crate::{Mmu, cpu::{ExceptionKind, reg}};
+use crate::{Mmu, exc, reg};
 
-pub type ExcQueue = ConstQueue::<ExceptionKind, 5>;
+pub type ExcQueue = ConstQueue::<exc::Kind, 5>;
 
 pub mod i {
     /// An I-type instruction.
@@ -508,7 +508,7 @@ def_instr_and_op_kind!(
         operate: |exc: &mut ExcQueue, opx: &mut opx::Add, _| {
             let (result, overflowed) = opx.rs.value().overflowing_add(opx.rt.value());
             if overflowed {
-                exc.push(ExceptionKind::IntegerOverflow).unwrap();
+                exc.push(exc::Kind::IntegerOverflow).unwrap();
             } else {
                 // `rd` is only modified when an exception doesn't occur.
                 opx.rd.update(result);
@@ -522,7 +522,7 @@ def_instr_and_op_kind!(
         operate: |exc: &mut ExcQueue, opx: &mut opx::Addi, _| {
             let (result, overflowed) = opx.rs.value().overflowing_add(sign_extend_16(opx.imm));
             if overflowed {
-                exc.push(ExceptionKind::IntegerOverflow).unwrap();
+                exc.push(exc::Kind::IntegerOverflow).unwrap();
             } else {
                 // `rt` is only modified when an exception doesn't occur.
                 opx.rt.update(result);
@@ -599,7 +599,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["break"],
         operate: |exc: &mut ExcQueue, _, _| {
-            exc.push(ExceptionKind::Breakpoint).unwrap();
+            exc.push(exc::Kind::Breakpoint).unwrap();
         },
     },
     {
@@ -973,7 +973,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["syscall"],
         operate: |exc: &mut ExcQueue, _, _| {
-            exc.push(ExceptionKind::Syscall).unwrap();
+            exc.push(exc::Kind::Syscall).unwrap();
         },
     },
     {

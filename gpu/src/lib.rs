@@ -10,4 +10,5 @@ impl Gpu {
     }
 }
 
+#[derive(Default)]
 pub struct Gpu(());

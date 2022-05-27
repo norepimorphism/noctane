@@ -6,28 +6,42 @@
 
 extern crate test;
 
-use std::{cell::{Ref, RefCell, RefMut}, rc::Rc};
-
 pub use noctane_cpu::Cpu;
+pub use noctane_gpu::Gpu;
 
-impl Core {
-    pub fn new() -> Self {
-        let cpu = Cpu::new();
-
-        Self { cpu }
-    }
-}
-
+#[derive(Default)]
 pub struct Core {
-    cpu: Cpu,
+    cpu_state: noctane_cpu::State,
+    gpu: Gpu,
+    banks: Banks,
 }
 
 impl Core {
-    pub fn cpu(&self) -> &Cpu {
-        &self.cpu
+    pub fn cpu(&mut self) -> Cpu {
+        self.cpu_state.connect_bus(noctane_cpu::Bus {
+            main_ram: &mut self.banks.main_ram,
+            exp_1: &mut self.banks.exp_1,
+            gpu: &mut self.gpu,
+            exp_2: &mut self.banks.exp_2,
+            exp_3: &mut self.banks.exp_3,
+            bios: &mut self.banks.bios,
+        })
     }
 
-    pub fn cpu_mut(&mut self) -> &mut Cpu {
-        &mut self.cpu
+    pub fn banks(&self) -> &Banks {
+        &self.banks
     }
+
+    pub fn banks_mut(&mut self) -> &mut Banks {
+        &mut self.banks
+    }
+}
+
+#[derive(Default)]
+pub struct Banks {
+    pub main_ram: Box<noctane_cpu::bus::MainRam>,
+    pub exp_1: Box<noctane_cpu::bus::Exp1>,
+    pub exp_2: Box<noctane_cpu::bus::Exp2>,
+    pub exp_3: Box<noctane_cpu::bus::Exp3>,
+    pub bios: Box<noctane_cpu::bus::Bios>,
 }

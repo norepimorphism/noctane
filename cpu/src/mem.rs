@@ -1,24 +1,19 @@
-use crate::{bus::{self, Bus}, InstrCache};
+use crate::{Cache, bus::{self, Bus}};
 
 #[derive(Debug)]
 pub enum Error {
     Bus(bus::Error),
 }
 
-impl Default for Memory {
-    fn default() -> Self {
-        Self {
-            i_cache: InstrCache::default(),
-            d_cache: [0xff; 0xff],
-            bus: Bus::default(),
-        }
+impl<'c, 'b> Memory<'c, 'b> {
+    pub fn new(cache: &'c mut Cache, bus: Bus<'b>) -> Self {
+        Self { cache, bus }
     }
 }
 
-pub struct Memory {
-    i_cache: InstrCache,
-    d_cache: [u32; 0xff],
-    bus: Bus,
+pub struct Memory<'c, 'b> {
+    cache: &'c mut Cache,
+    bus: Bus<'b>,
 }
 
 macro_rules! def_read_write {
@@ -67,7 +62,7 @@ macro_rules! def_read_write {
     };
 }
 
-impl Memory {
+impl Memory<'_, '_> {
     def_read_write! {
         read_8
         read_16
@@ -113,7 +108,7 @@ impl Memory {
     }
 
     fn read_kseg0_32(&mut self, addr: u32, offset: u32) -> Result<u32, Error> {
-        self.i_cache.read_32(
+        self.cache.i.read_32(
             addr,
             || self.bus.read_32(offset).map_err(Error::Bus),
         )
@@ -143,7 +138,7 @@ impl Memory {
     }
 
     fn write_kseg0_32(&mut self, addr: u32, offset: u32, value: u32) -> Result<(), Error> {
-        self.i_cache.write_32(
+        self.cache.i.write_32(
             addr,
             value,
             || self.bus.write_32(offset, value).map_err(Error::Bus),

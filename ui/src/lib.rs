@@ -19,7 +19,7 @@ use window::Windows;
 use menu_bar::MenuBar;
 
 pub fn run() -> Result<(), anyhow::Error> {
-    let mut noctane = noctane::Core::new();
+    let mut noctane = noctane::Core::default();
     let boing = boing::Ui::new()
         .context("Failed to initialize GUI")?;
 
