@@ -36,7 +36,7 @@ impl fmt::Debug for Address {
     }
 }
 
-impl Default for InstrCache {
+impl Default for Cache {
     fn default() -> Self {
         Self {
             entries: [Entry::default(); 256],
@@ -45,12 +45,12 @@ impl Default for InstrCache {
     }
 }
 
-pub struct InstrCache {
+pub struct Cache {
     entries: [Entry; 256],
     is_isolated: bool,
 }
 
-impl InstrCache {
+impl Cache {
     pub fn read_32<E>(
         &mut self,
         addr: u32,
@@ -102,7 +102,7 @@ impl InstrCache {
         value: u32,
         write_on_miss: impl FnOnce()-> Result<(), E>,
     ) -> Result<(), E> {
-        // tracing::debug!("Updating cache ({:?})", addr);
+        tracing::trace!("Updating cache ({:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx] = value;
 
         write_on_miss()

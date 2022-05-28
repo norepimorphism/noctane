@@ -9,7 +9,7 @@ macro_rules! def_bank {
     ($name:ident, $len:literal, $addr:literal) => {
         impl Default for $name {
             fn default() -> Self {
-                Self([0; Self::LEN])
+                Self(box [0; Self::LEN])
             }
         }
 
@@ -20,7 +20,7 @@ macro_rules! def_bank {
             const END_IDX: usize = $name::BASE_IDX + $name::LEN;
         }
 
-        pub struct $name([u32; Self::LEN]);
+        pub struct $name(Box<[u32; Self::LEN]>);
 
         impl std::ops::Deref for $name {
             type Target = [u32; Self::LEN];
@@ -128,7 +128,7 @@ impl Bus<'_> {
                 this.exp_1[idx]
             },
             |_, _| {
-                tracing::debug!("READ IO @ {:08x}", addr);
+                tracing::debug!("io[{:#010x}] -> 0x0", (addr >> 2) << 2);
 
                 // TODO
                 0
@@ -155,7 +155,7 @@ impl Bus<'_> {
                 this.exp_1[idx] = value;
             },
             |_, _| {
-                tracing::debug!("WRITE IO @ {:08x} = {:x}", addr, value);
+                tracing::debug!("io[{:#010x}] <- {:#010x}", (addr >> 2) << 2, value);
 
                 // TODO
             },

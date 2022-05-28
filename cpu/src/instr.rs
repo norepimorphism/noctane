@@ -136,7 +136,9 @@ impl Pipeline {
             *wb_stage = Some(state);
         }
         if let Some(mut state) = alu_stage.take() {
-            state.operate(reg.pc());
+            let delay_slot_pc = reg.pc().wrapping_sub(12);
+            state.operate(delay_slot_pc);
+
             *mem_stage = Some(state);
         }
         if let Some(instr) = rd_stage.take() {
@@ -170,6 +172,11 @@ macro_rules! def_instr_and_op_kind {
                         $kind:tt($($arg:tt)?)
                     ),* $(,)?
                 ]
+                $(
+                    , fields: {
+                        $($field_name:ident : $field_ty:ty = $field_value:literal),* $(,)?
+                    }
+                )?
                 $(
                     , operate: $alu_fn:expr
                 )?
@@ -304,7 +311,7 @@ macro_rules! def_instr_and_op_kind {
                         opx::State::$variant_name(ref mut opx) => {
                             opx.write(reg);
                             $(
-                                $wb_fn(&mut self.exc, opx, reg);
+                                $wb_fn(&mut self.exc, opx, reg, self.will_jump);
                             )?
                         }
                     )*
@@ -357,7 +364,7 @@ macro_rules! def_instr_and_op_kind {
             }
 
             $(
-                gen_opx_state!($ty, $variant_name);
+                gen_opx_state!($ty, $variant_name; $($($field_name, $field_ty, $field_value;)*)?);
             )*
         }
 
@@ -389,6 +396,10 @@ macro_rules! def_instr_and_op_kind {
             }
 
             impl Gpr {
+                pub fn index(&self) -> usize {
+                    self.index
+                }
+
                 /// The current value of this GPR.
                 pub fn value(&self) -> u32 {
                     self.value
@@ -409,13 +420,16 @@ macro_rules! def_instr_and_op_kind {
 }
 
 macro_rules! gen_opx_state {
-    (i, $variant_name:ident) => {
+    (i, $variant_name:ident; $($field_name:ident, $field_ty:ty, $field_value:literal);* $(;)?) => {
         impl $variant_name {
             pub fn read(reg: &reg::File, instr: super::i::Instr) -> Self {
                 Self {
                     rs: Gpr::read(reg, instr.rs.into()),
                     rt: Gpr::read(reg, instr.rt.into()),
                     imm: instr.imm,
+                    $(
+                        $field_name: $field_value,
+                    )*
                 }
             }
         }
@@ -424,6 +438,9 @@ macro_rules! gen_opx_state {
             pub rs: Gpr,
             pub rt: Gpr,
             pub imm: u16,
+            $(
+                pub $field_name: $field_ty,
+            )*
         }
 
         impl $variant_name {
@@ -432,17 +449,23 @@ macro_rules! gen_opx_state {
             }
         }
     };
-    (j, $variant_name:ident) => {
+    (j, $variant_name:ident; $($field_name:ident, $field_ty:ty, $field_value:literal);* $(;)?) => {
         impl $variant_name {
             pub fn read(_: &reg::File, instr: super::j::Instr) -> Self {
                 Self {
                     target: instr.target,
+                    $(
+                        $field_name: $field_value,
+                    )*
                 }
             }
         }
 
         pub struct $variant_name {
             pub target: u32,
+            $(
+                pub $field_name: $field_ty,
+            )*
         }
 
         impl $variant_name {
@@ -451,7 +474,7 @@ macro_rules! gen_opx_state {
             }
         }
     };
-    (r, $variant_name:ident) => {
+    (r, $variant_name:ident; $($field_name:ident, $field_ty:ty, $field_value:literal);* $(;)?) => {
         impl $variant_name {
             pub fn read(reg: &reg::File, instr: super::r::Instr) -> Self {
                 Self {
@@ -460,6 +483,9 @@ macro_rules! gen_opx_state {
                     rd: Gpr::read(reg, instr.rd.into()),
                     shamt: instr.shamt,
                     funct: instr.funct,
+                    $(
+                        $field_name: $field_value,
+                    )*
                 }
             }
         }
@@ -470,6 +496,9 @@ macro_rules! gen_opx_state {
             pub rd: Gpr,
             pub shamt: u8,
             pub funct: u8,
+            $(
+                pub $field_name: $field_ty,
+            )*
         }
 
         impl $variant_name {
@@ -493,10 +522,21 @@ fn sign_extend_8(value: u8) -> u32 {
 }
 
 fn calc_vaddr(base: u32, offset: u16) -> u32 {
-    sign_extend_16(offset).wrapping_add(base)
+    let offset = sign_extend_16(offset);
+    tracing::trace!("Calc. virtual address (base={:#010x}, offset={:#010x})", base, offset);
+
+    base.wrapping_add(offset)
 }
 
-fn calc_target(pc: u32, value: u32) -> u32 {
+fn calc_branch_target(pc: u32, value: u16) -> u32 {
+    let base = pc;
+    let offset = sign_extend_16(value << 2);
+    tracing::trace!("Calc. branch target (base={:#010x}, offset={:#010x})", base, offset);
+
+    base.wrapping_add(offset)
+}
+
+fn calc_jump_target(pc: u32, value: u32) -> u32 {
     (pc & !((1 << 28) - 1)) | (value << 2)
 }
 
@@ -572,26 +612,68 @@ def_instr_and_op_kind!(
         name: Beq,
         type: i,
         asm: ["beq" %(rs), %(rt), #(s)],
+        fields: { target: u32 = 0 },
+        operate: |_, opx: &mut opx::Beq, pc: u32| {
+            opx.target = calc_branch_target(pc, opx.imm);
+        },
+        access_mmu: |_, opx: &mut opx::Beq, _, will_jump: &mut bool| {
+            *will_jump = opx.rs.value() == opx.rt.value();
+        },
+        write_back: |_, opx: &mut opx::Beq, reg: &mut reg::File, should_jump: bool| {
+            if should_jump {
+                *reg.pc_mut() = opx.target;
+            }
+        },
     },
     {
         name: Bgtz,
         type: i,
         asm: ["bgtz" %(rs), #(s)],
+        fields: { target: u32 = 0 },
+        operate: |_, opx: &mut opx::Bgtz, pc: u32| {
+            opx.target = calc_branch_target(pc, opx.imm);
+        },
+        access_mmu: |_, opx: &mut opx::Bgtz, _, will_jump: &mut bool| {
+            *will_jump = (opx.rs.value() as i32) > 0;
+        },
+        write_back: |_, opx: &mut opx::Bgtz, reg: &mut reg::File, should_jump: bool| {
+            if should_jump {
+                *reg.pc_mut() = opx.target;
+            }
+        },
     },
     {
         name: Blez,
         type: i,
         asm: ["blez" %(rs), #(s)],
+        fields: { target: u32 = 0 },
+        operate: |_, opx: &mut opx::Blez, pc: u32| {
+            opx.target = calc_branch_target(pc, opx.imm);
+        },
+        access_mmu: |_, opx: &mut opx::Blez, _, will_jump: &mut bool| {
+            *will_jump = (opx.rs.value() as i32) <= 0;
+        },
+        write_back: |_, opx: &mut opx::Blez, reg: &mut reg::File, should_jump: bool| {
+            if should_jump {
+                *reg.pc_mut() = opx.target;
+            }
+        },
     },
     {
         name: Bne,
         type: i,
         asm: ["bne" %(rs), %(rt), #(s)],
-        operate: |_, opx: &mut opx::Bne, _| {
-            // TODO
+        fields: { target: u32 = 0 },
+        operate: |_, opx: &mut opx::Bne, pc: u32| {
+            opx.target = calc_branch_target(pc, opx.imm);
         },
         access_mmu: |_, opx: &mut opx::Bne, _, will_jump: &mut bool| {
             *will_jump = opx.rs.value() != opx.rt.value();
+        },
+        write_back: |_, opx: &mut opx::Bne, reg: &mut reg::File, should_jump: bool| {
+            if should_jump {
+                *reg.pc_mut() = opx.target;
+            }
         },
     },
     {
@@ -626,10 +708,11 @@ def_instr_and_op_kind!(
         name: Div,
         type: r,
         asm: ["div"  %(rs), %(rt)],
-        write_back: |_, opx: &opx::Div, reg: &mut reg::File| {
+        write_back: |_, opx: &opx::Div, reg: &mut reg::File, _| {
             // Note: the ALU operations should technically be performed in the ALU stage, but it's
             // OK to do it here as there are no programmer-visible effects (e.g., exceptions) in
             // doing so.
+            // TODO: Do this properly.
 
             // Note: MIPS I specifies that division by 0 is undefined, but to be safe, we'll
             // hardcode it to the fairly-reasonable value of 0.
@@ -641,7 +724,7 @@ def_instr_and_op_kind!(
         name: Divu,
         type: r,
         asm: ["divu"  %(rs), %(rt)],
-        write_back: |_, opx: &opx::Divu, reg: &mut reg::File| {
+        write_back: |_, opx: &opx::Divu, reg: &mut reg::File, _| {
             // See `Div`.
             *reg.lo_mut() = opx.rs.value().checked_div(opx.rt.value()).unwrap_or(0);
             *reg.hi_mut() = opx.rs.value() % opx.rt.value();
@@ -652,12 +735,12 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["j" *()],
         operate: |_, opx: &mut opx::J, pc: u32| {
-            opx.target = calc_target(pc, opx.target);
+            opx.target = calc_jump_target(pc, opx.target);
         },
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
-        write_back: |_, opx: &mut opx::J, reg: &mut reg::File| {
+        write_back: |_, opx: &mut opx::J, reg: &mut reg::File, _| {
             *reg.pc_mut() = opx.target;
         },
     },
@@ -665,25 +748,45 @@ def_instr_and_op_kind!(
         name: Jal,
         type: j,
         asm: ["jal" *()],
+        fields: { ret_addr: u32 = 0 },
         operate: |_, opx: &mut opx::Jal, pc: u32| {
-            opx.target = calc_target(pc, opx.target);
+            opx.target = calc_jump_target(pc, opx.target);
+            opx.ret_addr = pc;
         },
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
-        write_back: |_, opx: &mut opx::Jal, reg: &mut reg::File| {
-            reg.set_gpr(31, opx.target);
+        write_back: |_, opx: &mut opx::Jal, reg: &mut reg::File, _| {
+            tracing::trace!(
+                "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
+                opx.target,
+                opx.ret_addr,
+                reg.gpr(29),
+            );
+            reg.set_gpr(31, opx.ret_addr);
+            *reg.pc_mut() = opx.target;
         },
     },
     {
         name: Jalr,
         type: r,
         asm: ["jalr" %(rs), %(rd)],
+        fields: { ret_addr: u32 = 0 },
+        operate: |_, opx: &mut opx::Jalr, pc: u32| {
+            opx.ret_addr = pc;
+        },
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
-        write_back: |_, opx: &mut opx::Jalr, reg: &mut reg::File| {
-            reg.set_gpr(31, opx.rs.value());
+        write_back: |_, opx: &mut opx::Jalr, reg: &mut reg::File, _| {
+            tracing::trace!(
+                "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
+                opx.rs.value(),
+                opx.ret_addr,
+                reg.gpr(29),
+            );
+            reg.set_gpr(31, opx.ret_addr);
+            *reg.pc_mut() = opx.rs.value();
         },
     },
     {
@@ -693,7 +796,11 @@ def_instr_and_op_kind!(
         access_mmu: |_, _, _, will_jump: &mut bool| {
             *will_jump = true;
         },
-        write_back: |_, opx: &mut opx::Jr, reg: &mut reg::File| {
+        write_back: |_, opx: &mut opx::Jr, reg: &mut reg::File, _| {
+            if opx.rs.index() == 31 {
+                tracing::trace!("Leaving function");
+            }
+
             *reg.pc_mut() = opx.rs.value();
         },
     },
@@ -741,6 +848,9 @@ def_instr_and_op_kind!(
         name: Lui,
         type: i,
         asm: ["lui" %(rt), #(s)],
+        operate: |_, opx: &mut opx::Lui, _| {
+            opx.rt.update(u32::from(opx.imm) << 16);
+        },
     },
     {
         name: Lw,
@@ -840,11 +950,19 @@ def_instr_and_op_kind!(
         name: Sb,
         type: i,
         asm: ["sb" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Sb, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            mmu.write_virt_8(vaddr, opx.rt.value() as u8).unwrap();
+        },
     },
     {
         name: Sh,
         type: i,
         asm: ["sh" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Sh, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            mmu.write_virt_16(vaddr, opx.rt.value() as u16).unwrap();
+        },
     },
     {
         name: Sll,
@@ -937,6 +1055,10 @@ def_instr_and_op_kind!(
         name: Sw,
         type: i,
         asm: ["sw" %(rt), #(s)],
+        access_mmu: |_, opx: &mut opx::Sw, mmu: &mut Mmu, _| {
+            let vaddr = calc_vaddr(opx.rs.value(), opx.imm);
+            mmu.write_virt_32(vaddr, opx.rt.value()).unwrap();
+        },
     },
     {
         name: Swc0,

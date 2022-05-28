@@ -94,13 +94,21 @@ impl Memory<'_, '_> {
     }
 
     pub fn read_32(&mut self, addr: u32) -> Result<u32, Error> {
-        self.select_access_region_fn(
+        let result = self.select_access_region_fn(
             addr,
             |this, offset| this.read_kuseg_32(addr, offset),
             |this, offset| this.read_kseg0_32(addr, offset),
             |this, offset| this.read_kseg1_32(offset),
             |this, offset| this.read_kseg2_32(offset),
-        )
+        );
+
+        tracing::debug!(
+            "mem[{:#010x}] -> {}",
+            addr,
+            result.as_ref().map(|it| format!("{:#010x}", it)).unwrap_or("!".into()),
+        );
+
+        result
     }
 
     fn read_kuseg_32(&mut self, addr: u32, offset: u32) -> Result<u32, Error> {

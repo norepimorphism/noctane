@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(test)]
-
-extern crate test;
-
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 
@@ -39,9 +35,9 @@ impl Core {
 
 #[derive(Default)]
 pub struct Banks {
-    pub main_ram: Box<noctane_cpu::bus::MainRam>,
-    pub exp_1: Box<noctane_cpu::bus::Exp1>,
-    pub exp_2: Box<noctane_cpu::bus::Exp2>,
-    pub exp_3: Box<noctane_cpu::bus::Exp3>,
-    pub bios: Box<noctane_cpu::bus::Bios>,
+    pub main_ram: noctane_cpu::bus::MainRam,
+    pub exp_1: noctane_cpu::bus::Exp1,
+    pub exp_2: noctane_cpu::bus::Exp2,
+    pub exp_3: noctane_cpu::bus::Exp3,
+    pub bios: noctane_cpu::bus::Bios,
 }

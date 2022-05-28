@@ -1,17 +1,15 @@
-mod i_cache;
-
-use i_cache::InstrCache;
+mod i;
 
 impl Default for Cache {
     fn default() -> Self {
         Self {
-            i: InstrCache::default(),
+            i: i::Cache::default(),
             d: [0xff; 0xff],
         }
     }
 }
 
 pub struct Cache {
-    pub i: InstrCache,
+    pub i: i::Cache,
     pub d: [u32; 0xff],
 }
