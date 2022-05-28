@@ -2,7 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(box_syntax, exclusive_range_pattern, slice_as_chunks)]
+#![feature(
+    bigint_helper_methods,
+    box_syntax,
+    exclusive_range_pattern,
+    slice_as_chunks,
+    unchecked_math,
+)]
 
 pub mod bus;
 pub mod cache;
@@ -18,9 +24,21 @@ pub use instr::Instr;
 pub use mem::Memory;
 pub use mmu::Mmu;
 
-#[derive(Default)]
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            cache: Cache::default(),
+            exc: exc::Queue::new(),
+            pipeline: instr::Pipeline::default(),
+            reg: reg::File::default(),
+        }
+    }
+}
+
 pub struct State {
     pub cache: Cache,
+    /// The exception queue.
+    pub exc: exc::Queue,
     /// The instruction pipeline.
     pub pipeline: instr::Pipeline,
     /// The register file.
@@ -30,6 +48,7 @@ pub struct State {
 impl State {
     pub fn connect_bus<'s, 'b>(&'s mut self, bus: crate::Bus<'b>) -> Cpu<'s, 'b> {
         Cpu {
+            exc: &mut self.exc,
             pipeline: &mut self.pipeline,
             reg: &mut self.reg,
             mmu: Mmu::new(Memory::new(&mut self.cache, bus)),
@@ -38,6 +57,7 @@ impl State {
 }
 
 pub struct Cpu<'s, 'b> {
+    exc: &'s mut exc::Queue,
     pipeline: &'s mut instr::Pipeline,
     reg: &'s mut reg::File,
     mmu: Mmu<'s, 'b>,
@@ -83,6 +103,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Processes the current stage, and then advances to the next stage, of each queued
     /// instruction.
     pub fn advance_pipeline(&mut self, decode_instr: impl Fn(u32) -> Instr) {
-        self.pipeline.advance(&mut self.mmu, &mut self.reg, &decode_instr);
+        self.handle_exc();
+        self.pipeline.advance(&mut self.exc, &mut self.mmu, &mut self.reg, &decode_instr);
+    }
+
+    fn handle_exc(&mut self) {
+        if let Ok(e) = self.exc.pop() {
+            tracing::error!("Exception: {:?}", e);
+            *self.reg.pc_mut() = e.vector();
+        }
     }
 }

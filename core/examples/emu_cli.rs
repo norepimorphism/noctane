@@ -2,7 +2,7 @@
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::DEBUG)
         .with_ansi(true)
         .with_level(true)
         .without_time()
@@ -28,6 +28,7 @@ fn main() {
         let enc_instr = cpu.mmu_mut().read_virt_32(pc).unwrap();
         let enc_instr_bytes = enc_instr.to_le_bytes();
 
+        /*
         print!(
             "{:08x}   {}   {}",
             pc,
@@ -53,6 +54,7 @@ fn main() {
         } else {
             println!();
         }
+        */
 
         cpu.execute_next_instr();
     }

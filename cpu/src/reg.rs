@@ -7,7 +7,8 @@ pub struct File {
     hi: u32,
     lo: u32,
     /// General-purpose registers. Zero-indexed.
-    gprs: [u32; 31]
+    gprs: [u32; 31],
+    ctrl: ControlFile,
 }
 
 impl fmt::Display for File {
@@ -29,6 +30,7 @@ impl fmt::Display for File {
         writeln!(f, "r14:{:08x} r30:{:08x}", self.gprs[13], self.gprs[29])?;
         writeln!(f, "r15:{:08x} r31:{:08x}", self.gprs[14], self.gprs[30])?;
         writeln!(f, "hi: {:08x} lo: {:08x}", self.hi, self.lo)?;
+        // TODO: Write control registers.
 
         Ok(())
     }
@@ -72,4 +74,51 @@ impl File {
             self.gprs[index - 1] = value;
         }
     }
+
+    pub fn ctrl(&self) -> &ControlFile {
+        &self.ctrl
+    }
+
+    pub fn ctrl_mut(&mut self) -> &mut ControlFile {
+        &mut self.ctrl
+    }
+
+    pub fn cpr(&self, index: usize) -> Option<u32> {
+        match index {
+            ControlFile::BAD_VADDR_IDX => Some(self.ctrl.bad_vaddr),
+            ControlFile::EPC_IDX => Some(self.ctrl.epc),
+            ControlFile::CAUSE_IDX => Some(self.ctrl.cause),
+            ControlFile::STATUS_IDX => Some(self.ctrl.status),
+            ControlFile::PRID_IDX => Some(self.ctrl.prid),
+            _ => None,
+        }
+    }
+
+    pub fn cpr_mut(&mut self, index: usize) -> Option<&mut u32> {
+        match index {
+            ControlFile::BAD_VADDR_IDX => Some(&mut self.ctrl.bad_vaddr),
+            ControlFile::EPC_IDX => Some(&mut self.ctrl.epc),
+            ControlFile::CAUSE_IDX => Some(&mut self.ctrl.cause),
+            ControlFile::STATUS_IDX => Some(&mut self.ctrl.status),
+            ControlFile::PRID_IDX => Some(&mut self.ctrl.prid),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ControlFile {
+    pub bad_vaddr: u32,
+    pub epc: u32,
+    pub cause: u32,
+    pub status: u32,
+    pub prid: u32,
+}
+
+impl ControlFile {
+    const BAD_VADDR_IDX:    usize = 8;
+    const EPC_IDX:          usize = 14;
+    const CAUSE_IDX:        usize = 13;
+    const STATUS_IDX:       usize = 12;
+    const PRID_IDX:         usize = 15;
 }

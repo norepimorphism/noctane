@@ -36,7 +36,7 @@ macro_rules! def_read_write {
         ///
         /// This function will silently ignore the lowest bit if `addr` is unaligned.
         pub fn $read_16_name(&mut self, addr: u32) -> Result<u16, Error> {
-            let idx = (addr & 0b10) as usize;
+            let idx = ((addr & 0b10) >> 1) as usize;
             let chunk = self.$read_32_name(addr)?.to_be_bytes().as_chunks::<2>().0[idx];
 
             Ok(u16::from_be_bytes(chunk))
