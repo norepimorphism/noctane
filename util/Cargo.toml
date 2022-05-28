@@ -3,21 +3,9 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 [package]
-name = "noctane"
+name = "noctane-util"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
-[[bench]]
-name = "cpu"
-harness = false
-
 [dependencies]
-noctane-cpu = { path = "../cpu" }
-noctane-gpu = { path = "../gpu" }
-noctane-util = { path = "../util" }
-tracing = "0.1"
-tracing-subscriber = "0.3"
-
-[dev-dependencies]
-criterion = "0.3"

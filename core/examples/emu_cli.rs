@@ -28,33 +28,12 @@ fn main() {
         let enc_instr = cpu.mmu_mut().read_virt_32(pc).unwrap();
         let enc_instr_bytes = enc_instr.to_le_bytes();
 
-        /*
-        print!(
-            "{:08x}   {}   {}",
-            pc,
-            enc_instr_bytes
-                .iter()
-                .map(|byte| format!("{:02x}", byte))
-                .collect::<Vec<String>>()
-                .join(" "),
-                enc_instr_bytes
-                .iter()
-                .map(|byte| {
-                    if byte.is_ascii_graphic() {
-                        unsafe { char::from_u32_unchecked(u32::from(*byte)) }
-                    } else {
-                        '.'
-                    }
-                })
-                .map(|byte| format!("{}", byte))
-                .collect::<String>(),
-        );
+        noctane_util::dump_hex(&mut std::io::stdout(), pc, enc_instr.to_le_bytes());
         if let Some(instr) = noctane_cpu::Instr::decode(enc_instr) {
             println!("   {}", instr.asm());
         } else {
             println!();
         }
-        */
 
         cpu.execute_next_instr();
     }

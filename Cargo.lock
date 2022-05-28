@@ -1361,6 +1361,7 @@ dependencies = [
  "criterion",
  "noctane-cpu",
  "noctane-gpu",
+ "noctane-util",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1383,6 +1384,7 @@ dependencies = [
  "bit",
  "const_queue",
  "noctane-gpu",
+ "noctane-util",
  "tracing",
 ]
 
@@ -1417,6 +1419,10 @@ dependencies = [
  "wgpu",
  "winapi",
 ]
+
+[[package]]
+name = "noctane-util"
+version = "0.1.0"
 
 [[package]]
 name = "nom"

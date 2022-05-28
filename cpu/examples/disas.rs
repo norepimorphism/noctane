@@ -13,28 +13,7 @@ fn main() {
         .enumerate()
         .for_each(|(i, bytes)| {
             let enc_instr = u32::from_le_bytes(*bytes);
-
-            print!(
-                "{:08x}   {}   {}",
-                i * 4,
-                bytes
-                    .iter()
-                    .map(|byte| format!("{:02x}", byte))
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                bytes
-                    .iter()
-                    .map(|byte| {
-                        if byte.is_ascii_graphic() {
-                            unsafe { char::from_u32_unchecked(u32::from(*byte)) }
-                        } else {
-                            '.'
-                        }
-                    })
-                    .map(|byte| format!("{}", byte))
-                    .collect::<String>(),
-            );
-
+            noctane_util::dump_hex(&mut std::io::stdout(), i as u32, *bytes);
             if let Some(instr) = Instr::decode(enc_instr) {
                 println!("   {}", instr.asm())
             } else {

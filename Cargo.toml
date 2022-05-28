@@ -9,7 +9,8 @@ members = [
     "core",
     "cpu",
     "gpu",
-    "ui"
+    "ui",
+    "util"
 ]
 
 [profile.release]
