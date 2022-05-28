@@ -68,45 +68,21 @@ impl<'s, 'b> Cpu<'s, 'b> {
         &mut self.mmu
     }
 
-    pub fn execute_instr(&mut self, instr: Instr) {
-        self.advance_pipeline(|| instr)
-    }
-
     pub fn execute_next_instr(&mut self) {
-        let op = self.fetch_opcode();
-        self.execute_opcode(op);
+        self.advance_pipeline(|op| Instr::decode(op).unwrap());
     }
 
-    pub fn fetch_opcode(&mut self) -> u32 {
-        let pc = self.reg.pc();
-
-        // TODO: Handle exception.
-        let op = self.mmu.read_virt_32(pc).unwrap_or(0);
-
-        // Increment PC.
-        *self.reg.pc_mut() = pc.wrapping_add(4);
-
-        op
+    pub fn execute_instr(&mut self, instr: Instr) {
+        self.advance_pipeline(|_| instr)
     }
 
     pub fn execute_opcode(&mut self, op: u32) {
-        self.advance_pipeline(
-            || Instr::decode(op).unwrap_or_else(|| {
-                // Oops! Instruction decoding failed!
-                //
-                // A Reserved Instruction (RI) exception is made, and the first instruction in the
-                // exception handler is fetched.
-
-                // TODO
-                Instr::Sll(instr::r::Instr { rd: 0, rs: 0, rt: 0, shamt: 0, funct: 0 })
-            },
-        ));
+        self.advance_pipeline(|_| Instr::decode(op).unwrap());
     }
 
     /// Processes the current stage, and then advances to the next stage, of each queued
     /// instruction.
-    pub fn advance_pipeline(&mut self, fetch_instr: impl FnOnce() -> Instr) {
-        // tracing::debug!("{}", self.pipe);
-        self.pipeline.advance(&mut self.mmu, &mut self.reg, fetch_instr);
+    pub fn advance_pipeline(&mut self, decode_instr: impl Fn(u32) -> Instr) {
+        self.pipeline.advance(&mut self.mmu, &mut self.reg, &decode_instr);
     }
 }

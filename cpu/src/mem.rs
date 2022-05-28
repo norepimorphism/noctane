@@ -102,11 +102,11 @@ impl Memory<'_, '_> {
             |this, offset| this.read_kseg2_32(offset),
         );
 
-        tracing::debug!(
-            "mem[{:#010x}] -> {}",
-            addr,
-            result.as_ref().map(|it| format!("{:#010x}", it)).unwrap_or("!".into()),
-        );
+        // tracing::debug!(
+        //     "mem[{:#010x}] -> {}",
+        //     addr,
+        //     result.as_ref().map(|it| format!("{:#010x}", it)).unwrap_or("!".into()),
+        // );
 
         result
     }
