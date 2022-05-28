@@ -80,21 +80,7 @@ impl Pipeline {
         decode_instr: &impl Fn(u32) -> Instr,
     ) {
         let mut pc = reg.pc();
-
-        if let Some(instr) = self.rd.take() {
-            let mut state = State::read(instr, reg);
-
-            let mut target = None;
-            state.operate(pc, &mut target);
-            state.access_mmu(mmu);
-            state.write_back(reg);
-
-            if let Some(target) = target {
-                self.advance(mmu, reg, decode_instr);
-                self.advance(mmu, reg, decode_instr);
-                pc = target;
-            }
-        }
+        self.execute_queued_instr(mmu, reg, decode_instr, &mut pc);
 
         // TODO: Handle exception.
         let op = mmu.read_virt_32(pc).unwrap_or(0);
@@ -102,6 +88,29 @@ impl Pipeline {
         *reg.pc_mut() = pc.wrapping_add(4);
 
         self.rd = Some(decode_instr(op));
+    }
+
+    fn execute_queued_instr(
+        &mut self,
+        mmu: &mut Mmu,
+        reg: &mut reg::File,
+        decode_instr: &impl Fn(u32) -> Instr,
+        pc: &mut u32,
+    ) {
+        if let Some(instr) = self.rd.take() {
+            let mut state = State::read(instr, reg);
+
+            let mut target = None;
+            state.operate(*pc, &mut target);
+            state.access_mmu(mmu);
+            state.write_back(reg);
+
+            if let Some(target) = target {
+                self.advance(mmu, reg, decode_instr);
+                self.execute_queued_instr(mmu, reg, decode_instr, &mut 0);
+                *pc = target;
+            }
+        }
     }
 }
 
@@ -662,13 +671,14 @@ def_instr_and_op_kind!(
         fields: { ret_addr: u32 = 0 },
         operate: |_, opx: &mut opx::Jal, pc: u32, target: &mut Option<u32>| {
             let target_addr = calc_jump_target(pc, opx.target);
+            *target = Some(target_addr);
+            opx.ret_addr = pc;
+
             tracing::trace!(
                 "Entering function `sub_{:08X}` (ra={:#010x})",
                 target_addr,
                 opx.ret_addr,
             );
-            *target = Some(target_addr);
-            opx.ret_addr = pc;
         },
         write_back: |_, opx: &mut opx::Jal, reg: &mut reg::File| {
             reg.set_gpr(31, opx.ret_addr);
@@ -681,13 +691,14 @@ def_instr_and_op_kind!(
         fields: { ret_addr: u32 = 0 },
         operate: |_, opx: &mut opx::Jalr, pc: u32, target: &mut Option<u32>| {
             let target_addr = opx.rs.value();
+            *target = Some(target_addr);
+            opx.ret_addr = pc;
+
             tracing::trace!(
                 "Entering function `sub_{:08X}` (ra={:#010x})",
                 target_addr,
                 opx.ret_addr,
             );
-            *target = Some(target_addr);
-            opx.ret_addr = pc;
         },
         write_back: |_, opx: &mut opx::Jalr, reg: &mut reg::File| {
             reg.set_gpr(31, opx.ret_addr);
