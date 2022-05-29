@@ -241,10 +241,12 @@ macro_rules! def_instr_and_op_kind {
                     pc: u32,
                     target: &mut Option<u32>,
                 ) -> Result<(), exc::Kind> {
+                    #[inline(always)]
                     fn sign_extend_16(value: u16) -> u32 {
                         ((value as i16) as i32) as u32
                     }
 
+                    #[inline(always)]
                     fn sign_extend_8(value: u8) -> u32 {
                         ((value as i8) as i32) as u32
                     }
@@ -272,10 +274,12 @@ macro_rules! def_instr_and_op_kind {
                         base.wrapping_add(offset)
                     }
 
+                    #[inline(always)]
                     fn calc_jump_target(pc: u32, value: u32) -> u32 {
                         (pc & !((1 << 28) - 1)) | (value << 2)
                     }
 
+                    #[inline(always)]
                     fn log_enter_function(target_addr: u32, ret_addr: u32) {
                         tracing::trace!(
                             "Entering function `sub_{:08X}` (ra={:#010x})",

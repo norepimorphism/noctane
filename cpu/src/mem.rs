@@ -71,27 +71,40 @@ impl Memory<'_, '_> {
         write_16
         write_32
     }
+}
 
-    fn select_access_region_fn<T>(
-        &mut self,
-        addr: u32,
-        access_kuseg: impl FnOnce(&mut Self, u32) -> T,
-        access_kseg0: impl FnOnce(&mut Self, u32) -> T,
-        access_kseg1: impl FnOnce(&mut Self, u32) -> T,
-        access_kseg2: impl FnOnce(&mut Self, u32) -> T,
-    ) -> T {
-        const KUSEG_BASE: u32 = 0x0000_0000;
-        const KSEG0_BASE: u32 = 0x8000_0000;
-        const KSEG1_BASE: u32 = 0xa000_0000;
-        const KSEG2_BASE: u32 = 0xc000_0000;
-
-        match addr {
-            KUSEG_BASE..KSEG0_BASE => access_kuseg(self, addr - KUSEG_BASE),
-            KSEG0_BASE..KSEG1_BASE => access_kseg0(self, addr - KSEG0_BASE),
-            KSEG1_BASE..KSEG2_BASE => access_kseg1(self, addr - KSEG1_BASE),
-            KSEG2_BASE.. => access_kseg2(self, addr - KSEG2_BASE),
+macro_rules! def_select_access_region_fn {
+    ($($access_region_fn_name:ident @ { $($hi:literal),* $(,)? }),* $(,)?) => {
+        fn select_access_region_fn<T>(
+            &mut self,
+            addr: u32,
+            $(
+                $access_region_fn_name: impl FnOnce(&mut Self, u32) -> T,
+            )*
+        ) -> T {
+            match addr >> 29 {
+                $(
+                    $(
+                        $hi => $access_region_fn_name(self, addr - ($hi << 29)),
+                    )*
+                )*
+                _ => unreachable!(),
+            }
         }
-    }
+    };
+}
+
+impl Memory<'_, '_> {
+    def_select_access_region_fn!(
+        // 0x0000_0000
+        access_kuseg @ { 0, 1, 2, 3 },
+        // 0x8000_0000
+        access_kseg0 @ { 4 },
+        // 0xa000_0000
+        access_kseg1 @ { 5 },
+        // 0xc000_0000
+        access_kseg2 @ { 6, 7 },
+    );
 
     pub fn read_32(&mut self, addr: u32) -> Result<u32, Error> {
         let result = self.select_access_region_fn(

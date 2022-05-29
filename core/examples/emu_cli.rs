@@ -26,7 +26,6 @@ fn main() {
     loop {
         let pc = cpu.reg().pc();
         let enc_instr = cpu.mmu_mut().read_virt_32(pc).unwrap();
-        let enc_instr_bytes = enc_instr.to_le_bytes();
 
         noctane_util::dump_hex(&mut std::io::stdout(), pc, enc_instr.to_le_bytes());
         if let Some(instr) = noctane_cpu::Instr::decode(enc_instr) {
