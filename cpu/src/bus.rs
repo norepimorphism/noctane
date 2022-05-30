@@ -1,3 +1,7 @@
+//! The CPU memory bus.
+//!
+//! This is the stage at which memory accesses are delegated to the appropriate memory bank.
+
 pub mod io;
 
 pub use io::Io;

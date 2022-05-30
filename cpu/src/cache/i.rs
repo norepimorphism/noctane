@@ -54,20 +54,14 @@ impl Cache {
     pub fn read_32<E>(
         &mut self,
         addr: u32,
-        read_on_miss: impl FnOnce() -> Result<u32, E>,
+        on_miss: impl FnOnce() -> Result<u32, E>,
     ) -> Result<u32, E> {
-        self._read_32(&Address::from_phys(addr), read_on_miss)
-    }
+        let addr = &Address::from_phys(addr);
 
-    fn _read_32<E>(
-        &mut self,
-        addr: &Address,
-        read_on_miss: impl FnOnce() -> Result<u32, E>,
-    ) -> Result<u32, E> {
         match self.access(addr) {
             AccessResult::Hit(value) => Ok(value),
             AccessResult::Miss(old) => {
-                let value = read_on_miss()?;
+                let value = on_miss()?;
                 // Update the cache.
                 *old = value;
 
@@ -91,21 +85,14 @@ impl Cache {
         &mut self,
         addr: u32,
         value: u32,
-        write_on_miss: impl FnOnce() -> Result<(), E>,
+        on_miss: impl FnOnce()-> Result<(), E>,
     ) -> Result<(), E> {
-        self._write_32(&Address::from_phys(addr), value, write_on_miss)
-    }
+        let addr = &Address::from_phys(addr);
 
-    fn _write_32<E>(
-        &mut self,
-        addr: &Address,
-        value: u32,
-        write_on_miss: impl FnOnce()-> Result<(), E>,
-    ) -> Result<(), E> {
         tracing::trace!("Updating cache ({:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx] = value;
 
-        write_on_miss()
+        on_miss()
     }
 }
 

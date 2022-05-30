@@ -790,7 +790,7 @@ def_instr_and_op_kind!(
         name: Lwc0,
         type: i,
         asm: ["lwc0" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Lwc1,
@@ -823,13 +823,13 @@ def_instr_and_op_kind!(
         name: Lwl,
         type: i,
         asm: ["lwl" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Lwr,
         type: i,
         asm: ["lwr" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Mfhi,
@@ -1096,7 +1096,7 @@ def_instr_and_op_kind!(
         name: Swc0,
         type: i,
         asm: ["swc0" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Swc1,
@@ -1129,13 +1129,13 @@ def_instr_and_op_kind!(
         name: Swl,
         type: i,
         asm: ["swl" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Swr,
         type: i,
         asm: ["swr" %(rt), #(s)],
-        fn: |ctx: Context| todo!(),
+        fn: |_: Context| todo!(),
     },
     {
         name: Syscall,

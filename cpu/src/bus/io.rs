@@ -10,6 +10,7 @@ pub enum Error {
     UnmappedAddress(usize),
 }
 
+/// External components accessible to the CPU via I/O registers.
 pub struct Io<'a> {
     pub gpu: &'a mut Gpu,
 }

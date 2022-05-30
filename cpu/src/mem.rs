@@ -1,3 +1,9 @@
+//! Cached CPU memory.
+//!
+//! This is the stage at which 16-bit addresses are stripped of their bottom bit, 32-bit addresses
+//! are stripped of their bottom two bits, and accesses are delegated to either the CPU cache (see
+//! [`crate::cache`]) or memory bus (see [`bus`]).
+
 use crate::{Cache, bus::{self, Bus}};
 
 #[derive(Debug)]
@@ -16,170 +22,175 @@ pub struct Memory<'c, 'b> {
     bus: Bus<'b>,
 }
 
-macro_rules! def_read_write {
-    (
-        $read_8_name:ident
-        $read_16_name:ident
-        $read_32_name:ident
-        $write_8_name:ident
-        $write_16_name:ident
-        $write_32_name:ident
-    ) => {
-        /// Reads the 8-bit value at the given physical address.
-        pub fn $read_8_name(&mut self, addr: u32) -> Result<u8, Error> {
-            let idx = (addr & 0b11) as usize;
-
-            self.$read_32_name(addr).map(|it| it.to_be_bytes()[idx])
-        }
-
-        /// Reads the 16-bit value at the given physical address.
-        ///
-        /// This function will silently ignore the lowest bit if `addr` is unaligned.
-        pub fn $read_16_name(&mut self, addr: u32) -> Result<u16, Error> {
-            let idx = ((addr & 0b10) >> 1) as usize;
-            let chunk = self.$read_32_name(addr)?.to_be_bytes().as_chunks::<2>().0[idx];
-
-            Ok(u16::from_be_bytes(chunk))
-        }
-
-        /// Writes an 8-bit value to the given physical address.
-        pub fn $write_8_name(&mut self, addr: u32, value: u8) -> Result<(), Error> {
-            let mut bytes = self.$read_32_name(addr)?.to_be_bytes();
-            let idx = (addr & 0b11) as usize;
-            bytes[idx] = value;
-            self.$write_32_name(addr, u32::from_be_bytes(bytes))?;
-
-            Ok(())
-        }
-
-        /// Writes a 16-bit value to the given physical address.
-        ///
-        /// This function will silently ignore the lowest bit if `addr` is unaligned.
-        pub fn $write_16_name(&mut self, addr: u32, value: u16) -> Result<(), Error> {
-            // TODO
-            Ok(())
-        }
-    };
-}
-
-impl Memory<'_, '_> {
-    def_read_write! {
-        read_8
-        read_16
-        read_32
-        write_8
-        write_16
-        write_32
-    }
-}
-
-macro_rules! def_select_access_region_fn {
-    (
-        $($access_region_fn_name:ident @ { $start_hi:literal $(, $($hi:literal),*)? $(,)? }),* $(,)?
-    ) => {
-        fn select_access_region_fn<T>(
+macro_rules! def_access {
+    ($fn_name:ident $width:tt) => {
+        fn $fn_name<T>(
             &mut self,
             addr: u32,
-            $(
-                $access_region_fn_name: impl FnOnce(&mut Self, usize) -> T,
-            )*
+            access_kseg0: impl FnOnce(&mut Self, usize) -> T,
+            access_kseg1: impl FnOnce(&mut Self, usize) -> T,
+            access_kseg2: impl FnOnce(&mut Self, usize) -> T,
         ) -> T {
             #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
             compile_error!("The pointer width of the target system is too small. At least a 32-bit pointer width is necessary to index certain arrays.");
 
+            // Now that we know we're running on at least a 32-bit system, we can cast to `usize`.
+            // This is possible as well as important because certain memory banks have a size
+            // greater than a `u8` or `u16` can possibly index, so it's best to issue a compile
+            // error now such that, from now on, we can assume `usize` addresses are capable of
+            // indexing all accessible memory.
             let addr = addr as usize;
 
+            let addr = strip_addr!($width addr);
+
+            let make_offset = |shift_amt: usize| {
+                addr - (shift_amt << 29)
+            };
+
             match addr >> 29 {
-                $(
-                    $start_hi => $access_region_fn_name(self, addr - ($start_hi << 29)),
-                    $(
-                        $($hi => $access_region_fn_name(self, addr - ($start_hi << 29)),)*
-                    )?
-                )*
+                // 0x0000_0000
+                0 => access_kseg0(self, make_offset(0)),
+                1 => access_kseg0(self, make_offset(0)),
+                2 => access_kseg0(self, make_offset(0)),
+                3 => access_kseg0(self, make_offset(0)),
+                // 0x8000_0000
+                4 => access_kseg0(self, make_offset(4)),
+                // 0xa000_0000
+                5 => access_kseg1(self, make_offset(5)),
+                // 0xc000_0000
+                6 => access_kseg2(self, make_offset(6)),
+                7 => access_kseg2(self, make_offset(6)),
                 _ => unreachable!(),
             }
         }
     };
 }
 
+macro_rules! strip_addr {
+    (8 $addr:expr) => { $addr };
+    (16 $addr:expr) => { $addr & !0b1 };
+    (32 $addr:expr) => { $addr & !0b11 };
+}
+
 impl Memory<'_, '_> {
-    def_select_access_region_fn!(
-        // 0x0000_0000
-        kuseg @ { 0, 1, 2, 3 },
-        // 0x8000_0000
-        kseg0 @ { 4 },
-        // 0xa000_0000
-        kseg1 @ { 5 },
-        // 0xc000_0000
-        kseg2 @ { 6, 7 },
-    );
+    def_access!(access_8 8);
+    def_access!(access_16 16);
+    def_access!(access_32 32);
 
-    pub fn read_32(&mut self, addr: u32) -> Result<u32, Error> {
-        let result = self.select_access_region_fn(
+    pub fn read_8(&mut self, addr: u32) -> Result<u8, Error> {
+        self.access_8(
             addr,
-            |this, offset| this.read_kuseg_32(addr, offset),
-            |this, offset| this.read_kseg0_32(addr, offset),
-            |this, offset| this.read_kseg1_32(offset),
-            |this, offset| this.read_kseg2_32(offset),
-        );
+            |this, offset| {
+                this.cache.i.read_32(
+                    addr,
+                    || this.bus.read_32(offset).map_err(Error::Bus),
+                )
+                .map(|it| it.to_be_bytes()[offset & 0b11])
+            },
+            |this, offset| {
+                this.bus.read_8(offset).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(0)
+            },
+        )
+    }
 
-        // tracing::debug!(
-        //     "mem[{:#010x}] -> {}",
-        //     addr,
-        //     result.as_ref().map(|it| format!("{:#010x}", it)).unwrap_or("!".into()),
-        // );
+    pub fn read_16(&mut self, addr: u32) -> Result<u16, Error> {
+        let result = self.access_16(
+            addr,
+            |this, offset| {
+                this.cache.i.read_32(
+                    addr,
+                    || this.bus.read_32(offset).map_err(Error::Bus),
+                )
+                .map(|it| {
+                    u16::from_be_bytes(it.to_be_bytes().as_chunks::<2>().0[(offset >> 1) & 0b1])
+                })
+            },
+            |this, offset| {
+                this.bus.read_16(offset).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(0)
+            },
+        );
 
         result
     }
 
-    fn read_kuseg_32(&mut self, addr: u32, offset: usize) -> Result<u32, Error> {
-        self.read_kseg0_32(addr, offset)
+    pub fn read_32(&mut self, addr: u32) -> Result<u32, Error> {
+        let result = self.access_32(
+            addr,
+            |this, offset| {
+                this.cache.i.read_32(
+                    addr,
+                    || this.bus.read_32(offset).map_err(Error::Bus),
+                )
+            },
+            |this, offset| {
+                this.bus.read_32(offset).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(0)
+            },
+        );
+
+        result
     }
 
-    fn read_kseg0_32(&mut self, addr: u32, offset: usize) -> Result<u32, Error> {
-        self.cache.i.read_32(
+    pub fn write_8(&mut self, addr: u32, value: u8) -> Result<(), Error> {
+        self.access_8(
             addr,
-            || self.bus.read_32(offset).map_err(Error::Bus),
+            |this, offset| {
+                todo!()
+            },
+            |this, offset| {
+                this.bus.write_8(offset, value).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(())
+            },
         )
     }
 
-    fn read_kseg1_32(&mut self, offset: usize) -> Result<u32, Error> {
-        self.bus.read_32(offset).map_err(Error::Bus)
-    }
-
-    fn read_kseg2_32(&mut self, offset: usize) -> Result<u32, Error> {
-        // TODO
-        Ok(0)
+    pub fn write_16(&mut self, addr: u32, value: u16) -> Result<(), Error> {
+        self.access_16(
+            addr,
+            |this, offset| {
+                todo!()
+            },
+            |this, offset| {
+                this.bus.write_16(offset, value).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(())
+            },
+        )
     }
 
     pub fn write_32(&mut self, addr: u32, value: u32) -> Result<(), Error> {
-        self.select_access_region_fn(
+        self.access_32(
             addr,
-            |this, offset| this.write_kuseg_32(addr, offset, value),
-            |this, offset| this.write_kseg0_32(addr, offset, value),
-            |this, offset| this.write_kseg1_32(offset, value),
-            |this, offset| this.write_kseg2_32(offset, value),
+            |this, offset| {
+                this.cache.i.write_32(
+                    addr,
+                    value,
+                    || this.bus.write_32(offset, value).map_err(Error::Bus),
+                )
+            },
+            |this, offset| {
+                this.bus.write_32(offset, value).map_err(Error::Bus)
+            },
+            |_, _| {
+                // TODO
+                Ok(())
+            },
         )
-    }
-
-    fn write_kuseg_32(&mut self, addr: u32, offset: usize, value: u32) -> Result<(), Error> {
-        self.write_kseg0_32(addr, offset, value)
-    }
-
-    fn write_kseg0_32(&mut self, addr: u32, offset: usize, value: u32) -> Result<(), Error> {
-        self.cache.i.write_32(
-            addr,
-            value,
-            || self.bus.write_32(offset, value).map_err(Error::Bus),
-        )
-    }
-
-    fn write_kseg1_32(&mut self, offset: usize, value: u32) -> Result<(), Error> {
-        self.bus.write_32(offset, value).map_err(Error::Bus)
-    }
-
-    fn write_kseg2_32(&mut self, offset: usize, value: u32) -> Result<(), Error> {
-        // TODO
-        Ok(())
     }
 }

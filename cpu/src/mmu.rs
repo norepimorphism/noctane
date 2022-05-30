@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! The memory management unit (MMU).
+//!
+//! This is the stage at which virtual addresses are translated into physical addresses for further
+//! processing by the [`mem`] module.
+
 use std::ops::{Deref, DerefMut};
 
 use crate::mem::{self, Memory};
@@ -17,6 +22,7 @@ impl<'c, 'b> Mmu<'c, 'b> {
     }
 }
 
+/// The memory management unit (MMU).
 pub struct Mmu<'c, 'b>(Memory<'c, 'b>);
 
 macro_rules! def_read {
