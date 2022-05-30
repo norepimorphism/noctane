@@ -23,6 +23,7 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
 
     for lut_strukt in lut_strukts.0 {
         let lut_name = lut_strukt.name;
+        let lut_base_addr = lut_strukt.base_addr;
         let mut lut_entries = TokenStream2::new();
 
         for reg_strukt in lut_strukt.regs {
@@ -37,7 +38,7 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
 
                     for byte_idx in 0..reg_len {
                         lut_entries.extend(quote! {
-                            LutEntry { idx: #reg_index, start_offset: #byte_idx },
+                            super::LutEntry { idx: #reg_index, start_offset: #byte_idx },
                         });
                     }
 
@@ -70,7 +71,7 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
 
                     for byte_idx in 0..len {
                         lut_entries.extend(quote! {
-                            LutEntry { idx: #index, start_offset: #byte_idx },
+                            super::LutEntry { idx: #index, start_offset: #byte_idx },
                         });
                     }
                 }
@@ -79,7 +80,11 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
         }
 
         luts.extend(quote! {
-            static #lut_name: &[LutEntry] = &[#lut_entries];
+            mod #lut_name {
+                pub(super) const BASE_ADDR: usize = #lut_base_addr;
+
+                pub(super) static LUT: &[super::LutEntry] = &[#lut_entries];
+            }
         });
     }
 
@@ -129,6 +134,9 @@ mod cpu {
                     let name_field = fields.nth(0).ok_or_else(|| {
                         input.error("expected 'name' field")
                     })?;
+                    let base_field = fields.nth(0).ok_or_else(|| {
+                        input.error("expected 'base_addr' field")
+                    })?;
                     let regs_field = fields.nth(0).ok_or_else(|| {
                         input.error("expected 'regs' field")
                     })?;
@@ -137,6 +145,7 @@ mod cpu {
                     }
 
                     let name = name_field.expr;
+                    let base_addr = base_field.expr;
 
                     let Expr::Array(regs_array) = regs_field.expr else {
                         return Err(input.error("'regs' should be an array"));
@@ -203,12 +212,13 @@ mod cpu {
                         })
                         .collect::<syn::Result<Vec<RegStruct>>>()?;
 
-                    Ok(Self { name, regs })
+                    Ok(Self { name, base_addr, regs })
                 }
             }
 
             pub struct LutStruct {
                 pub name: Expr,
+                pub base_addr: Expr,
                 pub regs: Vec<RegStruct>,
             }
 

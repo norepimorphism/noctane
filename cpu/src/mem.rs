@@ -81,9 +81,14 @@ macro_rules! def_select_access_region_fn {
             &mut self,
             addr: u32,
             $(
-                $access_region_fn_name: impl FnOnce(&mut Self, u32) -> T,
+                $access_region_fn_name: impl FnOnce(&mut Self, usize) -> T,
             )*
         ) -> T {
+            #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
+            compile_error!("The pointer width of the target system is too small. At least a 32-bit pointer width is necessary to index certain arrays.");
+
+            let addr = addr as usize;
+
             match addr >> 29 {
                 $(
                     $start_hi => $access_region_fn_name(self, addr - ($start_hi << 29)),
@@ -127,22 +132,22 @@ impl Memory<'_, '_> {
         result
     }
 
-    fn read_kuseg_32(&mut self, addr: u32, offset: u32) -> Result<u32, Error> {
+    fn read_kuseg_32(&mut self, addr: u32, offset: usize) -> Result<u32, Error> {
         self.read_kseg0_32(addr, offset)
     }
 
-    fn read_kseg0_32(&mut self, addr: u32, offset: u32) -> Result<u32, Error> {
+    fn read_kseg0_32(&mut self, addr: u32, offset: usize) -> Result<u32, Error> {
         self.cache.i.read_32(
             addr,
             || self.bus.read_32(offset).map_err(Error::Bus),
         )
     }
 
-    fn read_kseg1_32(&mut self, offset: u32) -> Result<u32, Error> {
+    fn read_kseg1_32(&mut self, offset: usize) -> Result<u32, Error> {
         self.bus.read_32(offset).map_err(Error::Bus)
     }
 
-    fn read_kseg2_32(&mut self, offset: u32) -> Result<u32, Error> {
+    fn read_kseg2_32(&mut self, offset: usize) -> Result<u32, Error> {
         // TODO
         Ok(0)
     }
@@ -157,11 +162,11 @@ impl Memory<'_, '_> {
         )
     }
 
-    fn write_kuseg_32(&mut self, addr: u32, offset: u32, value: u32) -> Result<(), Error> {
+    fn write_kuseg_32(&mut self, addr: u32, offset: usize, value: u32) -> Result<(), Error> {
         self.write_kseg0_32(addr, offset, value)
     }
 
-    fn write_kseg0_32(&mut self, addr: u32, offset: u32, value: u32) -> Result<(), Error> {
+    fn write_kseg0_32(&mut self, addr: u32, offset: usize, value: u32) -> Result<(), Error> {
         self.cache.i.write_32(
             addr,
             value,
@@ -169,11 +174,11 @@ impl Memory<'_, '_> {
         )
     }
 
-    fn write_kseg1_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
+    fn write_kseg1_32(&mut self, offset: usize, value: u32) -> Result<(), Error> {
         self.bus.write_32(offset, value).map_err(Error::Bus)
     }
 
-    fn write_kseg2_32(&mut self, offset: u32, value: u32) -> Result<(), Error> {
+    fn write_kseg2_32(&mut self, offset: usize, value: u32) -> Result<(), Error> {
         // TODO
         Ok(())
     }

@@ -1,85 +1,59 @@
 use noctane_gpu::Gpu;
 use noctane_proc_macro::gen_cpu_bus_io;
 
+pub enum Error {
+    UnmappedAddress(usize),
+}
+
 pub struct Io<'a> {
     pub gpu: &'a mut Gpu,
 }
 
-// impl Io<'_> {
-//     fn select_access_lut_fn<T>(
-//         &mut self,
-//         addr: usize,
-//         access_mem_ctrl_1: impl FnOnce(&mut Self, usize) -> T,
-//         access_perif_io_ports: impl FnOnce(&mut Self, usize) -> T,
-//         access_mem_ctrl_2: impl FnOnce(&mut Self, usize) -> T,
-//         access_int_ctrl: impl FnOnce(&mut Self, usize) -> T,
-//         access_dma: impl FnOnce(&mut Self, usize) -> T,
-//         access_timers: impl FnOnce(&mut Self, usize) -> T,
-//         access_cdrom: impl FnOnce(&mut Self, usize) -> T,
-//     ) -> Result<T, Error> {
-//         const IO_BASE_IDX:  usize = make_index(0x1f80_1000);
-//         const IO_END_IDX:   usize = IO_BASE_IDX + <Bus>::IO_LEN;
+impl Io<'_> {
+    fn access<T>(
+        &mut self,
+        addr: usize,
+        f: impl FnOnce(&mut Self, &Register, usize) -> T,
+    ) -> Result<T, Error> {
+        let lut_entry = match addr {
+            mem_ctrl_1::BASE_ADDR..perif_ports::BASE_ADDR => {
+                Ok(&mem_ctrl_1::LUT[addr - mem_ctrl_1::BASE_ADDR])
+            }
+            _ => Err(Error::UnmappedAddress(addr)),
+        }?;
 
-//         let idx = make_index(addr as usize);
-
-//         match idx {
-//             MainRam::BASE_IDX..MainRam::END_IDX => {
-//                 Ok(access_main_ram(self, idx - MainRam::BASE_IDX))
-//             }
-//             Exp1::BASE_IDX..Exp1::END_IDX => {
-//                 Ok(access_exp_1(self, idx - Exp1::BASE_IDX))
-//             }
-//             IO_BASE_IDX..IO_END_IDX => {
-//                 Ok(access_io(self, idx - IO_BASE_IDX))
-//             }
-//             Exp2::BASE_IDX..Exp2::END_IDX => {
-//                 Ok(access_exp_2(self, idx - Exp2::BASE_IDX))
-//             }
-//             Exp3::BASE_IDX..Exp3::END_IDX => {
-//                 Ok(access_exp_3(self, idx - Exp3::BASE_IDX))
-//             }
-//             Bios::BASE_IDX..Bios::END_IDX => {
-//                 Ok(access_bios(self, idx - Bios::BASE_IDX))
-//             }
-//             _ => Err(Error::UnmappedAddress(addr)),
-//         }
-//     }
-// }
+        Ok(f(self, &REGISTERS[lut_entry.idx], lut_entry.start_offset))
+    }
+}
 
 macro_rules! def_read_with_offset {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&self, offset: usize) -> $ty {
-            let reg = &REGISTERS[LUT[offset].idx];
-
-            (reg.$fn_name)(reg, self, offset)
+        pub fn $fn_name(&mut self, addr: usize) -> Result<$ty, Error> {
+            self.access(addr, |this, reg, offset| (reg.$fn_name)(reg, this, offset))
         }
     };
 }
 
 macro_rules! def_read_without_offset {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&self, offset: usize) -> $ty {
-            let reg = &REGISTERS[LUT[offset].idx];
-
-            (reg.$fn_name)(reg, self)
+        pub fn $fn_name(&mut self, addr: usize) -> Result<$ty, Error> {
+            self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this))
         }
     };
 }
 
 macro_rules! def_write_with_offset {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, offset: usize, value: $ty) {
-            let reg = &REGISTERS[LUT[offset].idx];
-            (reg.$fn_name)(reg, self, offset, value);
+        pub fn $fn_name(&mut self, addr: usize, value: $ty) -> Result<(), Error> {
+            self.access(addr, |this, reg, offset| (reg.$fn_name)(reg, this, offset, value))
         }
     };
 }
 
 macro_rules! def_write_without_offset {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, offset: usize, value: $ty) {
-            let reg = &REGISTERS[LUT[offset].idx];
-            (reg.$fn_name)(reg, self, value);
+        pub fn $fn_name(&mut self, addr: usize, value: $ty) -> Result<(), Error> {
+            self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this, value))
         }
     };
 }
@@ -110,7 +84,8 @@ struct LutEntry {
 gen_cpu_bus_io!(
     // Memory Control 1.
     Lut {
-        name: MEM_CTRL_1,
+        name: mem_ctrl_1,
+        base_addr: 0x1000,
         regs: [
             Register {
                 name: EXP_1_BASE_ADDR,
@@ -151,12 +126,13 @@ gen_cpu_bus_io!(
                 name: COMMON_DELAY,
                 read_32: |this, io| 0,
                 write_32: |this, io, value| {},
-            }
-        ]
+            },
+        ],
     },
     // Peripheral I/O Ports.
     Lut {
-        name: PERIF_IO_PORTS,
+        name: perif_ports,
+        base_addr: 0x1040,
         regs: [
             Register {
                 name: JOY_DATA,
@@ -212,12 +188,13 @@ gen_cpu_bus_io!(
                 name: SIO_BAUD,
                 read_32: |this, io| 0,
                 write_32: |this, io, value| {},
-            }
-        ]
+            },
+        ],
     },
     // Memory Control 2.
     Lut {
-        name: MEM_CTRL_2,
+        name: mem_ctrl_2,
+        base_addr: 0x1060,
         regs: [
             Register {
                 name: RAM_SIZE,
@@ -228,7 +205,8 @@ gen_cpu_bus_io!(
     },
     // Interrupt Control.
     Lut {
-        name: INT_CTRL,
+        name: int_ctrl,
+        base_addr: 0x1070,
         regs: [
             Register {
                 name: STAT,
@@ -239,12 +217,13 @@ gen_cpu_bus_io!(
                 name: MASK,
                 read_32: |this, io| 0,
                 write_32: |this, io, value| {},
-            }
-        ]
+            },
+        ],
     },
     // DMA.
     Lut {
-        name: DMA,
+        name: dma,
+        base_addr: 0x1080,
         regs: [
             Register {
                 name: MDECin,
@@ -290,12 +269,13 @@ gen_cpu_bus_io!(
                 name: DICR,
                 read_32: |this, io| 0,
                 write_32: |this, io, value| {},
-            }
-        ]
+            },
+        ],
     },
     // Timers (Root Counters).
     Lut {
-        name: TIMERS,
+        name: timers,
+        base_addr: 0x1100,
         regs: [
             Register {
                 name: DOTCLOCK,
@@ -311,94 +291,15 @@ gen_cpu_bus_io!(
                 name: SYS_CLOCK,
                 read_32: |this, io| 0,
                 write_32: |this, io, value| {},
-            }
-        ]
+            },
+        ],
     },
     // CD-ROM.
     Lut {
-        name: CDROM,
-        regs: [
-            Register {
-                name: IDX,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: RESPONSE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: DATA,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: INT_ENABLE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: INT_FLAG,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Mirror { name: INT_ENABLE },
-            Mirror { name: INT_FLAG },
-            Register {
-                name: CMD,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: PARAM,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: REQUEST,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: UNK_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Mirror { name: INT_ENABLE },
-            Mirror { name: INT_FLAG },
-            Register {
-                name: UNK_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: VOL_LL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: VOL_LR,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: VOL_RR,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: VOL_RL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            },
-            Register {
-                name: VOL_APPLY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
-            }
-        ]
-    }
+        name: cdrom,
+        base_addr: 0x1800,
+        regs: [],
+    },
     // GPU.
     // MDEC.
     // SPU Voice.
