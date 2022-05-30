@@ -3,17 +3,15 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 [package]
-name = "noctane-cpu"
+name = "noctane-proc-macro"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
-[dependencies]
-bit = "0.1"
-const_queue = "0.1"
-noctane-gpu = { path = "../gpu" }
-noctane-util = { path = "../util" }
-noctane-proc-macro = { path = "../proc-macro" }
-tracing = "0.1"
+[lib]
+proc-macro = true
 
-[dev-dependencies]
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "1.0"

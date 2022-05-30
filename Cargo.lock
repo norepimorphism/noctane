@@ -1384,6 +1384,7 @@ dependencies = [
  "bit",
  "const_queue",
  "noctane-gpu",
+ "noctane-proc-macro",
  "noctane-util",
  "tracing",
 ]
@@ -1393,6 +1394,15 @@ name = "noctane-gpu"
 version = "0.1.0"
 dependencies = [
  "bit",
+]
+
+[[package]]
+name = "noctane-proc-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

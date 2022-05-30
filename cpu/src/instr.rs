@@ -11,6 +11,8 @@ pub use asm::Asm;
 use crate::{Mmu, exc, reg};
 
 pub mod i {
+    use super::{opn::Gpr, reg};
+
     /// An I-type instruction.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
@@ -18,23 +20,75 @@ pub mod i {
         pub rt: u8,
         pub imm: u16,
     }
+
+    impl State {
+        pub fn read(reg: &reg::File, instr: Instr) -> Self {
+            Self {
+                rs: Gpr::read(reg, instr.rs.into()),
+                rt: Gpr::read(reg, instr.rt.into()),
+                imm: instr.imm,
+            }
+        }
+    }
+
+    pub struct State {
+        pub rs: Gpr,
+        pub rt: Gpr,
+        pub imm: u16,
+    }
 }
 
 pub mod j {
+    use super::reg;
+
     /// A J-type instruction.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
         pub target: u32,
     }
+
+    impl State {
+        pub fn read(_: &reg::File, instr: Instr) -> Self {
+            Self {
+                target: instr.target,
+            }
+        }
+    }
+
+    pub struct State {
+        pub target: u32,
+    }
 }
 
 pub mod r {
+    use super::{opn::Gpr, reg};
+
     /// An R-type instruction.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
         pub rs: u8,
         pub rt: u8,
         pub rd: u8,
+        pub shamt: u8,
+        pub funct: u8,
+    }
+
+    impl State {
+        pub fn read(reg: &reg::File, instr: Instr) -> Self {
+            Self {
+                rs: Gpr::read(reg, instr.rs.into()),
+                rt: Gpr::read(reg, instr.rt.into()),
+                rd: Gpr::read(reg, instr.rd.into()),
+                shamt: instr.shamt,
+                funct: instr.funct,
+            }
+        }
+    }
+
+    pub struct State {
+        pub rs: Gpr,
+        pub rt: Gpr,
+        pub rd: Gpr,
         pub shamt: u8,
         pub funct: u8,
     }
@@ -194,7 +248,7 @@ macro_rules! def_instr_and_op_kind {
 
             use std::fmt;
 
-            use super::{Instr, Mmu, exc, reg, opn::Gpr};
+            use super::{Instr, Mmu, exc, reg};
 
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
@@ -208,7 +262,7 @@ macro_rules! def_instr_and_op_kind {
                     match instr {
                         $(
                             Instr::$variant_name(it) => {
-                                Self::$variant_name($variant_name::read(reg, it))
+                                Self::$variant_name(super::$ty::State::read(reg, it))
                             }
                         )*
                     }
@@ -217,7 +271,7 @@ macro_rules! def_instr_and_op_kind {
 
             pub enum State {
                 $(
-                    $variant_name($variant_name),
+                    $variant_name(super::$ty::State),
                 )*
             }
 
@@ -293,7 +347,7 @@ macro_rules! def_instr_and_op_kind {
                             #[allow(dead_code)]
                             State::$variant_name(ref mut opx) => {
                                 struct Context<'a, 'c, 'b> {
-                                    opx: &'a mut $variant_name,
+                                    opx: &'a mut super::$ty::State,
                                     reg: &'a mut reg::File,
                                     mmu: &'a mut Mmu<'c, 'b>,
                                     pc: u32,
@@ -306,10 +360,6 @@ macro_rules! def_instr_and_op_kind {
                     }
                 }
             }
-
-            $(
-                gen_opx_state!($ty, $variant_name);
-            )*
         }
 
         pub mod opn {
@@ -337,60 +387,6 @@ macro_rules! def_instr_and_op_kind {
                 pub gpr_value: u32,
                 pub cpr_value: Option<u32>,
             }
-        }
-    };
-}
-
-macro_rules! gen_opx_state {
-    (i, $variant_name:ident) => {
-        impl $variant_name {
-            pub fn read(reg: &reg::File, instr: super::i::Instr) -> Self {
-                Self {
-                    rs: Gpr::read(reg, instr.rs.into()),
-                    rt: Gpr::read(reg, instr.rt.into()),
-                    imm: instr.imm,
-                }
-            }
-        }
-
-        pub struct $variant_name {
-            pub rs: Gpr,
-            pub rt: Gpr,
-            pub imm: u16,
-        }
-    };
-    (j, $variant_name:ident) => {
-        impl $variant_name {
-            pub fn read(_: &reg::File, instr: super::j::Instr) -> Self {
-                Self {
-                    target: instr.target,
-                }
-            }
-        }
-
-        pub struct $variant_name {
-            pub target: u32,
-        }
-    };
-    (r, $variant_name:ident) => {
-        impl $variant_name {
-            pub fn read(reg: &reg::File, instr: super::r::Instr) -> Self {
-                Self {
-                    rs: Gpr::read(reg, instr.rs.into()),
-                    rt: Gpr::read(reg, instr.rt.into()),
-                    rd: Gpr::read(reg, instr.rd.into()),
-                    shamt: instr.shamt,
-                    funct: instr.funct,
-                }
-            }
-        }
-
-        pub struct $variant_name {
-            pub rs: Gpr,
-            pub rt: Gpr,
-            pub rd: Gpr,
-            pub shamt: u8,
-            pub funct: u8,
         }
     };
 }

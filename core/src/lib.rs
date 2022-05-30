@@ -17,7 +17,9 @@ impl Core {
         self.cpu_state.connect_bus(noctane_cpu::Bus {
             main_ram: &mut self.banks.main_ram,
             exp_1: &mut self.banks.exp_1,
-            gpu: &mut self.gpu,
+            io: noctane_cpu::bus::Io {
+                gpu: &mut self.gpu,
+            },
             exp_2: &mut self.banks.exp_2,
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,

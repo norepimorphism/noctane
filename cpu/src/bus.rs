@@ -1,4 +1,6 @@
-use noctane_gpu::Gpu;
+pub mod io;
+
+pub use io::Io;
 
 #[derive(Debug)]
 pub enum Error {
@@ -39,7 +41,7 @@ macro_rules! def_bank {
 }
 
 const fn make_index(addr: usize) -> usize {
-    (addr as usize) / std::mem::size_of::<u32>()
+    addr / std::mem::size_of::<u32>()
 }
 
 def_bank!(MainRam,  0x08_0000, 0x0000_0000);
@@ -52,7 +54,7 @@ impl<'a> Bus<'a> {
     pub fn new(
         main_ram: &'a mut MainRam,
         exp_1: &'a mut Exp1,
-        gpu: &'a mut Gpu,
+        io: Io<'a>,
         exp_2: &'a mut Exp2,
         exp_3: &'a mut Exp3,
         bios: &'a mut Bios,
@@ -60,7 +62,7 @@ impl<'a> Bus<'a> {
         Self {
             main_ram,
             exp_1,
-            gpu,
+            io,
             exp_2,
             exp_3,
             bios,
@@ -71,7 +73,7 @@ impl<'a> Bus<'a> {
 pub struct Bus<'a> {
     pub main_ram: &'a mut MainRam,
     pub exp_1: &'a mut Exp1,
-    pub gpu: &'a mut Gpu,
+    pub io: Io<'a>,
     pub exp_2: &'a mut Exp2,
     pub exp_3: &'a mut Exp3,
     pub bios: &'a mut Bios,
@@ -128,10 +130,9 @@ impl Bus<'_> {
                 this.exp_1[idx]
             },
             |_, _| {
-                tracing::debug!("io[{:#010x}] -> 0x0", (addr >> 2) << 2);
+                tracing::debug!("io[{:#010x}] -> 0x0", addr);
 
-                // TODO
-                0
+                self.io.read_32(addr)
             },
             |this, idx| {
                 this.exp_2[idx]
@@ -155,9 +156,8 @@ impl Bus<'_> {
                 this.exp_1[idx] = value;
             },
             |_, _| {
-                tracing::debug!("io[{:#010x}] <- {:#010x}", (addr >> 2) << 2, value);
-
-                // TODO
+                tracing::debug!("io[{:#010x}] <- {:#010x}", addr, value);
+                self.io.write_32(addr, value);
             },
             |this, idx| {
                 this.exp_2[idx] = value;
