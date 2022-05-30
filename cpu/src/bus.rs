@@ -129,10 +129,10 @@ impl Bus<'_> {
             |this, idx| {
                 this.exp_1[idx]
             },
-            |_, _| {
+            |this, offset| {
                 tracing::debug!("io[{:#010x}] -> 0x0", addr);
 
-                self.io.read_32(addr)
+                this.io.read_32(offset)
             },
             |this, idx| {
                 this.exp_2[idx]
@@ -155,9 +155,9 @@ impl Bus<'_> {
             |this, idx| {
                 this.exp_1[idx] = value;
             },
-            |_, _| {
+            |this, offset| {
                 tracing::debug!("io[{:#010x}] <- {:#010x}", addr, value);
-                self.io.write_32(addr, value);
+                this.io.write_32(offset, value);
             },
             |this, idx| {
                 this.exp_2[idx] = value;

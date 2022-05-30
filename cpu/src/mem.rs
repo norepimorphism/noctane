@@ -74,7 +74,9 @@ impl Memory<'_, '_> {
 }
 
 macro_rules! def_select_access_region_fn {
-    ($($access_region_fn_name:ident @ { $($hi:literal),* $(,)? }),* $(,)?) => {
+    (
+        $($access_region_fn_name:ident @ { $start_hi:literal $(, $($hi:literal),*)? $(,)? }),* $(,)?
+    ) => {
         fn select_access_region_fn<T>(
             &mut self,
             addr: u32,
@@ -84,9 +86,10 @@ macro_rules! def_select_access_region_fn {
         ) -> T {
             match addr >> 29 {
                 $(
+                    $start_hi => $access_region_fn_name(self, addr - ($start_hi << 29)),
                     $(
-                        $hi => $access_region_fn_name(self, addr - ($hi << 29)),
-                    )*
+                        $($hi => $access_region_fn_name(self, addr - ($start_hi << 29)),)*
+                    )?
                 )*
                 _ => unreachable!(),
             }

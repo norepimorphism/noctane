@@ -385,7 +385,7 @@ macro_rules! def_instr_and_op_kind {
                 /// An index of 0 represents `r1` while an index of 30 represents `r31`.
                 pub index: usize,
                 pub gpr_value: u32,
-                pub cpr_value: Option<u32>,
+                pub cpr_value: u32,
             }
         }
     };
@@ -567,9 +567,7 @@ def_instr_and_op_kind!(
                 0 => match ctx.opx.rs.index {
                     0 => {
                         tracing::trace!("mfc0");
-                        if let Some(cpr) = ctx.reg.cpr(usize::from(ctx.opx.imm >> 11)) {
-                            ctx.reg.set_gpr(ctx.opx.rt.index, cpr);
-                        }
+                        ctx.reg.set_gpr(ctx.opx.rt.index, ctx.reg.cpr((ctx.opx.imm >> 11).into()));
 
                         Ok(())
                     }
@@ -581,9 +579,7 @@ def_instr_and_op_kind!(
                     }
                     4 => {
                         tracing::trace!("mtc0");
-                        if let Some(cpr) = ctx.reg.cpr_mut(usize::from(ctx.opx.imm >> 11)) {
-                            *cpr = ctx.opx.rt.gpr_value;
-                        }
+                        ctx.reg.set_cpr(usize::from(ctx.opx.imm >> 11), ctx.opx.rt.gpr_value);
 
                         Ok(())
                     }
@@ -633,8 +629,8 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["cop2"],
         fn: |_| {
-            // The PSX CPU lacks a coprocessor #2.
-            Err(exc::Kind::CopUnusable)
+            // GTE.
+            todo!()
         },
     },
     {
@@ -810,8 +806,8 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lwc2" %(rt), #(s)],
         fn: |_| {
-            // The PSX CPU lacks a coprocessor #2.
-            Err(exc::Kind::CopUnusable)
+            // GTE.
+            todo!()
         },
     },
     {
@@ -1116,8 +1112,8 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["swc2" %(rt), #(s)],
         fn: |_| {
-            // The PSX CPU lacks a coprocessor #2.
-            Err(exc::Kind::CopUnusable)
+            // GTE.
+            todo!()
         },
     },
     {

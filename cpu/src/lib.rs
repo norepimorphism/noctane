@@ -5,6 +5,7 @@
 #![feature(
     bigint_helper_methods,
     box_syntax,
+    core_intrinsics,
     exclusive_range_pattern,
     slice_as_chunks,
     unchecked_math,

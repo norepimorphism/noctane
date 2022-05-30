@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![feature(let_else, proc_macro_diagnostic)]
+#![feature(entry_insert, let_else, proc_macro_diagnostic)]
+
+use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -13,39 +15,78 @@ use syn::{
 
 #[proc_macro]
 pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
-    let entries = parse_macro_input!(input as cpu::bus::io::Entries).0;
+    let lut_strukts = parse_macro_input!(input as cpu::bus::io::LutStructArray);
 
-    let regs = entries.into_iter().map(|entry| {
-        let cpu::bus::io::AccessFns {
-            _8: read_8,
-            _16: read_16,
-            _32: read_32,
-        } = entry.read.gen_access_fns();
-        let cpu::bus::io::AccessFns {
-            _8: write_8,
-            _16: write_16,
-            _32: write_32,
-        } = entry.write.gen_access_fns();
+    let mut luts = TokenStream2::new();
+    let mut reg_entries = TokenStream2::new();
+    let mut reg_table = HashMap::new();
 
-        quote! {
-            Register {
-                read_8: #read_8,
-                read_16: #read_16,
-                read_32: #read_32,
-                write_8: #write_8,
-                write_16: #write_16,
-                write_32: #write_32,
-            }
+    for lut_strukt in lut_strukts.0 {
+        let lut_name = lut_strukt.name;
+        let mut lut_entries = TokenStream2::new();
+
+        for reg_strukt in lut_strukt.regs {
+            match reg_strukt {
+                cpu::bus::io::RegStruct::Normal { name, read, write } => {
+                    // [`HashMap::len`] reads from a single field and doesn't iterate the table; see
+                    // <https://docs.rs/hashbrown/0.12.1/src/hashbrown/raw/mod.rs.html#388>.
+                    let reg_index = reg_table.len();
+
+                    // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
+                    let reg_len = read.kind.len();
+
+                    for byte_idx in 0..reg_len {
+                        lut_entries.extend(quote! {
+                            LutEntry { idx: #reg_index, start_offset: #byte_idx },
+                        });
+                    }
+
+                    let cpu::bus::io::AccessFns {
+                        _8: read_8,
+                        _16: read_16,
+                        _32: read_32,
+                    } = read.gen_access_fns();
+                    let cpu::bus::io::AccessFns {
+                        _8: write_8,
+                        _16: write_16,
+                        _32: write_32,
+                    } = write.gen_access_fns();
+
+                    reg_entries.extend(quote! {
+                        Register {
+                            read_8: #read_8,
+                            read_16: #read_16,
+                            read_32: #read_32,
+                            write_8: #write_8,
+                            write_16: #write_16,
+                            write_32: #write_32,
+                        },
+                    });
+
+                    reg_table.entry(name).insert_entry((reg_index, reg_len));
+                }
+                cpu::bus::io::RegStruct::Mirror { name } => {
+                    let (index, len) = reg_table.get(&name).cloned().unwrap();
+
+                    for byte_idx in 0..len {
+                        lut_entries.extend(quote! {
+                            LutEntry { idx: #index, start_offset: #byte_idx },
+                        });
+                    }
+                }
+            };
+
         }
-    })
-    .collect::<TokenStream2>();
+
+        luts.extend(quote! {
+            static #lut_name: &[LutEntry] = &[#lut_entries];
+        });
+    }
 
     quote! {
-        static REGISTERS: &[Register] = &[#regs];
+        static REGISTERS: &[Register] = &[#reg_entries];
 
-        static LUT: &[LutEntry] = &[
-
-        ];
+        #luts
     }
     .into()
 }
@@ -56,77 +97,130 @@ mod cpu {
             use proc_macro2::TokenStream as TokenStream2;
             use quote::quote;
             use syn::{
-                braced,
                 parse::{Parse, ParseStream},
                 punctuated::Punctuated,
                 Expr,
-                FieldValue,
+                ExprStruct,
                 Member,
                 Token,
             };
 
-            impl Parse for Entries {
+            impl Parse for LutStructArray {
                 fn parse(input: ParseStream) -> syn::Result<Self> {
-                    input
-                        .parse_terminated(Entry::parse)
-                        .map(Self)
+                    input.parse_terminated(LutStruct::parse).map(Self)
                 }
             }
 
-            pub struct Entries(pub Punctuated<Entry, Token![,]>);
+            pub struct LutStructArray(pub Punctuated<LutStruct, Token![,]>);
 
-            impl Parse for Entry {
+            impl Parse for LutStruct {
                 fn parse(input: ParseStream) -> syn::Result<Self> {
-                    let content;
-                    braced!(content in input);
+                    let strukt = input.parse::<ExprStruct>()?;
 
-                    let mut fields = content
-                        .parse_terminated::<_, Token![,]>(FieldValue::parse)?
-                        .into_iter();
+                    let Some(ident) = strukt.path.get_ident() else {
+                        return Err(input.error("struct path should be a single identifier"));
+                    };
+                    if ident != "Lut" {
+                        return Err(input.error("expected 'Lut' struct"));
+                    }
+
+                    let mut fields = strukt.fields.into_iter();
 
                     let name_field = fields.nth(0).ok_or_else(|| {
-                        content.error("expected 'name' field")
+                        input.error("expected 'name' field")
                     })?;
-                    let read_field = fields.nth(0).ok_or_else(|| {
-                        content.error("expected 'read_*' field")
-                    })?;
-                    let write_field = fields.nth(0).ok_or_else(|| {
-                        content.error("expected 'write_*' field")
+                    let regs_field = fields.nth(0).ok_or_else(|| {
+                        input.error("expected 'regs' field")
                     })?;
                     if fields.next().is_some() {
-                        content.span().unwrap().warning("found extraneous fields");
+                        input.span().unwrap().warning("found extraneous fields");
                     }
 
                     let name = name_field.expr;
 
-                    let read_kind = AccessKind::try_from_read(read_field.member)
-                        .ok_or_else(|| {
-                            input.error("failed to parse 'read' identifier")
-                        })?;
-                    let read_expr = read_field.expr;
-                    let read = ReadFn {
-                        kind: read_kind,
-                        expr: quote!(#read_expr),
+                    let Expr::Array(regs_array) = regs_field.expr else {
+                        return Err(input.error("'regs' should be an array"));
                     };
+                    let regs = regs_array.elems
+                        .into_iter()
+                        .map(|elem| {
+                            let Expr::Struct(strukt) = elem else {
+                                return Err(input.error("expected struct"));
+                            };
 
-                    let write_kind = AccessKind::try_from_write(write_field.member)
-                        .ok_or_else(|| {
-                            input.error("failed to parse 'write' identifier")
-                        })?;
-                    let write_expr = write_field.expr;
-                    let write = WriteFn {
-                        kind: write_kind,
-                        expr: quote!(#write_expr),
-                    };
+                            let Some(ident) = strukt.path.get_ident() else {
+                                return Err(
+                                    input.error("struct path should be a single identifier")
+                                );
+                            };
 
-                    Ok(Self { name, read, write })
+                            let mut fields = strukt.fields.into_iter();
+
+                            let name_field = fields.nth(0).ok_or_else(|| {
+                                input.error("expected 'name' field")
+                            })?;
+                            let name = name_field.expr;
+
+                            match ident.to_string().as_str() {
+                                "Register" => {
+                                    let read_field = fields.nth(0).ok_or_else(|| {
+                                        input.error("expected 'read_*' field")
+                                    })?;
+                                    let write_field = fields.nth(0).ok_or_else(|| {
+                                        input.error("expected 'write_*' field")
+                                    })?;
+                                    if fields.next().is_some() {
+                                        input.span().unwrap().warning("found extraneous fields");
+                                    }
+
+                                    let read_kind = AccessKind::try_from_read(read_field.member)
+                                        .ok_or_else(|| {
+                                            input.error("failed to parse 'read' identifier")
+                                        })?;
+                                    let read_expr = read_field.expr;
+                                    let read = ReadFn {
+                                        kind: read_kind,
+                                        expr: quote!(#read_expr),
+                                    };
+
+                                    let write_kind = AccessKind::try_from_write(write_field.member)
+                                        .ok_or_else(|| {
+                                            input.error("failed to parse 'write' identifier")
+                                        })?;
+                                    let write_expr = write_field.expr;
+                                    let write = WriteFn {
+                                        kind: write_kind,
+                                        expr: quote!(#write_expr),
+                                    };
+
+                                    Ok(RegStruct::Normal { name, read, write })
+                                }
+                                "Mirror" => {
+                                    Ok(RegStruct::Mirror { name })
+                                }
+                                _ => Err(input.error("expected 'Register' or 'Mirror' struct")),
+                            }
+                        })
+                        .collect::<syn::Result<Vec<RegStruct>>>()?;
+
+                    Ok(Self { name, regs })
                 }
             }
 
-            pub struct Entry {
+            pub struct LutStruct {
                 pub name: Expr,
-                pub read: ReadFn,
-                pub write: WriteFn,
+                pub regs: Vec<RegStruct>,
+            }
+
+            pub enum RegStruct {
+                Normal {
+                    name: Expr,
+                    read: ReadFn,
+                    write: WriteFn,
+                },
+                Mirror {
+                    name: Expr,
+                },
             }
 
             pub struct AccessFns {
@@ -168,10 +262,21 @@ mod cpu {
                 def_try_access_kind_from_member!(try_from_write write write_8 write_16 write_32);
             }
 
+            #[derive(Clone, Copy)]
             pub enum AccessKind {
                 _8,
                 _16,
                 _32,
+            }
+
+            impl AccessKind {
+                pub fn len(self) -> usize {
+                    match self {
+                        Self::_8 => 1,
+                        Self::_16 => 2,
+                        Self::_32 => 4,
+                    }
+                }
             }
 
             pub struct ReadFn {
