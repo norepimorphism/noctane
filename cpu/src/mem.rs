@@ -105,13 +105,13 @@ macro_rules! def_select_access_region_fn {
 impl Memory<'_, '_> {
     def_select_access_region_fn!(
         // 0x0000_0000
-        access_kuseg @ { 0, 1, 2, 3 },
+        kuseg @ { 0, 1, 2, 3 },
         // 0x8000_0000
-        access_kseg0 @ { 4 },
+        kseg0 @ { 4 },
         // 0xa000_0000
-        access_kseg1 @ { 5 },
+        kseg1 @ { 5 },
         // 0xc000_0000
-        access_kseg2 @ { 6, 7 },
+        kseg2 @ { 6, 7 },
     );
 
     pub fn read_32(&mut self, addr: u32) -> Result<u32, Error> {

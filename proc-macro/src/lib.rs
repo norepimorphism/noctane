@@ -13,12 +13,15 @@ use syn::{
     parse_macro_input,
 };
 
+/// Generates the `noctane_cpu::bus::io` lookup tables (LUTs).
 #[proc_macro]
 pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
-    let lut_strukts = parse_macro_input!(input as cpu::bus::io::LutStructArray);
+    let lut_strukts = parse_macro_input!(input as cpu::bus::io::LutStructSeq);
 
-    let mut luts = TokenStream2::new();
+    let mut lut_mods = TokenStream2::new();
     let mut reg_entries = TokenStream2::new();
+    // The *raison d'etre* of this table is to memorize previously-seen register structs such that
+    // they can be referenced by [`cpu::bus::io::RegStruct::Mirror`]s.
     let mut reg_table = HashMap::new();
 
     for lut_strukt in lut_strukts.0 {
@@ -29,16 +32,19 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
         for reg_strukt in lut_strukt.regs {
             match reg_strukt {
                 cpu::bus::io::RegStruct::Normal { name, read, write } => {
-                    // [`HashMap::len`] reads from a single field and doesn't iterate the table; see
+                    // This is performant as [`HashMap::len`] reads from a single field and doesn't
+                    // iterate the table; see
                     // <https://docs.rs/hashbrown/0.12.1/src/hashbrown/raw/mod.rs.html#388>.
                     let reg_index = reg_table.len();
 
                     // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
+                    // TODO: Don't make that assumption; assert that it is true.
                     let reg_len = read.kind.len();
 
                     for byte_idx in 0..reg_len {
                         lut_entries.extend(quote! {
-                            super::LutEntry { idx: #reg_index, start_offset: #byte_idx },
+                            // Remember: we're inside the LUT module, so we must use `super`.
+                            super::LutEntry { reg_idx: #reg_index, byte_idx: #byte_idx },
                         });
                     }
 
@@ -67,11 +73,12 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
                     reg_table.entry(name).insert_entry((reg_index, reg_len));
                 }
                 cpu::bus::io::RegStruct::Mirror { name } => {
+                    // We can afford to clone here as these are merely two machine words.
                     let (index, len) = reg_table.get(&name).cloned().unwrap();
 
                     for byte_idx in 0..len {
                         lut_entries.extend(quote! {
-                            super::LutEntry { idx: #index, start_offset: #byte_idx },
+                            super::LutEntry { reg_idx: #index, byte_idx: #byte_idx },
                         });
                     }
                 }
@@ -79,19 +86,24 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
 
         }
 
-        luts.extend(quote! {
+        lut_mods.extend(quote! {
             mod #lut_name {
+                /// The base address, relative to the start of the I/O region, of the group of I/O
+                /// registers represented by [`LUT`].
                 pub(super) const BASE_ADDR: usize = #lut_base_addr;
 
+                /// A lookup table (LUT) of [`LutEntry`]s, indexed by an address relative to the
+                /// start of the I/O region.
                 pub(super) static LUT: &[super::LutEntry] = &[#lut_entries];
             }
         });
     }
 
     quote! {
+        /// All I/O registers.
         static REGISTERS: &[Register] = &[#reg_entries];
 
-        #luts
+        #lut_mods
     }
     .into()
 }
@@ -110,13 +122,14 @@ mod cpu {
                 Token,
             };
 
-            impl Parse for LutStructArray {
+            impl Parse for LutStructSeq {
                 fn parse(input: ParseStream) -> syn::Result<Self> {
                     input.parse_terminated(LutStruct::parse).map(Self)
                 }
             }
 
-            pub struct LutStructArray(pub Punctuated<LutStruct, Token![,]>);
+            /// A comma-separated sequence of [`LutStruct`]s.
+            pub struct LutStructSeq(pub Punctuated<LutStruct, Token![,]>);
 
             impl Parse for LutStruct {
                 fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -329,8 +342,8 @@ mod cpu {
                             _16: self.expr,
                             _32: quote! {
                                 |this, io| {
-                                    let [a, b] = (this.read_16)(this, io, 0);
-                                    let [c, d] = (this.read_16)(this, io, 1);
+                                    let [a, b] = (this.read_16)(this, io, 0).to_be_bytes();
+                                    let [c, d] = (this.read_16)(this, io, 1).to_be_bytes();
 
                                     u32::from_be_bytes([a, b, c, d])
                                 }
