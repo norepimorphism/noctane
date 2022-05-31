@@ -23,13 +23,12 @@ impl From<mem::Address> for Address {
         // The tag contains the remaining bits.
         let tag = addr;
 
-        Self { init: it.init, working: it.working, tag, entry_idx, word_idx }
+        Self { working: it.working, tag, entry_idx, word_idx }
     }
 }
 
 #[derive(Clone)]
 struct Address {
-    init: usize,
     working: usize,
     tag: usize,
     entry_idx: usize,
@@ -56,43 +55,53 @@ pub struct Cache {
     is_isolated: bool,
 }
 
+impl fmt::Display for Cache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, entry) in self.entries.iter().enumerate() {
+            writeln!(f, "{:03x}   {}", i * 16, entry)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl Cache {
+    pub fn is_isolated(&self) -> bool {
+        self.is_isolated
+    }
+
     pub fn read_8<E>(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
     ) -> Result<u8, E> {
-        let addr = Address::from(mem_addr);
-
-        self.access(addr, fetch_line, |word| mem_addr.index_byte_in_word(word))
+        self.read(addr, fetch_line, |word| addr.index_byte_in_word(word))
     }
 
     pub fn read_16<E>(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
     ) -> Result<u16, E> {
-        let addr = Address::from(mem_addr);
-
-        self.access(addr, fetch_line, |word| mem_addr.index_halfword_in_word(word))
+        self.read(addr, fetch_line, |word| addr.index_halfword_in_word(word))
     }
 
     pub fn read_32<E>(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
     ) -> Result<u32, E> {
-        let addr = Address::from(mem_addr);
-
-        self.access(addr, fetch_line, |word| word)
+        self.read(addr, fetch_line, |word| word)
     }
 
-    fn access<T, E>(
+    fn read<T, E>(
         &mut self,
-        addr: Address,
+        addr: mem::Address,
         fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
         extract: impl FnOnce(u32) -> T,
     ) -> Result<T, E> {
+        let addr = Address::from(addr);
+
         let entry = &mut self.entries[addr.entry_idx];
 
         // When the cache is isolated, all cache accesses are hits.
@@ -117,11 +126,10 @@ impl Cache {
         value: u8,
     ) {
         let addr = Address::from(mem_addr);
-        tracing::trace!("Updating cache (addr={:?})", addr);
 
         let entry = &mut self.entries[addr.entry_idx];
-        if self.is_isolated || entry.test_hit(&addr) {
-            entry.tag = addr.tag;
+        if entry.test_hit(&addr) {
+            tracing::trace!("Updating cache (addr={:?})", addr);
             entry.line[addr.word_idx][mem_addr.byte_idx] = value;
         }
     }
@@ -132,11 +140,10 @@ impl Cache {
         value: u16,
     ) {
         let addr = Address::from(mem_addr);
-        tracing::trace!("Updating cache (addr={:?})", addr);
 
         let entry = &mut self.entries[addr.entry_idx];
-        if self.is_isolated || entry.test_hit(&addr) {
-            entry.tag = addr.tag;
+        if entry.test_hit(&addr) {
+            tracing::trace!("Updating cache (addr={:?})", addr);
             entry
                 .line[addr.word_idx]
                 .as_chunks_mut::<2>()
@@ -162,7 +169,7 @@ impl Cache {
 impl Default for Entry {
     fn default() -> Self {
         Self {
-            tag: !0,
+            tag: 0,
             line: [[0; 4]; 4],
         }
     }
@@ -174,8 +181,60 @@ struct Entry {
     line: [[u8; 4]; 4],
 }
 
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({:05x})", self.tag)?;
+        for word in self.line {
+            write!(f, " {:08x}", u32::from_be_bytes(word))?;
+        }
+
+        Ok(())
+    }
+}
+
 impl Entry {
     fn test_hit(&self, addr: &Address) -> bool {
         self.tag == addr.tag
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gen_test_addrs() -> impl Iterator<Item = mem::Address> {
+        (0x0000_00000..=0xffff_ffff).step_by(2048).map(mem::Address::from)
+    }
+
+    macro_rules! def_read_cache_fn {
+        ($fn_name:ident, $ty:ty, $read_name:ident, $write_name:ident $(,)?) => {
+            #[test]
+            fn $fn_name() {
+                let mut cache = Cache::default();
+                for addr in gen_test_addrs() {
+                    let written: u8 = rand::random();
+                    let written: u32 = u32::from_be_bytes([written; 4]);
+                    cache.$write_name(addr, written as $ty);
+
+                    let read = cache.$read_name(
+                        addr,
+                        |_| -> Result<_, ()> { Ok([written; 4]) },
+                    )
+                    .unwrap();
+
+                    assert_eq!(
+                        written as $ty,
+                        read,
+                        "failed to read from {:#010x} ({:?})",
+                        addr.init,
+                        Address::from(addr),
+                    );
+                }
+            }
+        };
+    }
+
+    def_read_cache_fn!(read_cache_8, u8, read_8, write_8);
+    def_read_cache_fn!(read_cache_16, u16, read_16, write_16);
+    def_read_cache_fn!(read_cache_32, u32, read_32, write_32);
 }

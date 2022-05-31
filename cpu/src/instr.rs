@@ -373,7 +373,7 @@ macro_rules! def_instr_and_op_kind {
                                     target: &'a mut Option<u32>,
                                 }
 
-                                tracing::trace!("{:?}", opx);
+                                // tracing::trace!("{:?}", opx);
 
                                 $fn(Context { opx, reg, mmu, pc, target })
                             }

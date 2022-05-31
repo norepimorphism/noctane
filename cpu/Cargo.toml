@@ -17,3 +17,4 @@ noctane-proc-macro = { path = "../proc-macro" }
 tracing = "0.1"
 
 [dev-dependencies]
+rand = "0.8"

@@ -67,13 +67,18 @@ impl Debugger<'_> {
 
                 Ok(())
             }
-            "s" => {
-                self.do_step();
+            "pr" => {
+                self.do_print_reg();
 
                 Ok(())
             }
-            "r" => {
-                self.print_reg();
+            "px" => {
+                self.do_print_i_cache();
+
+                Ok(())
+            }
+            "s" => {
+                self.do_step();
 
                 Ok(())
             }
@@ -91,10 +96,8 @@ impl Debugger<'_> {
         &mut self,
         mut args: impl Iterator<Item = &'a str>,
     ) -> Result<(), &str> {
-        let addr = args
-            .next()
-            .ok_or("expected breakpoint address")?
-            .parse::<u32>()
+        let addr = args.next().ok_or("expected breakpoint address")?;
+        let addr = u32::from_str_radix(addr, 16)
             .map_err(|_| "failed to parse breakpoint address")?;
         self.breakpoints.insert(addr);
 
@@ -113,13 +116,17 @@ impl Debugger<'_> {
         }
     }
 
+    fn do_print_reg(&self) {
+        println!("{}", self.cpu.reg());
+    }
+
+    fn do_print_i_cache(&self) {
+        println!("{}", self.cpu.mmu().cache().i);
+    }
+
     fn do_step(&mut self) {
         if let Some(exec) = self.cpu.execute_next_instr() {
             println!("{:08x}   {}", exec.pc, exec.instr.asm());
         }
-    }
-
-    fn print_reg(&self) {
-        println!("{}", self.cpu.reg());
     }
 }

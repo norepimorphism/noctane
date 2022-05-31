@@ -23,8 +23,16 @@ pub struct Memory<'c, 'b> {
 }
 
 impl<'b> Memory<'_, 'b> {
+    pub fn cache(&self) -> &Cache {
+        self.cache
+    }
+
     pub fn cache_mut(&mut self) -> &mut Cache {
         self.cache
+    }
+
+    pub fn bus(&self) -> &Bus<'b> {
+        &self.bus
     }
 
     pub fn bus_mut(&mut self) -> &mut Bus<'b> {
@@ -224,8 +232,11 @@ impl Memory<'_, '_> {
             addr,
             |this, addr| {
                 this.cache.i.write_8(addr, value);
+                if !this.cache.i.is_isolated() {
+                    this.bus.write_8(addr, value).map_err(Error::Bus)?;
+                }
 
-                this.bus.write_8(addr, value).map_err(Error::Bus)
+                Ok(())
             },
             |this, addr| {
                 this.bus.write_8(addr, value).map_err(Error::Bus)
@@ -244,8 +255,11 @@ impl Memory<'_, '_> {
             addr,
             |this, addr| {
                 this.cache.i.write_16(addr, value);
+                if !this.cache.i.is_isolated() {
+                    this.bus.write_16(addr, value).map_err(Error::Bus)?;
+                }
 
-                this.bus.write_16(addr, value).map_err(Error::Bus)
+                Ok(())
             },
             |this, addr| {
                 this.bus.write_16(addr, value).map_err(Error::Bus)
@@ -264,8 +278,11 @@ impl Memory<'_, '_> {
             addr,
             |this, addr| {
                 this.cache.i.write_32(addr, value);
+                if !this.cache.i.is_isolated() {
+                    this.bus.write_32(addr, value).map_err(Error::Bus)?;
+                }
 
-                this.bus.write_32(addr, value).map_err(Error::Bus)
+                Ok(())
             },
             |this, addr| {
                 this.bus.write_32(addr, value).map_err(Error::Bus)
