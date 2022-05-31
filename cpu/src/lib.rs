@@ -20,7 +20,7 @@ pub mod mmu;
 pub mod reg;
 
 pub use bus::Bus;
-pub use cache::Cache;
+pub use cache::{i::Cache as ICache, Cache};
 pub use instr::Instr;
 pub use mem::Memory;
 pub use mmu::Mmu;

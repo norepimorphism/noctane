@@ -1,4 +1,4 @@
-mod i;
+pub mod i;
 
 impl Default for Cache {
     fn default() -> Self {

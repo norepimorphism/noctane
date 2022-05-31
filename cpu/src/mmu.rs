@@ -11,7 +11,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::mem::{self, Memory};
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     Memory(mem::Error),
 }

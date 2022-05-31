@@ -4,6 +4,7 @@ use noctane_proc_macro::gen_cpu_bus_io;
 use crate::mem::Address;
 
 /// The error type returned by `read` and `write` functions.
+#[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     /// An invalid address was used in an I/O access.
     ///
@@ -26,9 +27,9 @@ impl Io<'_> {
         f: impl FnOnce(&mut Self, &Register, Address) -> T,
     ) -> Result<T, Error> {
         macro_rules! get_lut_entry {
-            ($addr:expr, $mod_name:ident $(,)?) => {
+            ($mod_name:ident $(,)?) => {
                 {
-                    let idx = $addr.working - $mod_name::BASE_ADDR;
+                    let idx = addr.working - $mod_name::BASE_ADDR;
                     tracing::trace!(
                         "Accessing `cpu_bus.io.{}[{:#010x}]`",
                         stringify!($mod_name),
@@ -44,13 +45,13 @@ impl Io<'_> {
         // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
         // work in a well-defined order from the first to last pattern.
         let lut_entry = match addr.working {
-            cdrom::BASE_ADDR.. => get_lut_entry!(addr, cdrom),
-            timers::BASE_ADDR.. => get_lut_entry!(addr, timers),
-            dma::BASE_ADDR.. => get_lut_entry!(addr, dma),
-            int_ctrl::BASE_ADDR.. => get_lut_entry!(addr, int_ctrl),
-            mem_ctrl_2::BASE_ADDR.. => get_lut_entry!(addr, mem_ctrl_2),
-            perif::BASE_ADDR.. => get_lut_entry!(addr, perif),
-            mem_ctrl_1::BASE_ADDR.. => get_lut_entry!(addr, mem_ctrl_1),
+            cdrom::BASE_ADDR.. => get_lut_entry!(cdrom),
+            timers::BASE_ADDR.. => get_lut_entry!(timers),
+            dma::BASE_ADDR.. => get_lut_entry!(dma),
+            int_ctrl::BASE_ADDR.. => get_lut_entry!(int_ctrl),
+            mem_ctrl_2::BASE_ADDR.. => get_lut_entry!(mem_ctrl_2),
+            perif::BASE_ADDR.. => get_lut_entry!(perif),
+            mem_ctrl_1::BASE_ADDR.. => get_lut_entry!(mem_ctrl_1),
             _ => None,
         }
         .ok_or(Error::UnmappedAddress(addr.init))?;
@@ -139,7 +140,7 @@ gen_cpu_bus_io!(
     // Memory Control 1.
     Lut {
         name: mem_ctrl_1,
-        base_addr: 0x1000,
+        base_addr: 0x0000,
         regs: [
             Register {
                 name: EXP_1_BASE_ADDR,
@@ -191,7 +192,7 @@ gen_cpu_bus_io!(
     // Peripheral I/O Ports.
     Lut {
         name: perif,
-        base_addr: 0x1040,
+        base_addr: 0x0040,
         regs: [
             Register {
                 name: JOY_DATA,
@@ -253,7 +254,7 @@ gen_cpu_bus_io!(
     // Memory Control 2.
     Lut {
         name: mem_ctrl_2,
-        base_addr: 0x1060,
+        base_addr: 0x0060,
         regs: [
             Register {
                 name: RAM_SIZE,
@@ -265,7 +266,7 @@ gen_cpu_bus_io!(
     // Interrupt Control.
     Lut {
         name: int_ctrl,
-        base_addr: 0x1070,
+        base_addr: 0x0070,
         regs: [
             Register {
                 name: STAT,
@@ -282,7 +283,7 @@ gen_cpu_bus_io!(
     // DMA.
     Lut {
         name: dma,
-        base_addr: 0x1080,
+        base_addr: 0x0080,
         regs: [
             Register {
                 name: MDECin,
@@ -334,7 +335,7 @@ gen_cpu_bus_io!(
     // Timers (Root Counters).
     Lut {
         name: timers,
-        base_addr: 0x1100,
+        base_addr: 0x0100,
         regs: [
             Register {
                 name: DOTCLOCK,
@@ -356,7 +357,7 @@ gen_cpu_bus_io!(
     // CD-ROM.
     Lut {
         name: cdrom,
-        base_addr: 0x1800,
+        base_addr: 0x0800,
         regs: [],
     },
     // GPU.

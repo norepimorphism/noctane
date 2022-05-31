@@ -117,9 +117,13 @@ impl Cache {
         value: u8,
     ) {
         let addr = Address::from(mem_addr);
-
         tracing::trace!("Updating cache (addr={:?})", addr);
-        self.entries[addr.entry_idx].line[addr.word_idx][mem_addr.byte_idx] = value;
+
+        let entry = &mut self.entries[addr.entry_idx];
+        if self.is_isolated || entry.test_hit(&addr) {
+            entry.tag = addr.tag;
+            entry.line[addr.word_idx][mem_addr.byte_idx] = value;
+        }
     }
 
     pub fn write_16(
@@ -128,14 +132,17 @@ impl Cache {
         value: u16,
     ) {
         let addr = Address::from(mem_addr);
-
         tracing::trace!("Updating cache (addr={:?})", addr);
-        self
-            .entries[addr.entry_idx]
-            .line[addr.word_idx]
-            .as_chunks_mut::<2>()
-            .0
-            [mem_addr.halfword_idx] = value.to_be_bytes();
+
+        let entry = &mut self.entries[addr.entry_idx];
+        if self.is_isolated || entry.test_hit(&addr) {
+            entry.tag = addr.tag;
+            entry
+                .line[addr.word_idx]
+                .as_chunks_mut::<2>()
+                .0
+                [mem_addr.halfword_idx] = value.to_be_bytes();
+        }
     }
 
     pub fn write_32(
@@ -144,9 +151,11 @@ impl Cache {
         value: u32,
     ) {
         let addr = Address::from(mem_addr);
-
         tracing::trace!("Updating cache (addr={:?})", addr);
-        self.entries[addr.entry_idx].line[addr.word_idx] = value.to_be_bytes();
+
+        let entry = &mut self.entries[addr.entry_idx];
+        entry.tag = addr.tag;
+        entry.line[addr.word_idx] = value.to_be_bytes();
     }
 }
 

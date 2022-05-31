@@ -16,21 +16,14 @@ fn main() {
 
     // Fill memory with the BIOS.
     for (idx, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
-        core
-            .banks_mut()
-            .bios
-            .as_chunks_mut::<4>()
-            .0
-            [idx] = u32::from_le_bytes(*instr).to_be_bytes();
+        core.banks_mut().bios[idx] = u32::from_le_bytes(*instr);
     }
 
     let mut cpu = core.cpu();
     *cpu.reg_mut().pc_mut() = 0xbfc0_0000;
 
     loop {
-        let pc = cpu.reg().pc();
-        let last_exec = cpu.execute_next_instr();
-        if let Some(exec) = last_exec {
+        if let Some(exec) = cpu.execute_next_instr() {
             println!("{:08x}   {}", exec.pc, exec.instr.asm());
         }
     }

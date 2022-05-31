@@ -6,7 +6,7 @@
 
 use crate::{Cache, bus::{self, Bus}};
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     Bus(bus::Error),
 }
@@ -20,6 +20,16 @@ impl<'c, 'b> Memory<'c, 'b> {
 pub struct Memory<'c, 'b> {
     cache: &'c mut Cache,
     bus: Bus<'b>,
+}
+
+impl<'b> Memory<'_, 'b> {
+    pub fn cache_mut(&mut self) -> &mut Cache {
+        self.cache
+    }
+
+    pub fn bus_mut(&mut self) -> &mut Bus<'b> {
+        &mut self.bus
+    }
 }
 
 macro_rules! def_access {
@@ -215,7 +225,7 @@ impl Memory<'_, '_> {
             |this, addr| {
                 this.cache.i.write_8(addr, value);
 
-                Ok(())
+                this.bus.write_8(addr, value).map_err(Error::Bus)
             },
             |this, addr| {
                 this.bus.write_8(addr, value).map_err(Error::Bus)
@@ -235,7 +245,7 @@ impl Memory<'_, '_> {
             |this, addr| {
                 this.cache.i.write_16(addr, value);
 
-                Ok(())
+                this.bus.write_16(addr, value).map_err(Error::Bus)
             },
             |this, addr| {
                 this.bus.write_16(addr, value).map_err(Error::Bus)
@@ -255,7 +265,7 @@ impl Memory<'_, '_> {
             |this, addr| {
                 this.cache.i.write_32(addr, value);
 
-                Ok(())
+                this.bus.write_32(addr, value).map_err(Error::Bus)
             },
             |this, addr| {
                 this.bus.write_32(addr, value).map_err(Error::Bus)

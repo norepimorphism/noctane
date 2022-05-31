@@ -43,3 +43,99 @@ pub struct Banks {
     pub exp_3: noctane_cpu::bus::Exp3,
     pub bios: noctane_cpu::bus::Bios,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ops::DerefMut as _;
+
+    use super::Core;
+
+    macro_rules! def_write_to_test {
+        (
+            $mem:expr,
+            $ty:ty,
+            $map_addr:expr,
+            $read_32_name:ident ($($read_32_arg:expr),* $(,)?),
+            $write_8_name:ident (),
+            $write_16_name:ident (),
+            $write_32_name:ident () $(,)?
+        ) => {
+            const VALUE: u32 = !0;
+
+            fn assert_success(mem: &mut $ty, addr: u32, bit_width: &str) {
+                assert_eq!(
+                    mem.$read_32_name($map_addr(addr), $($read_32_arg),*),
+                    Ok(VALUE),
+                    "failed to write {}-bit value",
+                    bit_width,
+                );
+            }
+
+            for addr in (0..32).step_by(4) {
+                let _ = $mem.$write_8_name($map_addr(addr + 0), VALUE as u8);
+                let _ = $mem.$write_8_name($map_addr(addr + 1), VALUE as u8);
+                let _ = $mem.$write_8_name($map_addr(addr + 2), VALUE as u8);
+                let _ = $mem.$write_8_name($map_addr(addr + 3), VALUE as u8);
+                assert_success($mem, addr, "8");
+
+                let _ = $mem.$write_16_name($map_addr(addr + 0), VALUE as u16);
+                let _ = $mem.$write_16_name($map_addr(addr + 2), VALUE as u16);
+                assert_success($mem, addr, "16");
+
+                let _ = $mem.$write_32_name($map_addr(addr), VALUE);
+                assert_success($mem, addr, "32");
+            }
+        };
+    }
+
+    #[test]
+    fn write_to_mmu() {
+        let mut core = Core::default();
+        let mut cpu = core.cpu();
+        let mmu = cpu.mmu_mut();
+
+        def_write_to_test!(
+            mmu,
+            noctane_cpu::Mmu,
+            |addr| addr,
+            read_virt_32(),
+            write_virt_8(),
+            write_virt_16(),
+            write_virt_32(),
+        );
+    }
+
+    #[test]
+    fn write_to_cpu_memory() {
+        let mut core = Core::default();
+        let mut cpu = core.cpu();
+        let mem = cpu.mmu_mut().deref_mut();
+
+        def_write_to_test!(
+            mem,
+            noctane_cpu::Memory,
+            |addr| addr,
+            read_32(),
+            write_8(),
+            write_16(),
+            write_32(),
+        );
+    }
+
+    #[test]
+    fn write_to_cpu_bus() {
+        let mut core = Core::default();
+        let mut cpu = core.cpu();
+        let bus = cpu.mmu_mut().deref_mut().bus_mut();
+
+        def_write_to_test!(
+            bus,
+            noctane_cpu::Bus,
+            |addr| noctane_cpu::mem::Address::from(addr as usize),
+            read_32(),
+            write_8(),
+            write_16(),
+            write_32(),
+        );
+    }
+}

@@ -19,7 +19,7 @@ impl From<io::Error> for Error {
 }
 
 /// The error type returned by `read` and `write` functions.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Error {
     /// An invalid address was used in a bus access.
     ///
@@ -32,23 +32,25 @@ macro_rules! def_bank {
     ($name:ident, $size:literal @ $addr:literal) => {
         impl Default for $name {
             fn default() -> Self {
-                Self(box [0; $size])
+                Self(box [0; Self::LEN])
             }
         }
 
         impl $name {
             /// The base address, relative to the start of each memory segment, of this memory bank.
             pub const BASE_ADDR: usize = $addr;
+
+            const LEN: usize = make_index($size);
         }
 
         /// A bank of memory.
         ///
         /// Internally, the data contained within this type is boxed so as to avoid otherwise
         /// certain stack buffer overflows from occuring as a result of large allocations.
-        pub struct $name(Box<[u8; $size]>);
+        pub struct $name(Box<[u32; Self::LEN]>);
 
         impl std::ops::Deref for $name {
-            type Target = [u8; $size];
+            type Target = [u32; Self::LEN];
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -61,6 +63,10 @@ macro_rules! def_bank {
             }
         }
     };
+}
+
+const fn make_index(addr: usize) -> usize {
+    addr / std::mem::size_of::<u32>()
 }
 
 // Define the memory banks (except for the I/O region, which is not a simple buffer like the rest
@@ -110,7 +116,7 @@ pub struct Bus<'a> {
 
 impl Bus<'_> {
     /// The base address, relative to the start of each memory segment, of the I/O region.
-    const IO_BASE_ADDR: usize = 0x1f80_0000;
+    const IO_BASE_ADDR: usize = 0x1f80_1000;
 
     /// Selects the appropriate memory bank for a given segment-relative address and passes it to
     /// one of two functions depending on how the data should be accessed.
@@ -125,21 +131,23 @@ impl Bus<'_> {
     /// expected to simply delegate to the appropriate I/O read/write function.
     fn access<T>(
         &mut self,
-        addr: Address,
-        access_word: impl FnOnce(&mut [u8]) -> Result<T, Error>,
+        mut addr: Address,
+        access_word: impl FnOnce(&mut u32) -> T,
         access_io: impl FnOnce(&mut Self, Address) -> Result<T, io::Error>,
     ) -> Result<T, Error> {
         macro_rules! get_bank {
             ($field_name:ident, $struct_name:ident $(,)?) => {
                 {
-                    let idx = addr.working - $struct_name::BASE_ADDR;
+                    addr.working -= $struct_name::BASE_ADDR;
                     tracing::trace!(
                         "Accessing `cpu_bus.{}[{:#010x}]`",
                         stringify!($field_name),
-                        idx,
+                        addr.working,
                     );
 
-                    &mut self.$field_name[idx..]
+                    self.$field_name
+                        .get_mut(make_index(addr.working))
+                        .ok_or(Error::UnmappedAddress(addr.init))?
                 }
             };
         }
@@ -148,12 +156,15 @@ impl Bus<'_> {
         // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
         // work in a well-defined order from the first to last pattern.
         match addr.working {
-            Bios::BASE_ADDR.. => access_word(get_bank!(bios, Bios)),
-            Exp3::BASE_ADDR.. => access_word(get_bank!(exp_3, Exp3)),
-            Exp2::BASE_ADDR.. => access_word(get_bank!(exp_2, Exp2)),
-            Self::IO_BASE_ADDR.. => access_io(self, addr).map_err(Error::from),
-            Exp1::BASE_ADDR.. => access_word(get_bank!(exp_1, Exp1)),
-            MainRam::BASE_ADDR.. => access_word(get_bank!(main_ram, MainRam)),
+            Bios::BASE_ADDR.. => Ok(access_word(get_bank!(bios, Bios))),
+            Exp3::BASE_ADDR.. => Ok(access_word(get_bank!(exp_3, Exp3))),
+            Exp2::BASE_ADDR.. => Ok(access_word(get_bank!(exp_2, Exp2))),
+            Self::IO_BASE_ADDR.. => {
+                access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR))
+                    .map_err(Error::from)
+            }
+            Exp1::BASE_ADDR.. => Ok(access_word(get_bank!(exp_1, Exp1))),
+            MainRam::BASE_ADDR.. => Ok(access_word(get_bank!(main_ram, MainRam))),
             _ => Err(Error::UnmappedAddress(addr.init)),
         }
     }
@@ -162,10 +173,7 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                word
-                    .get(0)
-                    .ok_or(Error::UnmappedAddress(addr.init))
-                    .map(|it| *it)
+                addr.index_byte_in_word(*word)
             },
             |this, addr| {
                 this.io.read_8(addr)
@@ -177,13 +185,7 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                Ok(u16::from_be_bytes({
-                    word
-                        .get(0..2)
-                        .ok_or(Error::UnmappedAddress(addr.init))?
-                        .try_into()
-                        .unwrap()
-                }))
+                addr.index_halfword_in_word(*word)
             },
             |this, addr| {
                 this.io.read_16(addr)
@@ -195,13 +197,7 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                Ok(u32::from_be_bytes({
-                    word
-                        .get(0..4)
-                        .ok_or(Error::UnmappedAddress(addr.init))?
-                        .try_into()
-                        .unwrap()
-                }))
+                *word
             },
             |this, addr| {
                 this.io.read_32(addr)
@@ -213,9 +209,9 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                *word.get_mut(0).ok_or(Error::UnmappedAddress(addr.init))? = value;
-
-                Ok(())
+                let mut bytes = word.to_be_bytes();
+                bytes[addr.byte_idx] = value;
+                *word = u32::from_be_bytes(bytes);
             },
             |this, addr| {
                 this.io.write_8(addr, value)
@@ -227,13 +223,9 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                *word
-                    .as_chunks_mut::<2>()
-                    .0
-                    .get_mut(addr.halfword_idx)
-                    .ok_or(Error::UnmappedAddress(addr.init))? = value.to_be_bytes();
-
-                Ok(())
+                let mut bytes = word.to_be_bytes();
+                bytes.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
+                *word = u32::from_be_bytes(bytes);
             },
             |this, addr| {
                 this.io.write_16(addr, value)
@@ -245,13 +237,7 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                *word
-                    .as_chunks_mut::<4>()
-                    .0
-                    .get_mut(0)
-                    .ok_or(Error::UnmappedAddress(addr.init))? = value.to_be_bytes();
-
-                Ok(())
+                *word = value;
             },
             |this, addr| {
                 this.io.write_32(addr, value)
