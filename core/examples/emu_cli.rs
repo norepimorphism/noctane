@@ -29,15 +29,9 @@ fn main() {
 
     loop {
         let pc = cpu.reg().pc();
-        let opcode = cpu.mmu_mut().read_virt_32(pc).unwrap();
-
-        noctane_util::dump_hex(&mut std::io::stdout(), pc, opcode.to_le_bytes());
-        if let Some(instr) = noctane_cpu::Instr::decode(opcode) {
-            println!("   {}", instr.asm());
-        } else {
-            println!();
+        let last_exec = cpu.execute_next_instr();
+        if let Some(exec) = last_exec {
+            println!("{:08x}   {}", exec.pc, exec.instr.asm());
         }
-
-        cpu.execute_next_instr();
     }
 }

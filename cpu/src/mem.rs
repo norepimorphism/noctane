@@ -51,7 +51,7 @@ macro_rules! def_access {
 
             // To absolutely ensure that page boundaries cannot be crossed, we will strip the bottom
             // bits from the address as necessary.
-            // TODO: Raise an exception if a page boundarie is crossed.
+            // TODO: Raise an exception if a page boundary is crossed.
             let addr = strip_addr!($width addr);
 
             let make_address = |shift_amt: usize| Address::new(addr, addr - (shift_amt << 29));

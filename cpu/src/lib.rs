@@ -89,23 +89,27 @@ impl<'s, 'b> Cpu<'s, 'b> {
         &mut self.mmu
     }
 
-    pub fn execute_next_instr(&mut self) {
-        self.advance_pipeline(|op| Instr::decode(op).unwrap());
+    pub fn execute_next_instr(&mut self) -> Option<instr::Execution> {
+        self.advance_pipeline(|op| Instr::decode(op).unwrap())
     }
 
-    pub fn execute_instr(&mut self, instr: Instr) {
+    pub fn execute_instr(&mut self, instr: Instr) -> Option<instr::Execution> {
         self.advance_pipeline(|_| instr)
     }
 
-    pub fn execute_opcode(&mut self, op: u32) {
-        self.advance_pipeline(|_| Instr::decode(op).unwrap());
+    pub fn execute_opcode(&mut self, op: u32) -> Option<instr::Execution> {
+        self.advance_pipeline(|_| Instr::decode(op).unwrap())
     }
 
     /// Processes the current stage, and then advances to the next stage, of each queued
     /// instruction.
-    pub fn advance_pipeline(&mut self, decode_instr: impl Fn(u32) -> Instr) {
+    pub fn advance_pipeline(
+        &mut self,
+        decode_instr: impl Fn(u32) -> Instr,
+    ) -> Option<instr::Execution> {
         self.handle_exc();
-        self.pipeline.advance(&mut self.exc, &mut self.mmu, &mut self.reg, &decode_instr);
+
+        self.pipeline.advance(&mut self.exc, &mut self.mmu, &mut self.reg, &decode_instr)
     }
 
     fn handle_exc(&mut self) {

@@ -96,7 +96,12 @@ impl Cache {
         let entry = &mut self.entries[addr.entry_idx];
 
         // When the cache is isolated, all cache accesses are hits.
-        if !(self.is_isolated || entry.test_hit(&addr)) {
+        if self.is_isolated || entry.test_hit(&addr) {
+            tracing::trace!("Cache hit! (addr={:?})", addr);
+        } else {
+            tracing::trace!("Cache miss... (addr={:?})", addr);
+            entry.tag = addr.tag;
+
             let line = fetch_line(mem::Address::from(addr.working & !0b1111))?;
             for i in 0..4 {
                 entry.line[i] = line[i].to_be_bytes();
@@ -113,7 +118,7 @@ impl Cache {
     ) {
         let addr = Address::from(mem_addr);
 
-        tracing::trace!("Updating cache ({:?})", addr);
+        tracing::trace!("Updating cache (addr={:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx][mem_addr.byte_idx] = value;
     }
 
@@ -124,7 +129,7 @@ impl Cache {
     ) {
         let addr = Address::from(mem_addr);
 
-        tracing::trace!("Updating cache ({:?})", addr);
+        tracing::trace!("Updating cache (addr={:?})", addr);
         self
             .entries[addr.entry_idx]
             .line[addr.word_idx]
@@ -140,7 +145,7 @@ impl Cache {
     ) {
         let addr = Address::from(mem_addr);
 
-        tracing::trace!("Updating cache ({:?})", addr);
+        tracing::trace!("Updating cache (addr={:?})", addr);
         self.entries[addr.entry_idx].line[addr.word_idx] = value.to_be_bytes();
     }
 }

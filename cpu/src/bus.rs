@@ -38,7 +38,7 @@ macro_rules! def_bank {
 
         impl $name {
             /// The base address, relative to the start of each memory segment, of this memory bank.
-            const BASE_ADDR: usize = $addr;
+            pub const BASE_ADDR: usize = $addr;
         }
 
         /// A bank of memory.
@@ -125,8 +125,8 @@ impl Bus<'_> {
     /// expected to simply delegate to the appropriate I/O read/write function.
     fn access<T>(
         &mut self,
-        mut addr: Address,
-        access_word: impl FnOnce(&mut [u8]) -> T,
+        addr: Address,
+        access_word: impl FnOnce(&mut [u8]) -> Result<T, Error>,
         access_io: impl FnOnce(&mut Self, Address) -> Result<T, io::Error>,
     ) -> Result<T, Error> {
         macro_rules! get_bank {
@@ -139,7 +139,7 @@ impl Bus<'_> {
                         idx,
                     );
 
-                    &mut self.$field_name[(addr.working - $struct_name::BASE_ADDR)..]
+                    &mut self.$field_name[idx..]
                 }
             };
         }
@@ -148,17 +148,12 @@ impl Bus<'_> {
         // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
         // work in a well-defined order from the first to last pattern.
         match addr.working {
-            Bios::BASE_ADDR.. => Ok(access_word(get_bank!(bios, Bios))),
-            Exp3::BASE_ADDR.. => Ok(access_word(get_bank!(exp_3, Exp3))),
-            Exp2::BASE_ADDR.. => Ok(access_word(get_bank!(exp_2, Exp2))),
-            Self::IO_BASE_ADDR.. => {
-                addr.working -= Self::IO_BASE_ADDR;
-                tracing::trace!("Accessing `cpu_bus.io[{:#010x}]`", addr.working);
-
-                access_io(self, addr).map_err(Error::from)
-            }
-            Exp1::BASE_ADDR.. => Ok(access_word(get_bank!(exp_1, Exp1))),
-            MainRam::BASE_ADDR.. => Ok(access_word(get_bank!(main_ram, MainRam))),
+            Bios::BASE_ADDR.. => access_word(get_bank!(bios, Bios)),
+            Exp3::BASE_ADDR.. => access_word(get_bank!(exp_3, Exp3)),
+            Exp2::BASE_ADDR.. => access_word(get_bank!(exp_2, Exp2)),
+            Self::IO_BASE_ADDR.. => access_io(self, addr).map_err(Error::from),
+            Exp1::BASE_ADDR.. => access_word(get_bank!(exp_1, Exp1)),
+            MainRam::BASE_ADDR.. => access_word(get_bank!(main_ram, MainRam)),
             _ => Err(Error::UnmappedAddress(addr.init)),
         }
     }
@@ -167,7 +162,10 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                word[0]
+                word
+                    .get(0)
+                    .ok_or(Error::UnmappedAddress(addr.init))
+                    .map(|it| *it)
             },
             |this, addr| {
                 this.io.read_8(addr)
@@ -179,7 +177,13 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                u16::from_be_bytes(word[0..2].try_into().unwrap())
+                Ok(u16::from_be_bytes({
+                    word
+                        .get(0..2)
+                        .ok_or(Error::UnmappedAddress(addr.init))?
+                        .try_into()
+                        .unwrap()
+                }))
             },
             |this, addr| {
                 this.io.read_16(addr)
@@ -191,7 +195,13 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                u32::from_be_bytes(word[0..4].try_into().unwrap())
+                Ok(u32::from_be_bytes({
+                    word
+                        .get(0..4)
+                        .ok_or(Error::UnmappedAddress(addr.init))?
+                        .try_into()
+                        .unwrap()
+                }))
             },
             |this, addr| {
                 this.io.read_32(addr)
@@ -203,7 +213,9 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                word[0] = value;
+                *word.get_mut(0).ok_or(Error::UnmappedAddress(addr.init))? = value;
+
+                Ok(())
             },
             |this, addr| {
                 this.io.write_8(addr, value)
@@ -215,7 +227,13 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
+                *word
+                    .as_chunks_mut::<2>()
+                    .0
+                    .get_mut(addr.halfword_idx)
+                    .ok_or(Error::UnmappedAddress(addr.init))? = value.to_be_bytes();
+
+                Ok(())
             },
             |this, addr| {
                 this.io.write_16(addr, value)
@@ -227,7 +245,13 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                word.as_chunks_mut::<4>().0[0] = value.to_be_bytes();
+                *word
+                    .as_chunks_mut::<4>()
+                    .0
+                    .get_mut(0)
+                    .ok_or(Error::UnmappedAddress(addr.init))? = value.to_be_bytes();
+
+                Ok(())
             },
             |this, addr| {
                 this.io.write_32(addr, value)
@@ -236,18 +260,18 @@ impl Bus<'_> {
     }
 
     pub fn fetch_cache_line(&mut self, addr: Address) -> Result<[u32; 4], Error> {
-        tracing::trace!("Fetching cache line at {:#010x}", addr.working);
+        tracing::trace!("Fetching cache line (addr={:#010x})", addr.working);
 
-        let addr_1 = addr;
-        let addr_2 = addr.map_working(|it| it + 1);
-        let addr_3 = addr.map_working(|it| it + 2);
-        let addr_4 = addr.map_working(|it| it + 3);
+        let a = self.read_32(addr.map_working(|it| it.wrapping_add(0)))?;
+        let b = self.read_32(addr.map_working(|it| it.wrapping_add(4)))?;
+        let c = self.read_32(addr.map_working(|it| it.wrapping_add(8)))?;
+        let d = self.read_32(addr.map_working(|it| it.wrapping_add(12)))?;
 
-        Ok([
-            self.read_32(addr_1)?,
-            self.read_32(addr_2)?,
-            self.read_32(addr_3)?,
-            self.read_32(addr_4)?,
-        ])
+        tracing::trace!("line[0] <- {:#010x}", a);
+        tracing::trace!("line[1] <- {:#010x}", b);
+        tracing::trace!("line[2] <- {:#010x}", c);
+        tracing::trace!("line[3] <- {:#010x}", d);
+
+        Ok([a, b, c, d])
     }
 }

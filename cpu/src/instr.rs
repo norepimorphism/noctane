@@ -122,6 +122,11 @@ impl fmt::Display for Pipeline {
     }
 }
 
+pub struct Execution {
+    pub pc: u32,
+    pub instr: Instr,
+}
+
 impl Pipeline {
     pub fn advance(
         &mut self,
@@ -129,7 +134,7 @@ impl Pipeline {
         mmu: &mut Mmu,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) {
+    ) -> Option<Execution> {
         let mut pc = reg.pc();
         self.execute_queued_instr(exc, mmu, reg, decode_instr, &mut pc);
 
@@ -138,10 +143,15 @@ impl Pipeline {
                 // Increment PC.
                 *reg.pc_mut() = pc.wrapping_add(4);
 
-                self.rd = Some(decode_instr(op));
+                let instr = decode_instr(op);
+                self.rd = Some(instr);
+
+                Some(Execution { pc, instr })
             }
             Err(e) => {
                 exc.push(e.into()).unwrap();
+
+                None
             }
         }
     }
@@ -334,11 +344,17 @@ macro_rules! def_instr_and_op_kind {
                     }
 
                     #[inline(always)]
-                    fn log_enter_function(target_addr: u32, ret_addr: u32) {
-                        tracing::trace!(
-                            "Entering function `sub_{:08X}` (ra={:#010x})",
+                    fn calc_ret_addr(pc: u32) -> u32 {
+                        pc.wrapping_add(4)
+                    }
+
+                    #[inline(always)]
+                    fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
+                        tracing::info!(
+                            "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
                             target_addr,
                             ret_addr,
+                            sp,
                         );
                     }
 
@@ -683,11 +699,11 @@ def_instr_and_op_kind!(
         asm: ["jal" *()],
         fn: |ctx: Context| {
             let target_addr = calc_jump_target(ctx.pc, ctx.opx.target);
-            let ret_addr = ctx.pc;
+            let ret_addr = calc_ret_addr(ctx.pc);
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
-            log_enter_function(target_addr, ret_addr);
+            log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
             Ok(())
         },
@@ -698,11 +714,11 @@ def_instr_and_op_kind!(
         asm: ["jalr" %(rs), %(rd)],
         fn: |ctx: Context| {
             let target_addr = ctx.opx.rs.gpr_value;
-            let ret_addr = ctx.pc;
+            let ret_addr = calc_ret_addr(ctx.pc);
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
-            log_enter_function(target_addr, ret_addr);
+            log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
             Ok(())
         },
@@ -713,7 +729,7 @@ def_instr_and_op_kind!(
         asm: ["jr" %(rs)],
         fn: |ctx: Context| {
             if ctx.opx.rs.index == 31 {
-                tracing::trace!("Leaving function");
+                tracing::info!("Leaving function");
             }
 
             *ctx.target = Some(ctx.opx.rs.gpr_value);

@@ -27,7 +27,16 @@ impl Io<'_> {
     ) -> Result<T, Error> {
         macro_rules! get_lut_entry {
             ($addr:expr, $mod_name:ident $(,)?) => {
-                $mod_name::LUT.get($addr.working - $mod_name::BASE_ADDR)
+                {
+                    let idx = $addr.working - $mod_name::BASE_ADDR;
+                    tracing::trace!(
+                        "Accessing `cpu_bus.io.{}[{:#010x}]`",
+                        stringify!($mod_name),
+                        idx,
+                    );
+
+                    $mod_name::LUT.get(idx)
+                }
             };
         }
 
