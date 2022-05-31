@@ -32,7 +32,9 @@ macro_rules! def_bank {
     ($name:ident, $size:literal @ $addr:literal) => {
         impl Default for $name {
             fn default() -> Self {
-                Self(box [0; Self::LEN])
+                // Use 'screaming 0xaa's so that it's more obvious when we access uninitialized
+                // memory.
+                Self(box [0xaa; Self::LEN])
             }
         }
 
@@ -73,7 +75,6 @@ const fn make_index(addr: usize) -> usize {
 // are).
 def_bank!(MainRam,  0x20_0000 @ 0x0000_0000);
 def_bank!(Exp1,     0x80_0000 @ 0x1f00_0000);
-def_bank!(Exp2,     0x00_2000 @ 0x1f80_2000);
 def_bank!(Exp3,     0x20_0000 @ 0x1fa0_0000);
 def_bank!(Bios,     0x08_0000 @ 0x1fc0_0000);
 
@@ -83,7 +84,6 @@ impl<'a> Bus<'a> {
         main_ram: &'a mut MainRam,
         exp_1: &'a mut Exp1,
         io: Io<'a>,
-        exp_2: &'a mut Exp2,
         exp_3: &'a mut Exp3,
         bios: &'a mut Bios,
     ) -> Self {
@@ -91,7 +91,6 @@ impl<'a> Bus<'a> {
             main_ram,
             exp_1,
             io,
-            exp_2,
             exp_3,
             bios,
         }
@@ -106,8 +105,6 @@ pub struct Bus<'a> {
     pub exp_1: &'a mut Exp1,
     /// Input and output (I/O).
     pub io: Io<'a>,
-    /// [`Exp2`].
-    pub exp_2: &'a mut Exp2,
     /// [`Exp3`].
     pub exp_3: &'a mut Exp3,
     /// [`Bios`].
@@ -153,12 +150,11 @@ impl Bus<'_> {
         }
 
         // To avoid explicitly defining a range for each memory bank, we can simply use an
-        // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
-        // work in a well-defined order from the first to last pattern.
+        // unbounded range in the positive direction and work backwards; `match`es work in a
+        // well-defined order from the first to last pattern.
         match addr.working {
             Bios::BASE_ADDR.. => Ok(access_word(get_bank!(bios, Bios))),
             Exp3::BASE_ADDR.. => Ok(access_word(get_bank!(exp_3, Exp3))),
-            Exp2::BASE_ADDR.. => Ok(access_word(get_bank!(exp_2, Exp2))),
             Self::IO_BASE_ADDR.. => {
                 access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR))
                     .map_err(Error::from)

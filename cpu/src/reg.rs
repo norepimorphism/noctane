@@ -1,6 +1,18 @@
 use std::{fmt, intrinsics::unlikely};
 
-#[derive(Debug, Default)]
+impl Default for File {
+    fn default() -> Self {
+       Self {
+           pc: 0xbfc0_0000,
+           hi: 0,
+           lo: 0,
+           gprs: [0; 32],
+           cprs: [0; 32],
+       }
+    }
+}
+
+#[derive(Debug)]
 pub struct File {
     /// The program counter.
     pc: u32,

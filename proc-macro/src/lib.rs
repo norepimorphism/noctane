@@ -4,8 +4,6 @@
 
 #![feature(entry_insert, let_else, proc_macro_diagnostic)]
 
-use std::collections::HashMap;
-
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
@@ -20,9 +18,7 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
 
     let mut lut_mods = TokenStream2::new();
     let mut reg_entries = TokenStream2::new();
-    // The *raison d'etre* of this table is to memorize previously-seen register structs such that
-    // they can be referenced by [`cpu::bus::io::RegStruct::Mirror`]s.
-    let mut reg_table = HashMap::new();
+    let mut reg_count: usize = 0;
 
     for lut_strukt in lut_strukts.0 {
         let lut_name = lut_strukt.name;
@@ -30,60 +26,43 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
         let mut lut_entries = TokenStream2::new();
 
         for reg_strukt in lut_strukt.regs {
-            match reg_strukt {
-                cpu::bus::io::RegStruct::Normal { name, read, write } => {
-                    // This is performant as [`HashMap::len`] reads from a single field and doesn't
-                    // iterate the table; see
-                    // <https://docs.rs/hashbrown/0.12.1/src/hashbrown/raw/mod.rs.html#388>.
-                    let reg_index = reg_table.len();
+            // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
+            // TODO: Don't make that assumption; assert that it is true.
+            let reg_len = reg_strukt.read.kind.len();
 
-                    // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
-                    // TODO: Don't make that assumption; assert that it is true.
-                    let reg_len = read.kind.len();
+            for byte_idx in 0..reg_len {
+                lut_entries.extend(quote! {
+                    // Remember: we're inside the LUT module, so we must use `super`.
+                    super::LutEntry { reg_idx: #reg_count, byte_idx: #byte_idx },
+                });
+            }
 
-                    for byte_idx in 0..reg_len {
-                        lut_entries.extend(quote! {
-                            // Remember: we're inside the LUT module, so we must use `super`.
-                            super::LutEntry { reg_idx: #reg_index, byte_idx: #byte_idx },
-                        });
-                    }
+            let name = reg_strukt.name;
 
-                    let cpu::bus::io::AccessFns {
-                        _8: read_8,
-                        _16: read_16,
-                        _32: read_32,
-                    } = read.gen_access_fns();
-                    let cpu::bus::io::AccessFns {
-                        _8: write_8,
-                        _16: write_16,
-                        _32: write_32,
-                    } = write.gen_access_fns();
+            let cpu::bus::io::AccessFns {
+                _8: read_8,
+                _16: read_16,
+                _32: read_32,
+            } = reg_strukt.read.gen_access_fns();
+            let cpu::bus::io::AccessFns {
+                _8: write_8,
+                _16: write_16,
+                _32: write_32,
+            } = reg_strukt.write.gen_access_fns();
 
-                    reg_entries.extend(quote! {
-                        Register {
-                            read_8: #read_8,
-                            read_16: #read_16,
-                            read_32: #read_32,
-                            write_8: #write_8,
-                            write_16: #write_16,
-                            write_32: #write_32,
-                        },
-                    });
+            reg_entries.extend(quote! {
+                Register {
+                    name: stringify!(#name),
+                    read_8: #read_8,
+                    read_16: #read_16,
+                    read_32: #read_32,
+                    write_8: #write_8,
+                    write_16: #write_16,
+                    write_32: #write_32,
+                },
+            });
 
-                    reg_table.entry(name).insert_entry((reg_index, reg_len));
-                }
-                cpu::bus::io::RegStruct::Mirror { name } => {
-                    // We can afford to clone here as these are merely two machine words.
-                    let (index, len) = reg_table.get(&name).cloned().unwrap();
-
-                    for byte_idx in 0..len {
-                        lut_entries.extend(quote! {
-                            super::LutEntry { reg_idx: #index, byte_idx: #byte_idx },
-                        });
-                    }
-                }
-            };
-
+            reg_count += 1;
         }
 
         lut_mods.extend(quote! {
@@ -215,12 +194,9 @@ mod cpu {
                                         expr: quote!(#write_expr),
                                     };
 
-                                    Ok(RegStruct::Normal { name, read, write })
+                                    Ok(RegStruct { name, read, write })
                                 }
-                                "Mirror" => {
-                                    Ok(RegStruct::Mirror { name })
-                                }
-                                _ => Err(input.error("expected 'Register' or 'Mirror' struct")),
+                                _ => Err(input.error("expected 'Register' struct")),
                             }
                         })
                         .collect::<syn::Result<Vec<RegStruct>>>()?;
@@ -235,15 +211,10 @@ mod cpu {
                 pub regs: Vec<RegStruct>,
             }
 
-            pub enum RegStruct {
-                Normal {
-                    name: Expr,
-                    read: ReadFn,
-                    write: WriteFn,
-                },
-                Mirror {
-                    name: Expr,
-                },
+            pub struct RegStruct {
+                pub name: Expr,
+                pub read: ReadFn,
+                pub write: WriteFn,
             }
 
             pub struct AccessFns {
@@ -404,25 +375,46 @@ mod cpu {
                         AccessKind::_16 => AccessFns {
                             _8: quote! {
                                 |this, io, addr, value| {
-                                    todo!()
+                                    let mut bytes = (this.read_16)(this, io, addr).to_be_bytes();
+                                    bytes[addr.byte_idx & 0b1] = value;
+                                    (this.write_16)(this, io, addr, u16::from_be_bytes(bytes));
                                 }
                             },
                             _16: self.expr,
                             _32: quote! {
                                 |this, io, value| {
-                                    todo!()
+                                    (this.write_16)(
+                                        this,
+                                        io,
+                                        Address::from(0),
+                                        Address::from(0).index_halfword_in_word(value),
+                                    );
+                                    (this.write_16)(
+                                        this,
+                                        io,
+                                        Address::from(1),
+                                        Address::from(2).index_halfword_in_word(value),
+                                    );
                                 }
                             },
                         },
                         AccessKind::_32 => AccessFns {
                             _8: quote! {
                                 |this, io, addr, value| {
-                                    todo!()
+                                    let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                    bytes[addr.byte_idx] = value;
+                                    (this.write_32)(this, io, u32::from_be_bytes(bytes));
                                 }
                             },
                             _16: quote! {
                                 |this, io, addr, value| {
-                                    todo!()
+                                    let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                    bytes
+                                        .as_chunks_mut::<2>()
+                                        .0
+                                        [addr.halfword_idx] = value.to_be_bytes();
+
+                                    (this.write_32)(this, io, u32::from_be_bytes(bytes));
                                 }
                             },
                             _32: self.expr,

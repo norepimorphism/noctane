@@ -31,6 +31,7 @@ pub mod i {
         }
     }
 
+    #[derive(Debug)]
     pub struct State {
         pub rs: Gpr,
         pub rt: Gpr,
@@ -55,6 +56,7 @@ pub mod j {
         }
     }
 
+    #[derive(Debug)]
     pub struct State {
         pub target: u32,
     }
@@ -85,6 +87,7 @@ pub mod r {
         }
     }
 
+    #[derive(Debug)]
     pub struct State {
         pub rs: Gpr,
         pub rt: Gpr,
@@ -350,7 +353,7 @@ macro_rules! def_instr_and_op_kind {
 
                     #[inline(always)]
                     fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
-                        tracing::info!(
+                        tracing::debug!(
                             "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
                             target_addr,
                             ret_addr,
@@ -369,6 +372,8 @@ macro_rules! def_instr_and_op_kind {
                                     pc: u32,
                                     target: &'a mut Option<u32>,
                                 }
+
+                                tracing::trace!("{:?}", opx);
 
                                 $fn(Context { opx, reg, mmu, pc, target })
                             }
@@ -711,7 +716,7 @@ def_instr_and_op_kind!(
     {
         name: Jalr,
         type: r,
-        asm: ["jalr" %(rs), %(rd)],
+        asm: ["jalr" %(rd), %(rs)],
         fn: |ctx: Context| {
             let target_addr = ctx.opx.rs.gpr_value;
             let ret_addr = calc_ret_addr(ctx.pc);
@@ -729,7 +734,7 @@ def_instr_and_op_kind!(
         asm: ["jr" %(rs)],
         fn: |ctx: Context| {
             if ctx.opx.rs.index == 31 {
-                tracing::info!("Leaving function");
+                tracing::debug!("Leaving function");
             }
 
             *ctx.target = Some(ctx.opx.rs.gpr_value);

@@ -7,6 +7,7 @@
     box_syntax,
     core_intrinsics,
     exclusive_range_pattern,
+    let_else,
     slice_as_chunks,
     unchecked_math,
 )]

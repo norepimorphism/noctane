@@ -20,7 +20,6 @@ impl Core {
             io: noctane_cpu::bus::Io {
                 gpu: &mut self.gpu,
             },
-            exp_2: &mut self.banks.exp_2,
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })
@@ -39,7 +38,6 @@ impl Core {
 pub struct Banks {
     pub main_ram: noctane_cpu::bus::MainRam,
     pub exp_1: noctane_cpu::bus::Exp1,
-    pub exp_2: noctane_cpu::bus::Exp2,
     pub exp_3: noctane_cpu::bus::Exp3,
     pub bios: noctane_cpu::bus::Bios,
 }
