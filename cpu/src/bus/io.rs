@@ -1,6 +1,8 @@
 use noctane_gpu::Gpu;
 use noctane_proc_macro::gen_cpu_bus_io;
 
+use crate::mem::Address;
+
 /// The error type returned by `read` and `write` functions.
 pub enum Error {
     /// An invalid address was used in an I/O access.
@@ -20,77 +22,69 @@ impl Io<'_> {
     /// to a callback.
     fn access<T>(
         &mut self,
-        addr: usize,
-        f: impl FnOnce(&mut Self, &Register, usize) -> T,
+        addr: Address,
+        f: impl FnOnce(&mut Self, &Register, Address) -> T,
     ) -> Result<T, Error> {
+        macro_rules! get_lut_entry {
+            ($addr:expr, $mod_name:ident $(,)?) => {
+                $mod_name::LUT.get($addr.working - $mod_name::BASE_ADDR)
+            };
+        }
+
         // To avoid explicitly defining a range for each register group, we can simply use an
         // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
         // work in a well-defined order from the first to last pattern.
-        let lut_entry = match addr {
-            cdrom::BASE_ADDR.. => {
-                cdrom::LUT.get(addr - cdrom::BASE_ADDR)
-            }
-            timers::BASE_ADDR.. => {
-                timers::LUT.get(addr - timers::BASE_ADDR)
-            }
-            dma::BASE_ADDR.. => {
-                dma::LUT.get(addr - dma::BASE_ADDR)
-            }
-            int_ctrl::BASE_ADDR.. => {
-                int_ctrl::LUT.get(addr - int_ctrl::BASE_ADDR)
-            }
-            mem_ctrl_2::BASE_ADDR.. => {
-                mem_ctrl_2::LUT.get(addr - mem_ctrl_2::BASE_ADDR)
-            }
-            perif::BASE_ADDR.. => {
-                perif::LUT.get(addr - perif::BASE_ADDR)
-            }
-            mem_ctrl_1::BASE_ADDR.. => {
-                mem_ctrl_1::LUT.get(addr - mem_ctrl_1::BASE_ADDR)
-            }
+        let lut_entry = match addr.working {
+            cdrom::BASE_ADDR.. => get_lut_entry!(addr, cdrom),
+            timers::BASE_ADDR.. => get_lut_entry!(addr, timers),
+            dma::BASE_ADDR.. => get_lut_entry!(addr, dma),
+            int_ctrl::BASE_ADDR.. => get_lut_entry!(addr, int_ctrl),
+            mem_ctrl_2::BASE_ADDR.. => get_lut_entry!(addr, mem_ctrl_2),
+            perif::BASE_ADDR.. => get_lut_entry!(addr, perif),
+            mem_ctrl_1::BASE_ADDR.. => get_lut_entry!(addr, mem_ctrl_1),
             _ => None,
         }
-        .ok_or(Error::UnmappedAddress(addr))?;
+        .ok_or(Error::UnmappedAddress(addr.init))?;
 
         // [`Option::get`] is unnecessary here as LUT entry indices are guaranteed by
         // [`gen_cpu_bus_io`] to point to valid register entries.
         let reg = &REGISTERS[lut_entry.reg_idx];
 
-        Ok(f(self, reg, lut_entry.byte_idx))
+        Ok(f(self, reg, Address::from(lut_entry.byte_idx)))
     }
 }
 
 /// Defines a `read_` method in which a byte index is relevant (i.e., `read_8`, `read_16`).
-macro_rules! def_read_with_offset {
+macro_rules! def_read_with_addr {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: usize) -> Result<$ty, Error> {
-            self.access(addr, |this, reg, offset| (reg.$fn_name)(reg, this, offset))
+        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, Error> {
+            self.access(addr, |this, reg, addr| (reg.$fn_name)(reg, this, addr))
         }
     };
 }
 
 /// Defines a `read_` method in which a byte index is not relevant (i.e., `read_32`).
-macro_rules! def_read_without_offset {
+macro_rules! def_read_without_addr {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: usize) -> Result<$ty, Error> {
+        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, Error> {
             self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this))
         }
     };
 }
 
 /// Defines a `write_` method in which a byte index is relevant (i.e., `write_8`, `write_16`).
-macro_rules! def_write_with_offset {
+macro_rules! def_write_with_addr {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, addr: usize, value: $ty) -> Result<(), Error> {
-            self.access(addr, |this, reg, offset| (reg.$fn_name)(reg, this, offset, value))
+        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), Error> {
+            self.access(addr, |this, reg, addr| (reg.$fn_name)(reg, this, addr, value))
         }
     };
 }
 
 /// Defines a `write_` method in which a byte index is not relevant (i.e., `write_32`).
-macro_rules! def_write_without_offset {
+macro_rules! def_write_without_addr {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, addr: usize, value: $ty) -> Result<(), Error> {
+        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), Error> {
             self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this, value))
         }
     };
@@ -98,12 +92,12 @@ macro_rules! def_write_without_offset {
 
 // This block defines `read_8`, `read_16`, `read_32`, `write_8`, `write_16`, and `write_32`.
 impl Io<'_> {
-    def_read_with_offset!(read_8() -> u8);
-    def_read_with_offset!(read_16() -> u16);
-    def_read_without_offset!(read_32() -> u32);
-    def_write_with_offset!(write_8(u8));
-    def_write_with_offset!(write_16(u16));
-    def_write_without_offset!(write_32(u32));
+    def_read_with_addr!(read_8() -> u8);
+    def_read_with_addr!(read_16() -> u16);
+    def_read_without_addr!(read_32() -> u32);
+    def_write_with_addr!(write_8(u8));
+    def_write_with_addr!(write_16(u16));
+    def_write_without_addr!(write_32(u32));
 }
 
 /// An entry within the [`REGISTERS`] table that represents a single register.
@@ -112,11 +106,11 @@ impl Io<'_> {
 /// explicitly defined for a register, and the remaining functions for other bit widths are
 /// automagically implemented.
 struct Register {
-    read_8: fn(&Self, &Io, usize) -> u8,
-    read_16: fn(&Self, &Io, usize) -> u16,
+    read_8: fn(&Self, &Io, Address) -> u8,
+    read_16: fn(&Self, &Io, Address) -> u16,
     read_32: fn(&Self, &Io) -> u32,
-    write_8: fn(&Self, &mut Io, usize, u8),
-    write_16: fn(&Self, &mut Io, usize, u16),
+    write_8: fn(&Self, &mut Io, Address, u8),
+    write_16: fn(&Self, &mut Io, Address, u16),
     write_32: fn(&Self, &mut Io, u32),
 }
 
@@ -125,7 +119,7 @@ struct Register {
 ///
 /// `reg_idx` points to an register entry in the [`REGISTERS`] table, while `byte_idx` indicates
 /// the index of the byte represented by this [`LutEntry`] into the register it points to, and is
-/// intended as the `offset` input to [`Register`] functions.
+/// intended as the basis for the `addr` input to [`Register`] functions.
 struct LutEntry {
     reg_idx: usize,
     byte_idx: usize,

@@ -6,6 +6,8 @@ pub mod io;
 
 pub use io::Io;
 
+use crate::mem::Address;
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         match e {
@@ -35,9 +37,6 @@ macro_rules! def_bank {
         }
 
         impl $name {
-            /// The size, in bytes, of this memory bank.
-            pub const SIZE: usize = $size;
-
             /// The base address, relative to the start of each memory segment, of this memory bank.
             const BASE_ADDR: usize = $addr;
         }
@@ -124,89 +123,131 @@ impl Bus<'_> {
     /// `access_io` is called when the given address points into the I/O region. An address relative
     /// to the start of the I/O region is passed to `access_io`. Implementations of `access_io` are
     /// expected to simply delegate to the appropriate I/O read/write function.
-    fn select_access_bank_fn<T>(
+    fn access<T>(
         &mut self,
-        addr: usize,
+        mut addr: Address,
         access_word: impl FnOnce(&mut [u8]) -> T,
-        access_io: impl FnOnce(&mut Self, usize) -> Result<T, io::Error>,
+        access_io: impl FnOnce(&mut Self, Address) -> Result<T, io::Error>,
     ) -> Result<T, Error> {
+        macro_rules! get_bank {
+            ($field_name:ident, $struct_name:ident $(,)?) => {
+                {
+                    let idx = addr.working - $struct_name::BASE_ADDR;
+                    tracing::trace!(
+                        "Accessing `cpu_bus.{}[{:#010x}]`",
+                        stringify!($field_name),
+                        idx,
+                    );
+
+                    &mut self.$field_name[(addr.working - $struct_name::BASE_ADDR)..]
+                }
+            };
+        }
+
         // To avoid explicitly defining a range for each memory bank, we can simply use an
         // unbounded range in the positive direction and work backwards; `match`es, to my knowledge,
         // work in a well-defined order from the first to last pattern.
-        match addr {
-            Bios::BASE_ADDR.. => {
-                Ok(access_word(&mut self.bios[(addr - Bios::BASE_ADDR)..]))
-            }
-            Exp3::BASE_ADDR.. => {
-                Ok(access_word(&mut self.exp_3[(addr - Exp3::BASE_ADDR)..]))
-            }
-            Exp2::BASE_ADDR.. => {
-                Ok(access_word(&mut self.exp_2[(addr - Exp2::BASE_ADDR)..]))
-            }
+        match addr.working {
+            Bios::BASE_ADDR.. => Ok(access_word(get_bank!(bios, Bios))),
+            Exp3::BASE_ADDR.. => Ok(access_word(get_bank!(exp_3, Exp3))),
+            Exp2::BASE_ADDR.. => Ok(access_word(get_bank!(exp_2, Exp2))),
             Self::IO_BASE_ADDR.. => {
-                tracing::debug!("io[{:#010x}]", addr);
+                addr.working -= Self::IO_BASE_ADDR;
+                tracing::trace!("Accessing `cpu_bus.io[{:#010x}]`", addr.working);
 
-                access_io(self, addr - Self::IO_BASE_ADDR).map_err(Error::from)
+                access_io(self, addr).map_err(Error::from)
             }
-            Exp1::BASE_ADDR.. => {
-                Ok(access_word(&mut self.exp_1[(addr - Exp1::BASE_ADDR)..]))
-            }
-            MainRam::BASE_ADDR.. => {
-                Ok(access_word(&mut self.main_ram[(addr - MainRam::BASE_ADDR)..]))
-            }
-            _ => Err(Error::UnmappedAddress(addr)),
+            Exp1::BASE_ADDR.. => Ok(access_word(get_bank!(exp_1, Exp1))),
+            MainRam::BASE_ADDR.. => Ok(access_word(get_bank!(main_ram, MainRam))),
+            _ => Err(Error::UnmappedAddress(addr.init)),
         }
     }
 
-    pub fn read_8(&mut self, addr: usize) -> Result<u8, Error> {
-        self.select_access_bank_fn(
-            addr,
-            |word| word[0],
-            |this, offset| this.io.read_8(offset),
-        )
-    }
-
-    pub fn read_16(&mut self, addr: usize) -> Result<u16, Error> {
-        self.select_access_bank_fn(
-            addr,
-            |word| u16::from_be_bytes(word[0..2].try_into().unwrap()),
-            |this, offset| this.io.read_16(offset),
-        )
-    }
-
-    pub fn read_32(&mut self, addr: usize) -> Result<u32, Error> {
-        self.select_access_bank_fn(
-            addr,
-            |word| u32::from_be_bytes(word[0..4].try_into().unwrap()),
-            |this, offset| this.io.read_32(offset),
-        )
-    }
-
-    pub fn write_8(&mut self, addr: usize, value: u8) -> Result<(), Error> {
-        self.select_access_bank_fn(
-            addr,
-            |word| word[0] = value,
-            |this, offset| this.io.write_8(offset, value),
-        )
-    }
-
-    pub fn write_16(&mut self, addr: usize, value: u16) -> Result<(), Error> {
-        self.select_access_bank_fn(
+    pub fn read_8(&mut self, addr: Address) -> Result<u8, Error> {
+        self.access(
             addr,
             |word| {
-                word.as_chunks_mut::<2>().0[(addr >> 1) & 0b1] = value.to_be_bytes();
+                word[0]
             },
-            |this, offset| this.io.write_16(offset, value),
+            |this, addr| {
+                this.io.read_8(addr)
+            },
         )
     }
 
-    pub fn write_32(&mut self, addr: usize, value: u32) -> Result<(), Error> {
-        self.select_access_bank_fn(
+    pub fn read_16(&mut self, addr: Address) -> Result<u16, Error> {
+        self.access(
+            addr,
+            |word| {
+                u16::from_be_bytes(word[0..2].try_into().unwrap())
+            },
+            |this, addr| {
+                this.io.read_16(addr)
+            },
+        )
+    }
+
+    pub fn read_32(&mut self, addr: Address) -> Result<u32, Error> {
+        self.access(
+            addr,
+            |word| {
+                u32::from_be_bytes(word[0..4].try_into().unwrap())
+            },
+            |this, addr| {
+                this.io.read_32(addr)
+            },
+        )
+    }
+
+    pub fn write_8(&mut self, addr: Address, value: u8) -> Result<(), Error> {
+        self.access(
+            addr,
+            |word| {
+                word[0] = value;
+            },
+            |this, addr| {
+                this.io.write_8(addr, value)
+            },
+        )
+    }
+
+    pub fn write_16(&mut self, addr: Address, value: u16) -> Result<(), Error> {
+        self.access(
+            addr,
+            |word| {
+                word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
+            },
+            |this, addr| {
+                this.io.write_16(addr, value)
+            },
+        )
+    }
+
+    pub fn write_32(&mut self, addr: Address, value: u32) -> Result<(), Error> {
+        self.access(
             addr,
             |word| {
                 word.as_chunks_mut::<4>().0[0] = value.to_be_bytes();
             },
-            |this, offset| this.io.write_32(offset, value),
+            |this, addr| {
+                this.io.write_32(addr, value)
+            },
         )
+    }
+
+    pub fn fetch_cache_line(&mut self, addr: Address) -> Result<[u32; 4], Error> {
+        tracing::trace!("Fetching cache line at {:#010x}", addr.working);
+
+        let addr_1 = addr;
+        let addr_2 = addr.map_working(|it| it + 1);
+        let addr_3 = addr.map_working(|it| it + 2);
+        let addr_4 = addr.map_working(|it| it + 3);
+
+        Ok([
+            self.read_32(addr_1)?,
+            self.read_32(addr_2)?,
+            self.read_32(addr_3)?,
+            self.read_32(addr_4)?,
+        ])
     }
 }

@@ -313,37 +313,45 @@ mod cpu {
                         AccessKind::_8 => AccessFns {
                             _8: self.expr,
                             _16: quote! {
-                                |this, io, offset| {
+                                |this, io, addr| {
                                     u16::from_be_bytes([
-                                        (this.read_8)(this, io, offset),
-                                        (this.read_8)(this, io, offset.wrapping_add(1)),
+                                        (this.read_8)(this, io, addr),
+                                        (this.read_8)(this, io, addr.map_working(|it| it + 1)),
                                     ])
                                 }
                             },
                             _32: quote! {
                                 |this, io| {
                                     u32::from_be_bytes([
-                                        (this.read_8)(this, io, 0),
-                                        (this.read_8)(this, io, 1),
-                                        (this.read_8)(this, io, 2),
-                                        (this.read_8)(this, io, 3),
+                                        (this.read_8)(this, io, Address::from(0usize)),
+                                        (this.read_8)(this, io, Address::from(1usize)),
+                                        (this.read_8)(this, io, Address::from(2usize)),
+                                        (this.read_8)(this, io, Address::from(3usize)),
                                     ])
                                 }
                             },
                         },
                         AccessKind::_16 => AccessFns {
                             _8: quote! {
-                                |this, io, offset| {
-                                    (this.read_16)(this, io, (offset >> 1) & 0b1)
-                                        .to_be_bytes()
-                                        [offset & 0b1]
+                                |this, io, addr| {
+                                    addr.index_byte_in_halfword((this.read_16)(this, io, addr))
                                 }
                             },
                             _16: self.expr,
                             _32: quote! {
                                 |this, io| {
-                                    let [a, b] = (this.read_16)(this, io, 0).to_be_bytes();
-                                    let [c, d] = (this.read_16)(this, io, 1).to_be_bytes();
+                                    let [a, b] = (this.read_16)(
+                                        this,
+                                        io,
+                                        Address::from(0usize),
+                                    )
+                                    .to_be_bytes();
+                                    let [c, d] = (this.read_16)(
+                                        this,
+                                        io,
+                                        Address::from(1usize),
+                                    )
+                                    .to_be_bytes();
 
                                     u32::from_be_bytes([a, b, c, d])
                                 }
@@ -351,18 +359,13 @@ mod cpu {
                         },
                         AccessKind::_32 => AccessFns {
                             _8: quote! {
-                                |this, io, offset| (this.read_32)(this, io).to_be_bytes()[offset]
+                                |this, io, addr| {
+                                    addr.index_byte_in_word((this.read_32)(this, io))
+                                }
                             },
                             _16: quote! {
-                                |this, io, offset| {
-                                    u16::from_be_bytes({
-                                        (this.read_32)(this, io)
-                                            .to_be_bytes()
-                                            .as_chunks::<2>()
-                                            .0
-                                            [offset]
-                                    })
-
+                                |this, io, addr| {
+                                    addr.index_halfword_in_word((this.read_32)(this, io))
                                 }
                             },
                             _32: self.expr,
@@ -382,35 +385,25 @@ mod cpu {
                         AccessKind::_8 => AccessFns {
                             _8: self.expr,
                             _16: quote! {
-                                |this, io, offset, value| {
+                                |this, io, addr, value| {
                                     let [hi, lo] = value.to_be_bytes();
-                                    (this.write_8)(
-                                        this,
-                                        io,
-                                        offset,
-                                        hi,
-                                    );
-                                    (this.write_8)(
-                                        this,
-                                        io,
-                                        offset.wrapping_add(1),
-                                        lo,
-                                    );
+                                    (this.write_8)(this, io, addr, hi);
+                                    (this.write_8)(this, io, addr.map_working(|it| it + 1), lo);
                                 }
                             },
                             _32: quote! {
                                 |this, io, value| {
                                     let [a, b, c, d] = value.to_be_bytes();
-                                    (this.write_8)(this, io, 0, a);
-                                    (this.write_8)(this, io, 1, b);
-                                    (this.write_8)(this, io, 2, c);
-                                    (this.write_8)(this, io, 3, d);
+                                    (this.write_8)(this, io, Address::from(0), a);
+                                    (this.write_8)(this, io, Address::from(1), b);
+                                    (this.write_8)(this, io, Address::from(2), c);
+                                    (this.write_8)(this, io, Address::from(3), d);
                                 }
                             },
                         },
                         AccessKind::_16 => AccessFns {
                             _8: quote! {
-                                |this, io, offset, value| {
+                                |this, io, addr, value| {
                                     todo!()
                                 }
                             },
@@ -423,12 +416,12 @@ mod cpu {
                         },
                         AccessKind::_32 => AccessFns {
                             _8: quote! {
-                                |this, io, offset, value| {
+                                |this, io, addr, value| {
                                     todo!()
                                 }
                             },
                             _16: quote! {
-                                |this, io, offset, value| {
+                                |this, io, addr, value| {
                                     todo!()
                                 }
                             },
