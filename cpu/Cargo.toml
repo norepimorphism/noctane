@@ -10,6 +10,7 @@ license = "MPL-2.0"
 
 [dependencies]
 bit = "0.1"
+bitfield = "0.13"
 const_queue = "0.1"
 noctane-gpu = { path = "../gpu" }
 noctane-util = { path = "../util" }

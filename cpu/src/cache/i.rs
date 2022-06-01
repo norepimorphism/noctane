@@ -70,6 +70,16 @@ impl Cache {
         self.is_isolated
     }
 
+    pub fn set_isolated(&mut self, value: bool) {
+        self.is_isolated = value;
+
+        if value {
+            tracing::info!("Isolated I-cache");
+        } else {
+            tracing::info!("Un-isolated I-cache");
+        }
+    }
+
     pub fn read_8<E>(
         &mut self,
         addr: mem::Address,
@@ -104,8 +114,7 @@ impl Cache {
 
         let entry = &mut self.entries[addr.entry_idx];
 
-        // When the cache is isolated, all cache accesses are hits.
-        if self.is_isolated || entry.test_hit(&addr) {
+        if entry.test_hit(&addr) {
             tracing::trace!("Cache hit! (addr={:?})", addr);
         } else {
             tracing::trace!("Cache miss... (addr={:?})", addr);

@@ -110,7 +110,38 @@ impl<'s, 'b> Cpu<'s, 'b> {
     ) -> Option<instr::Execution> {
         self.handle_exc();
 
-        self.pipeline.advance(&mut self.exc, &mut self.mmu, &mut self.reg, &decode_instr)
+        let instr = self.pipeline.advance(
+            &mut self.exc,
+            &mut self.mmu,
+            &mut self.reg,
+            &decode_instr,
+        );
+
+        self.reg.apply_cpr(|idx, value| {
+            match idx {
+                reg::cpr::BAD_VADDR_IDX => {
+                    todo!()
+                }
+                reg::cpr::STATUS_IDX => {
+                    let sr = reg::cpr::Status(value);
+
+                    self.mmu.cache_mut().i.set_isolated(sr.is_c());
+
+                    // TODO
+                }
+                reg::cpr::CAUSE_IDX => {
+                    // TODO
+                }
+                reg::cpr::EPC_IDX => {
+                    todo!()
+                }
+                _ => {
+                    // We don't care, lol.
+                }
+            }
+        });
+
+        instr
     }
 
     fn handle_exc(&mut self) {

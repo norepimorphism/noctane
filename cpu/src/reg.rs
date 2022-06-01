@@ -1,14 +1,19 @@
-use std::{fmt, intrinsics::unlikely};
+use std::fmt;
 
 impl Default for File {
     fn default() -> Self {
-       Self {
+       let mut this = Self {
            pc: 0xbfc0_0000,
            hi: 0,
            lo: 0,
            gprs: [0; 32],
            cprs: [0; 32],
-       }
+           dirty_cpr_idx: None,
+       };
+
+       this.cprs[cpr::PRID_IDX] = cpr::Prid::default().0;
+
+       this
     }
 }
 
@@ -18,9 +23,13 @@ pub struct File {
     pc: u32,
     hi: u32,
     lo: u32,
-    /// General-purpose registers. Zero-indexed.
+    /// General-purpose registers.
     gprs: [u32; 32],
+    /// System coprocessor (COP0) registers.
     cprs: [u32; 32],
+    /// The index of the last system coprocessor register that was modified but has not been applied
+    /// yet, if one exists.
+    dirty_cpr_idx: Option<usize>,
 }
 
 impl fmt::Display for File {
@@ -74,7 +83,7 @@ impl File {
     }
 
     pub fn gpr(&self, index: usize) -> u32 {
-        if unlikely(index == 0) {
+        if index == 0 {
             0
         } else {
             self.gprs[index]
@@ -90,6 +99,74 @@ impl File {
     }
 
     pub fn set_cpr(&mut self, index: usize, value: u32) {
-        self.cprs[index] = value;
+        if index != cpr::PRID_IDX {
+            self.cprs[index] = value;
+            self.dirty_cpr_idx = Some(index);
+        }
+    }
+
+    pub fn apply_cpr(&mut self, mut f: impl FnMut(usize, u32)) {
+        if let Some(idx) = self.dirty_cpr_idx {
+            f(idx, self.cprs[idx]);
+            self.dirty_cpr_idx = None;
+        }
+    }
+}
+
+pub mod cpr {
+    use bitfield::bitfield;
+
+    pub const BAD_VADDR_IDX:    usize = 8;
+    pub const STATUS_IDX:       usize = 12;
+    pub const CAUSE_IDX:        usize = 13;
+    pub const EPC_IDX:          usize = 14;
+    pub const PRID_IDX:         usize = 15;
+
+    bitfield! {
+        pub struct Status(u32);
+        pub ie_c, set_ie_c: 0;
+        pub ku_c, set_ku_c: 1;
+        pub ie_p, set_ie_p: 2;
+        pub ku_p, set_ku_p: 3;
+        pub ie_o, set_ie_o: 4;
+        pub ku_o, set_ku_o: 5;
+        pub im, set_im: 15, 8;
+        pub bool, is_c, set_is_c: 16;
+        pub bool, sw_c, set_sw_c: 17;
+        pub pz, set_pz: 18;
+        pub cm, set_cm: 19;
+        pub pe, set_pe: 20;
+        pub ts, set_ts: 21;
+        pub bev, set_bev: 22;
+        pub re, set_re: 25;
+        pub cu0, set_cu0: 28;
+        pub cu1, set_cu1: 29;
+        pub cu2, set_cu2: 30;
+        pub cu3, set_cu3: 31;
+    }
+
+    bitfield! {
+        pub struct Cause(u32);
+        pub exc_code, set_exc_code: 6, 2;
+        pub ip, set_ip: 15, 8;
+        pub ce, set_ce: 29, 28;
+        pub bd, set_bd: 31;
+    }
+
+    impl Default for Prid {
+        fn default() -> Self {
+            let mut this = Self(0);
+            this.set_imp(3);
+            // I have no idea what Sony set this to.
+            this.set_rev(0xaaaa);
+
+            this
+        }
+    }
+
+    bitfield! {
+        pub struct Prid(u32);
+        pub rev, set_rev: 7, 0;
+        pub imp, set_imp: 15, 8;
     }
 }
