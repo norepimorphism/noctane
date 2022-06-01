@@ -19,6 +19,9 @@ pub mod exc;
 pub mod instr;
 pub mod mem;
 pub mod reg;
+pub mod sym;
+
+use std::collections::VecDeque;
 
 pub use bus::Bus;
 pub use cache::{i::Cache as ICache, Cache};
@@ -29,7 +32,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             cache: Cache::default(),
-            exc: exc::Queue::new(),
+            exc: VecDeque::new(),
             pipeline: instr::Pipeline::default(),
             reg: reg::File::default(),
         }
@@ -37,9 +40,9 @@ impl Default for State {
 }
 
 pub struct State {
-    pub cache: Cache,
     /// The exception queue.
     pub exc: exc::Queue,
+    pub cache: Cache,
     /// The instruction pipeline.
     pub pipeline: instr::Pipeline,
     /// The register file.
@@ -116,13 +119,8 @@ impl<'s, 'b> Cpu<'s, 'b> {
             &decode_instr,
         );
 
-        self.reg.apply_cpr(|idx, value| {
-            match idx {
-                reg::cpr::BAD_VADDR_IDX => {
-                    todo!()
-                }
-                reg::cpr::STATUS_IDX => {
-                    let sr = reg::cpr::Status(value);
+        if let Some(sr) = self.reg.apply_sr() {
+            let sr = reg::cpr::Status(sr);
 
                     self.mem.cache_mut().i.set_isolated(sr.is_c());
 
@@ -134,25 +132,25 @@ impl<'s, 'b> Cpu<'s, 'b> {
 
                     // TODO
                 }
-                reg::cpr::CAUSE_IDX => {
-                    // TODO
-                }
-                reg::cpr::EPC_IDX => {
-                    todo!()
-                }
-                _ => {
-                    // We don't care, lol.
-                }
-            }
-        });
 
         instr
     }
 
     fn handle_exc(&mut self) {
-        if let Ok(e) = self.exc.pop() {
-            tracing::error!("Exception: {:?}", e);
-            *self.reg.pc_mut() = e.vector();
+        if let Some(exc) = self.exc.pop_front() {
+            match exc.code {
+                exc::code::SYSCALL => {
+                    let code = self.reg.gpr(4);
+                    tracing::info!("Syscall: {}()", sym::for_syscall(code));
+                }
+                _ => {
+                    tracing::error!("Exception: {:?}", exc);
+                }
+            }
+
+            self.reg.set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
+            self.reg.set_cpr(reg::cpr::EPC_IDX, exc.epc);
+            *self.reg.pc_mut() = exc::VECTOR;
         }
     }
 }

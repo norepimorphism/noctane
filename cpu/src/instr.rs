@@ -109,7 +109,7 @@ pub mod r {
 /// 5. Write Back (WB)
 #[derive(Default)]
 pub struct Pipeline {
-    rd: Option<Instr>,
+    rd: Option<(u32, Instr)>,
 }
 
 impl fmt::Display for Pipeline {
@@ -119,7 +119,7 @@ impl fmt::Display for Pipeline {
             "{}",
             self.rd.as_ref().map_or_else(
                 || String::from("(none)"),
-                |instr| instr.asm().to_string(),
+                |(_, instr)| instr.asm().to_string(),
             ),
         )
     }
@@ -146,7 +146,7 @@ impl Pipeline {
         *reg.pc_mut() = pc.wrapping_add(4);
 
         let instr = decode_instr(op);
-        self.rd = Some(instr);
+        self.rd = Some((pc, instr));
 
         Some(Execution { pc, instr })
     }
@@ -157,20 +157,19 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-        pc: &mut u32,
+        next_pc: &mut u32,
     ) {
-        if let Some(instr) = self.rd.take() {
+        if let Some((pc, instr)) = self.rd.take() {
             let mut state = opx::State::read(instr, reg);
 
             let mut target = None;
-            if let Err(e) = state.execute(reg, mem, *pc, &mut target) {
-                tracing::error!("Failed to execute instruction: {:?}", e);
-                exc.push(e).unwrap();
+            if let Err(e) = state.execute(reg, mem, pc, *next_pc, &mut target) {
+                exc.push_back(e);
             } else if let Some(target) = target {
                 self.advance(exc, mem, reg, decode_instr);
                 self.execute_queued_instr(exc, mem, reg, decode_instr, &mut 0);
 
-                *pc = target;
+                *next_pc = target;
             }
         }
     }
@@ -254,7 +253,7 @@ macro_rules! def_instr_and_op_kind {
 
             use std::fmt;
 
-            use super::{Instr, Memory, exc, reg};
+            use super::{Instr, Memory, exc::{self, Exception}, reg};
 
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
@@ -299,8 +298,9 @@ macro_rules! def_instr_and_op_kind {
                     reg: &mut reg::File,
                     mem: &mut Memory,
                     pc: u32,
+                    next_pc: u32,
                     target: &mut Option<u32>,
-                ) -> Result<(), exc::Kind> {
+                ) -> Result<(), Exception> {
                     #[inline(always)]
                     fn sign_extend_16(value: u16) -> u32 {
                         ((value as i16) as i32) as u32
@@ -363,12 +363,13 @@ macro_rules! def_instr_and_op_kind {
                                     reg: &'a mut reg::File,
                                     mem: &'a mut Memory<'c, 'b>,
                                     pc: u32,
+                                    next_pc: u32,
                                     target: &'a mut Option<u32>,
                                 }
 
                                 // tracing::trace!("{:?}", opx);
 
-                                $fn(Context { opx, reg, mem, pc, target })
+                                $fn(Context { opx, reg, mem, pc, next_pc, target })
                             }
                         )*
                     }
@@ -415,7 +416,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(exc::Kind::IntegerOverflow)
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -432,7 +433,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(sign_extend_16(ctx.opx.imm) as i32);
 
             if overflowed {
-                Err(exc::Kind::IntegerOverflow)
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rt.index, result as u32);
 
@@ -491,7 +492,7 @@ def_instr_and_op_kind!(
                 0 => {
                     tracing::trace!("bltz");
                     if (ctx.opx.rs.gpr_value as i32) < 0 {
-                        *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                        *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
                     }
 
                     Ok(())
@@ -499,7 +500,7 @@ def_instr_and_op_kind!(
                 1 => {
                     tracing::trace!("bgez");
                     if (ctx.opx.rs.gpr_value as i32) >= 0 {
-                        *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                        *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
                     }
 
                     Ok(())
@@ -512,7 +513,7 @@ def_instr_and_op_kind!(
                     tracing::trace!("bgezal");
                     todo!();
                 }
-                _ => Err(exc::Kind::ReservedInstr),
+                _ => Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc)),
             }
         },
     },
@@ -522,7 +523,7 @@ def_instr_and_op_kind!(
         asm: ["beq" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value == ctx.opx.rt.gpr_value {
-                *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
             }
 
             Ok(())
@@ -534,7 +535,7 @@ def_instr_and_op_kind!(
         asm: ["bgtz" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) > 0 {
-                *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
             }
 
             Ok(())
@@ -546,7 +547,7 @@ def_instr_and_op_kind!(
         asm: ["blez" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) <= 0 {
-                *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
             }
 
             Ok(())
@@ -558,7 +559,7 @@ def_instr_and_op_kind!(
         asm: ["bne" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value != ctx.opx.rt.gpr_value {
-                *ctx.target = Some(calc_branch_target(ctx.pc, ctx.opx.imm));
+                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
             }
 
             Ok(())
@@ -568,8 +569,8 @@ def_instr_and_op_kind!(
         name: Break,
         type: i,
         asm: ["break"],
-        fn: |_: Context| {
-            Err(exc::Kind::Breakpoint)
+        fn: |ctx: Context| {
+            Err(Exception::new(exc::code::BREAKPOINT, ctx.pc))
         },
     },
     {
@@ -589,7 +590,7 @@ def_instr_and_op_kind!(
                         tracing::trace!("cfc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(exc::Kind::CopUnusable)
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                     }
                     4 => {
                         tracing::trace!("mtc0");
@@ -601,23 +602,27 @@ def_instr_and_op_kind!(
                         tracing::trace!("ctc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(exc::Kind::CopUnusable)
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                     }
                     _ => {
-                        Err(exc::Kind::ReservedInstr)
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                     }
                 }
+                // The PSX CPU doesn't implement an MMU... so page table instructions are reserved.
                 1 => {
                     tracing::trace!("tlbr");
-                    todo!();
+
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                 }
                 2 => {
                     tracing::trace!("tlbwi");
-                    todo!();
+
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                 }
                 8 => {
                     tracing::trace!("tlbp");
-                    todo!();
+
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                 }
                 16 => {
                     tracing::trace!("rfe");
@@ -632,7 +637,7 @@ def_instr_and_op_kind!(
                     Ok(())
                 }
                 _ => {
-                    Err(exc::Kind::ReservedInstr)
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
                 }
             }
         },
@@ -641,9 +646,9 @@ def_instr_and_op_kind!(
         name: Cop1,
         type: i,
         asm: ["cop1"],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -659,9 +664,9 @@ def_instr_and_op_kind!(
         name: Cop3,
         type: i,
         asm: ["cop3"],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -694,7 +699,7 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["j" *()],
         fn: |ctx: Context| {
-            *ctx.target = Some(calc_jump_target(ctx.pc, ctx.opx.target));
+            *ctx.target = Some(calc_jump_target(ctx.next_pc, ctx.opx.target));
 
             Ok(())
         },
@@ -704,8 +709,8 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["jal" *()],
         fn: |ctx: Context| {
-            let target_addr = calc_jump_target(ctx.pc, ctx.opx.target);
-            let ret_addr = calc_ret_addr(ctx.pc);
+            let target_addr = calc_jump_target(ctx.next_pc, ctx.opx.target);
+            let ret_addr = calc_ret_addr(ctx.next_pc);
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
@@ -720,7 +725,7 @@ def_instr_and_op_kind!(
         asm: ["jalr" %(rd), %(rs)],
         fn: |ctx: Context| {
             let target_addr = ctx.opx.rs.gpr_value;
-            let ret_addr = calc_ret_addr(ctx.pc);
+            let ret_addr = calc_ret_addr(ctx.next_pc);
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
@@ -818,9 +823,9 @@ def_instr_and_op_kind!(
         name: Lwc1,
         type: i,
         asm: ["lwc1" %(rt), #(s)],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -836,9 +841,9 @@ def_instr_and_op_kind!(
         name: Lwc3,
         type: i,
         asm: ["lwc3" %(rt), #(s)],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -1082,7 +1087,7 @@ def_instr_and_op_kind!(
                 .overflowing_sub(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(exc::Kind::IntegerOverflow)
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -1121,9 +1126,9 @@ def_instr_and_op_kind!(
         name: Swc1,
         type: i,
         asm: ["swc1" %(rt), #(s)],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -1139,9 +1144,9 @@ def_instr_and_op_kind!(
         name: Swc3,
         type: i,
         asm: ["swc3" %(rt), #(s)],
-        fn: |_| {
+        fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(exc::Kind::CopUnusable)
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
         },
     },
     {
@@ -1160,8 +1165,8 @@ def_instr_and_op_kind!(
         name: Syscall,
         type: i,
         asm: ["syscall"],
-        fn: |_: Context| {
-            todo!()
+        fn: |ctx: Context| {
+            Err(Exception::new(exc::code::SYSCALL, ctx.pc))
         },
     },
     {

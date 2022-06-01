@@ -3,14 +3,19 @@ use std::fmt;
 impl Default for File {
     fn default() -> Self {
        let mut this = Self {
+           // This is the reset vector.
+           // TODO: We should do something more proper in the future, like having a method called
+           // `reset` that sets the PC to this.
            pc: 0xbfc0_0000,
            hi: 0,
            lo: 0,
            gprs: [0; 32],
            cprs: [0; 32],
-           dirty_cpr_idx: None,
+           sr_is_dirty: false,
+           pending_cause: None,
        };
 
+       // PRId has a special default.
        this.cprs[cpr::PRID_IDX] = cpr::Prid::default().0;
 
        this
@@ -27,9 +32,8 @@ pub struct File {
     gprs: [u32; 32],
     /// System coprocessor (COP0) registers.
     cprs: [u32; 32],
-    /// The index of the last system coprocessor register that was modified but has not been applied
-    /// yet, if one exists.
-    dirty_cpr_idx: Option<usize>,
+    sr_is_dirty: bool,
+    pending_cause: Option<cpr::Cause>,
 }
 
 impl fmt::Display for File {
@@ -99,22 +103,28 @@ impl File {
     }
 
     pub fn set_cpr(&mut self, index: usize, value: u32) {
-        if index != cpr::PRID_IDX {
-            self.cprs[index] = value;
-            self.dirty_cpr_idx = Some(index);
+        if index == cpr::STATUS_IDX {
+            self.sr_is_dirty = true;
         }
+
+        self.cprs[index] = value;
     }
 
-    pub fn apply_cpr(&mut self, mut f: impl FnMut(usize, u32)) {
-        if let Some(idx) = self.dirty_cpr_idx {
-            f(idx, self.cprs[idx]);
-            self.dirty_cpr_idx = None;
+    pub fn apply_sr(&mut self) -> Option<u32> {
+        if self.sr_is_dirty {
+            self.sr_is_dirty = false;
+
+            Some(self.cprs[cpr::STATUS_IDX])
+        } else {
+            None
         }
     }
 }
 
 pub mod cpr {
     use bitfield::bitfield;
+
+    use crate::exc::Exception;
 
     pub const BAD_VADDR_IDX:    usize = 8;
     pub const STATUS_IDX:       usize = 12;
@@ -145,8 +155,19 @@ pub mod cpr {
         pub cu3, set_cu3: 31;
     }
 
+    impl From<Exception> for Cause {
+        fn from(exc: Exception) -> Self {
+            let mut this = Self(0);
+            this.set_exc_code(exc.code);
+            // TODO
+
+            this
+        }
+    }
+
     bitfield! {
         pub struct Cause(u32);
+        impl Debug;
         pub exc_code, set_exc_code: 6, 2;
         pub ip, set_ip: 15, 8;
         pub ce, set_ce: 29, 28;
