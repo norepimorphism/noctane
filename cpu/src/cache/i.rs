@@ -193,6 +193,10 @@ impl Cache {
         } else {
             tracing::trace!("Cache miss... (addr={:?})", addr);
             entry.invalidate_line(addr, fetch_line);
+
+            if !self.is_isolated {
+                entry.tag = addr.tag;
+            }
         }
 
         entry
@@ -202,7 +206,7 @@ impl Cache {
 impl Default for Entry {
     fn default() -> Self {
         Self {
-            tag: 0,
+            tag: 0xfffff,
             line: [[0; 4]; 4],
         }
     }
@@ -235,8 +239,6 @@ impl Entry {
         addr: Address,
         fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
     ) {
-        self.tag = addr.tag;
-
         let line = fetch_line(mem::Address::from(addr.working & !0b1111));
         for i in 0..4 {
             self.line[i] = line[i].to_be_bytes();

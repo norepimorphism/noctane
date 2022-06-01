@@ -621,7 +621,9 @@ def_instr_and_op_kind!(
                 }
                 16 => {
                     tracing::trace!("rfe");
-                    todo!();
+                    // TODO
+
+                    Ok(())
                 }
                 _ => {
                     Err(exc::Kind::ReservedInstr)
