@@ -4,7 +4,7 @@ use std::{collections::HashSet, io::Write as _};
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(true)
         .with_level(true)
         .with_target(false)
@@ -62,8 +62,13 @@ impl Debugger<'_> {
             "+b" => {
                 self.do_add_breakpoint(args)
             }
-            "c" => {
-                self.do_continue();
+            "c" | "cl" => {
+                self.do_continue(false);
+
+                Ok(())
+            }
+            "cq" => {
+                self.do_continue(true);
 
                 Ok(())
             }
@@ -77,8 +82,13 @@ impl Debugger<'_> {
 
                 Ok(())
             }
-            "s" => {
-                self.do_step();
+            "s" | "sl" => {
+                self.do_step_loudly();
+
+                Ok(())
+            }
+            "sq" => {
+                self.do_step_quietly();
 
                 Ok(())
             }
@@ -104,9 +114,13 @@ impl Debugger<'_> {
         Ok(())
     }
 
-    fn do_continue(&mut self) {
+    fn do_continue(&mut self, be_quiet: bool) {
         loop {
-            self.do_step();
+            if be_quiet {
+                self.do_step_quietly();
+            } else {
+                self.do_step_loudly();
+            }
 
             let pc = self.cpu.reg().pc();
             if self.breakpoints.get(&pc).is_some() {
@@ -124,9 +138,13 @@ impl Debugger<'_> {
         println!("{}", self.cpu.mmu().cache().i);
     }
 
-    fn do_step(&mut self) {
+    fn do_step_loudly(&mut self) {
         if let Some(exec) = self.cpu.execute_next_instr() {
             println!("{:08x}   {}", exec.pc, exec.instr.asm());
         }
+    }
+
+    fn do_step_quietly(&mut self) {
+        self.cpu.execute_next_instr();
     }
 }

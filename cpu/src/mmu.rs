@@ -9,12 +9,7 @@
 
 use std::ops::{Deref, DerefMut};
 
-use crate::mem::{self, Memory};
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum Error {
-    Memory(mem::Error),
-}
+use crate::mem::Memory;
 
 impl<'c, 'b> Mmu<'c, 'b> {
     pub fn new(mem: Memory<'c, 'b>) -> Self {
@@ -30,10 +25,10 @@ macro_rules! def_read {
         fn $fn_name:ident() -> $fn_out_ty:ty = $mem_fn_name:ident
     ) => {
         /// Reads the value at the given virtual address.
-        pub fn $fn_name(&mut self, vaddr: u32) -> Result<$fn_out_ty, Error> {
+        pub fn $fn_name(&mut self, vaddr: u32) -> $fn_out_ty {
             let addr = self.translate_vaddr(vaddr);
 
-            self.$mem_fn_name(addr).map_err(Error::Memory)
+            self.$mem_fn_name(addr)
         }
     };
 }
@@ -43,11 +38,9 @@ macro_rules! def_write {
         fn $fn_name:ident($fn_in_ty:ty) = $mem_fn_name:ident
     ) => {
         /// Writes a value to the given virtual address.
-        pub fn $fn_name(&mut self, vaddr: u32, value: $fn_in_ty) -> Result<(), Error> {
+        pub fn $fn_name(&mut self, vaddr: u32, value: $fn_in_ty) {
             let addr = self.translate_vaddr(vaddr);
-            self.$mem_fn_name(addr, value).map_err(Error::Memory)?;
-
-            Ok(())
+            self.$mem_fn_name(addr, value);
         }
     };
 }

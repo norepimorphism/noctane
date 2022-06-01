@@ -3,16 +3,6 @@ use noctane_proc_macro::gen_cpu_bus_io;
 
 use crate::mem::Address;
 
-/// The error type returned by `read` and `write` functions.
-#[derive(Debug, Eq, PartialEq)]
-pub enum Error {
-    /// An invalid address was used in an I/O access.
-    ///
-    /// You may receive this if your addresses are not rebased relative to the start of the I/O
-    /// region (which they should be).
-    UnmappedAddress(usize),
-}
-
 /// External components accessible to the CPU via I/O registers.
 pub struct Io<'a> {
     pub gpu: &'a mut Gpu,
@@ -25,11 +15,11 @@ impl Io<'_> {
         &mut self,
         addr: Address,
         f: impl FnOnce(&mut Self, &Register, Address) -> T,
-    ) -> Result<T, Error> {
+    ) -> Result<T, ()> {
         macro_rules! get_lut_entry {
             ($mod_name:ident $(,)?) => {
                 (
-                    $mod_name::LUT.get(addr.working - $mod_name::BASE_ADDR),
+                    $mod_name::LUT.get(addr.working - $mod_name::BASE_ADDR).ok_or(()),
                     stringify!($mod_name),
                 )
             };
@@ -54,12 +44,10 @@ impl Io<'_> {
             mem_ctrl_2::BASE_ADDR.. => get_lut_entry!(mem_ctrl_2),
             perif::BASE_ADDR.. => get_lut_entry!(perif),
             mem_ctrl_1::BASE_ADDR.. => get_lut_entry!(mem_ctrl_1),
-            _ => (None, ""),
+            _ => (Err(()), ""),
         };
 
-        let Some(lut_entry) = lut_entry else {
-            return Err(Error::UnmappedAddress(addr.init));
-        };
+        let lut_entry = lut_entry?;
 
         // [`Option::get`] is unnecessary here as LUT entry indices are guaranteed by
         // [`gen_cpu_bus_io`] to point to valid register entries.
@@ -74,7 +62,7 @@ impl Io<'_> {
 /// Defines a `read_` method in which a byte index is relevant (i.e., `read_8`, `read_16`).
 macro_rules! def_read_with_addr {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, Error> {
+        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, ()> {
             self.access(addr, |this, reg, addr| (reg.$fn_name)(reg, this, addr))
         }
     };
@@ -83,7 +71,7 @@ macro_rules! def_read_with_addr {
 /// Defines a `read_` method in which a byte index is not relevant (i.e., `read_32`).
 macro_rules! def_read_without_addr {
     ($fn_name:ident() -> $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, Error> {
+        pub fn $fn_name(&mut self, addr: Address) -> Result<$ty, ()> {
             self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this))
         }
     };
@@ -92,7 +80,7 @@ macro_rules! def_read_without_addr {
 /// Defines a `write_` method in which a byte index is relevant (i.e., `write_8`, `write_16`).
 macro_rules! def_write_with_addr {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), Error> {
+        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), ()> {
             self.access(addr, |this, reg, addr| (reg.$fn_name)(reg, this, addr, value))
         }
     };
@@ -101,7 +89,7 @@ macro_rules! def_write_with_addr {
 /// Defines a `write_` method in which a byte index is not relevant (i.e., `write_32`).
 macro_rules! def_write_without_addr {
     ($fn_name:ident($ty:ty)) => {
-        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), Error> {
+        pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), ()> {
             self.access(addr, |this, reg, _| (reg.$fn_name)(reg, this, value))
         }
     };

@@ -9,6 +9,7 @@
     exclusive_range_pattern,
     let_else,
     slice_as_chunks,
+    type_alias_impl_trait,
     unchecked_math,
 )]
 

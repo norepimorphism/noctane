@@ -27,7 +27,7 @@ impl From<mem::Address> for Address {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Address {
     working: usize,
     tag: usize,
@@ -72,106 +72,130 @@ impl Cache {
 
     pub fn set_isolated(&mut self, value: bool) {
         self.is_isolated = value;
-
-        if value {
-            tracing::info!("Isolated I-cache");
-        } else {
-            tracing::info!("Un-isolated I-cache");
-        }
     }
 
-    pub fn read_8<E>(
+    pub fn read_8(
         &mut self,
         addr: mem::Address,
-        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
-    ) -> Result<u8, E> {
-        self.read(addr, fetch_line, |word| addr.index_byte_in_word(word))
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+    ) -> u8 {
+        self.read(
+            addr.into(),
+            fetch_line,
+            |word| addr.index_byte_in_word(word),
+        )
     }
 
-    pub fn read_16<E>(
+    pub fn read_16(
         &mut self,
         addr: mem::Address,
-        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
-    ) -> Result<u16, E> {
-        self.read(addr, fetch_line, |word| addr.index_halfword_in_word(word))
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+    ) -> u16 {
+        self.read(
+            addr.into(),
+            fetch_line,
+            |word| addr.index_halfword_in_word(word),
+        )
     }
 
-    pub fn read_32<E>(
+    pub fn read_32(
         &mut self,
         addr: mem::Address,
-        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
-    ) -> Result<u32, E> {
-        self.read(addr, fetch_line, |word| word)
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+    ) -> u32 {
+        self.read(
+            addr.into(),
+            fetch_line,
+            |word| word,
+        )
     }
 
-    fn read<T, E>(
+    fn read<T>(
         &mut self,
-        addr: mem::Address,
-        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], E>,
+        addr: Address,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
         extract: impl FnOnce(u32) -> T,
-    ) -> Result<T, E> {
-        let addr = Address::from(addr);
+    ) -> T {
+        let entry = self.access(addr, fetch_line);
 
-        let entry = &mut self.entries[addr.entry_idx];
-
-        if entry.test_hit(&addr) {
-            tracing::trace!("Cache hit! (addr={:?})", addr);
-        } else {
-            tracing::trace!("Cache miss... (addr={:?})", addr);
-            entry.tag = addr.tag;
-
-            let line = fetch_line(mem::Address::from(addr.working & !0b1111))?;
-            for i in 0..4 {
-                entry.line[i] = line[i].to_be_bytes();
-            }
-        };
-
-        Ok(extract(u32::from_be_bytes(entry.line[addr.word_idx])))
+        extract(u32::from_be_bytes(entry.line[addr.word_idx]))
     }
 
     pub fn write_8(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         value: u8,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
     ) {
-        let addr = Address::from(mem_addr);
-
-        let entry = &mut self.entries[addr.entry_idx];
-        if entry.test_hit(&addr) {
-            tracing::trace!("Updating cache (addr={:?})", addr);
-            entry.line[addr.word_idx][mem_addr.byte_idx] = value;
-        }
+        self.write_partial(
+            addr.into(),
+            fetch_line,
+            |word| {
+                word[addr.byte_idx] = value;
+            },
+        )
     }
 
     pub fn write_16(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         value: u16,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
     ) {
-        let addr = Address::from(mem_addr);
+        self.write_partial(
+            addr.into(),
+            fetch_line,
+            |word| {
+                word
+                    .as_chunks_mut::<2>()
+                    .0
+                    [addr.halfword_idx] = value.to_be_bytes();
+            },
+        )
+    }
 
+    fn write_partial(
+        &mut self,
+        addr: Address,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+        modify_word: impl FnOnce(&mut [u8; 4]),
+    ) {
         let entry = &mut self.entries[addr.entry_idx];
-        if entry.test_hit(&addr) {
-            tracing::trace!("Updating cache (addr={:?})", addr);
-            entry
-                .line[addr.word_idx]
-                .as_chunks_mut::<2>()
-                .0
-                [mem_addr.halfword_idx] = value.to_be_bytes();
+        if self.is_isolated {
+            tracing::trace!("Invalidating cache line due to partial write... (addr={:?})", addr);
+            entry.invalidate_line(addr, fetch_line);
+
+            modify_word(&mut entry.line[addr.word_idx]);
+        } else if entry.test_hit(addr) {
+            modify_word(&mut entry.line[addr.word_idx]);
         }
     }
 
     pub fn write_32(
         &mut self,
-        mem_addr: mem::Address,
+        addr: mem::Address,
         value: u32,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
     ) {
-        let addr = Address::from(mem_addr);
-        tracing::trace!("Updating cache (addr={:?})", addr);
-
-        let entry = &mut self.entries[addr.entry_idx];
-        entry.tag = addr.tag;
+        let addr = addr.into();
+        let entry = self.access(addr, fetch_line);
         entry.line[addr.word_idx] = value.to_be_bytes();
+    }
+
+    fn access(
+        &mut self,
+        addr: Address,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+    ) -> &mut Entry {
+        let entry = &mut self.entries[addr.entry_idx];
+        if entry.test_hit(addr) {
+            tracing::trace!("Cache hit! (addr={:?})", addr);
+        } else {
+            tracing::trace!("Cache miss... (addr={:?})", addr);
+            entry.invalidate_line(addr, fetch_line);
+        }
+
+        entry
     }
 }
 
@@ -202,8 +226,21 @@ impl fmt::Display for Entry {
 }
 
 impl Entry {
-    fn test_hit(&self, addr: &Address) -> bool {
+    fn test_hit(&self, addr: Address) -> bool {
         self.tag == addr.tag
+    }
+
+    fn invalidate_line(
+        &mut self,
+        addr: Address,
+        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+    ) {
+        self.tag = addr.tag;
+
+        let line = fetch_line(mem::Address::from(addr.working & !0b1111));
+        for i in 0..4 {
+            self.line[i] = line[i].to_be_bytes();
+        }
     }
 }
 
@@ -223,13 +260,16 @@ mod tests {
                 for addr in gen_test_addrs() {
                     let written: u8 = rand::random();
                     let written: u32 = u32::from_be_bytes([written; 4]);
-                    cache.$write_name(addr, written as $ty);
+                    cache.$write_name(
+                        addr,
+                        written as $ty,
+                        |_| [0; 4],
+                    );
 
                     let read = cache.$read_name(
                         addr,
-                        |_| -> Result<_, ()> { Ok([written; 4]) },
-                    )
-                    .unwrap();
+                        |_| [written; 4],
+                    );
 
                     assert_eq!(
                         written as $ty,

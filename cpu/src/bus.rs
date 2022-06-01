@@ -8,26 +8,6 @@ pub use io::Io;
 
 use crate::mem::Address;
 
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        match e {
-            io::Error::UnmappedAddress(addr) => {
-                Self::UnmappedAddress(addr.wrapping_add(Bus::IO_BASE_ADDR))
-            }
-        }
-    }
-}
-
-/// The error type returned by `read` and `write` functions.
-#[derive(Debug, Eq, PartialEq)]
-pub enum Error {
-    /// An invalid address was used in a bus access.
-    ///
-    /// You may receive this if your addresses are not rebased relative to the start of each memory
-    /// segment (`kuseg`, `kseg0`, etc.).
-    UnmappedAddress(usize),
-}
-
 macro_rules! def_bank {
     ($name:ident, $size:literal @ $addr:literal) => {
         impl Default for $name {
@@ -126,12 +106,12 @@ impl Bus<'_> {
     /// `access_io` is called when the given address points into the I/O region. An address relative
     /// to the start of the I/O region is passed to `access_io`. Implementations of `access_io` are
     /// expected to simply delegate to the appropriate I/O read/write function.
-    fn access<T>(
+    fn access<T: Default>(
         &mut self,
         mut addr: Address,
         access_word: impl FnOnce(&mut u32) -> T,
-        access_io: impl FnOnce(&mut Self, Address) -> Result<T, io::Error>,
-    ) -> Result<T, Error> {
+        access_io: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
+    ) -> T {
         macro_rules! get_bank {
             ($field_name:ident, $struct_name:ident $(,)?) => {
                 {
@@ -144,7 +124,8 @@ impl Bus<'_> {
 
                     self.$field_name
                         .get_mut(make_index(addr.working))
-                        .ok_or(Error::UnmappedAddress(addr.init))?
+                        .map(|it| access_word(it))
+                        .ok_or(())
                 }
             };
         }
@@ -153,19 +134,19 @@ impl Bus<'_> {
         // unbounded range in the positive direction and work backwards; `match`es work in a
         // well-defined order from the first to last pattern.
         match addr.working {
-            Bios::BASE_ADDR.. => Ok(access_word(get_bank!(bios, Bios))),
-            Exp3::BASE_ADDR.. => Ok(access_word(get_bank!(exp_3, Exp3))),
+            Bios::BASE_ADDR.. => get_bank!(bios, Bios),
+            Exp3::BASE_ADDR.. => get_bank!(exp_3, Exp3),
             Self::IO_BASE_ADDR.. => {
                 access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR))
-                    .map_err(Error::from)
             }
-            Exp1::BASE_ADDR.. => Ok(access_word(get_bank!(exp_1, Exp1))),
-            MainRam::BASE_ADDR.. => Ok(access_word(get_bank!(main_ram, MainRam))),
-            _ => Err(Error::UnmappedAddress(addr.init)),
+            Exp1::BASE_ADDR.. => get_bank!(exp_1, Exp1),
+            MainRam::BASE_ADDR.. => get_bank!(main_ram, MainRam),
+            _ => Err(()),
         }
+        .unwrap_or(T::default())
     }
 
-    pub fn read_8(&mut self, addr: Address) -> Result<u8, Error> {
+    pub fn read_8(&mut self, addr: Address) -> u8 {
         self.access(
             addr,
             |word| {
@@ -177,7 +158,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn read_16(&mut self, addr: Address) -> Result<u16, Error> {
+    pub fn read_16(&mut self, addr: Address) -> u16 {
         self.access(
             addr,
             |word| {
@@ -189,7 +170,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn read_32(&mut self, addr: Address) -> Result<u32, Error> {
+    pub fn read_32(&mut self, addr: Address) -> u32 {
         self.access(
             addr,
             |word| {
@@ -201,7 +182,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_8(&mut self, addr: Address, value: u8) -> Result<(), Error> {
+    pub fn write_8(&mut self, addr: Address, value: u8) {
         self.access(
             addr,
             |word| {
@@ -215,7 +196,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_16(&mut self, addr: Address, value: u16) -> Result<(), Error> {
+    pub fn write_16(&mut self, addr: Address, value: u16) {
         self.access(
             addr,
             |word| {
@@ -229,7 +210,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_32(&mut self, addr: Address, value: u32) -> Result<(), Error> {
+    pub fn write_32(&mut self, addr: Address, value: u32) {
         self.access(
             addr,
             |word| {
@@ -241,19 +222,19 @@ impl Bus<'_> {
         )
     }
 
-    pub fn fetch_cache_line(&mut self, addr: Address) -> Result<[u32; 4], Error> {
+    pub fn fetch_cache_line(&mut self, addr: Address) -> [u32; 4] {
         tracing::trace!("Fetching cache line (addr={:#010x})", addr.working);
 
-        let a = self.read_32(addr.map_working(|it| it.wrapping_add(0)))?;
-        let b = self.read_32(addr.map_working(|it| it.wrapping_add(4)))?;
-        let c = self.read_32(addr.map_working(|it| it.wrapping_add(8)))?;
-        let d = self.read_32(addr.map_working(|it| it.wrapping_add(12)))?;
+        let a = self.read_32(addr.map_working(|it| it.wrapping_add(0)));
+        let b = self.read_32(addr.map_working(|it| it.wrapping_add(4)));
+        let c = self.read_32(addr.map_working(|it| it.wrapping_add(8)));
+        let d = self.read_32(addr.map_working(|it| it.wrapping_add(12)));
 
         tracing::trace!("line[0] <- {:#010x}", a);
         tracing::trace!("line[1] <- {:#010x}", b);
         tracing::trace!("line[2] <- {:#010x}", c);
         tracing::trace!("line[3] <- {:#010x}", d);
 
-        Ok([a, b, c, d])
+        [a, b, c, d]
     }
 }

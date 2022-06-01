@@ -4,12 +4,7 @@
 //! are stripped of their bottom two bits, and accesses are delegated to either the CPU cache (see
 //! [`crate::cache`]) or memory bus (see [`bus`]).
 
-use crate::{Cache, bus::{self, Bus}};
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum Error {
-    Bus(bus::Error),
-}
+use crate::{Cache, bus::Bus};
 
 impl From<usize> for Address {
     fn from(init: usize) -> Self {
@@ -127,8 +122,8 @@ macro_rules! def_access {
 
                         if self.cache.i.is_isolated() {
                             // When the I-cache is isolated, *all* memory accesses are cached, and
-                            // there are no write-throughs. KSEG0 is the only cached region, so we
-                            // can simply redirect everything to that handler.
+                            // there are no write-throughs. KSEG0 is like the other segments except
+                            // cached, so we can simply redirect everything to that handler.
                             access_kseg0(self, make_address($shift_amt))
                         } else {
                             $f(self, make_address($shift_amt))
@@ -158,57 +153,57 @@ macro_rules! def_access {
 
 macro_rules! def_read_fn {
     ($fn_name:ident $access_name:ident $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: u32) -> Result<$ty, Error> {
-            let result = self.$access_name(
+        pub fn $fn_name(&mut self, addr: u32) -> $ty {
+            let value = self.$access_name(
                 addr,
                 |this, addr| {
                     this.cache.i.$fn_name(
                         addr,
                         |addr| {
-                            this.bus.fetch_cache_line(addr).map_err(Error::Bus)
+                            this.bus.fetch_cache_line(addr)
                         },
                     )
                 },
                 |this, addr| {
-                    this.bus.$fn_name(addr).map_err(Error::Bus)
+                    this.bus.$fn_name(addr)
                 },
                 |_, _| {
                     // TODO
-                    Ok(0)
+                    0
                 },
             );
+            tracing::trace!("#[{:#010x}] -> {:#08x}", addr, value);
 
-            if let Ok(value) = result {
-                tracing::trace!("#[{:#010x}] -> {:#08x}", addr, value);
-            }
-
-            result
+            value
         }
     };
 }
 
 macro_rules! def_write_fn {
     ($fn_name:ident $access_name:ident $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: u32, value: $ty) -> Result<(), Error> {
+        pub fn $fn_name(&mut self, addr: u32, value: $ty) {
             tracing::trace!("#[{:#010x}] <- {:#010x}", addr, value);
 
             self.$access_name(
                 addr,
                 |this, addr| {
-                    this.cache.i.$fn_name(addr, value);
+                    this.cache.i.$fn_name(
+                        addr,
+                        value,
+                        |addr| {
+                            this.bus.fetch_cache_line(addr)
+                        },
+                    );
                     if !this.cache.i.is_isolated() {
                         // When not isolated, write-through to the CPU bus.
-                        this.bus.$fn_name(addr, value).map_err(Error::Bus)?;
+                        this.bus.$fn_name(addr, value);
                     }
-
-                    Ok(())
                 },
                 |this, addr| {
-                    this.bus.$fn_name(addr, value).map_err(Error::Bus)
+                    this.bus.$fn_name(addr, value)
                 },
                 |_, _| {
                     // TODO
-                    Ok(())
                 },
             )
         }

@@ -141,22 +141,14 @@ impl Pipeline {
         let mut pc = reg.pc();
         self.execute_queued_instr(exc, mmu, reg, decode_instr, &mut pc);
 
-        match mmu.read_virt_32(pc) {
-            Ok(op) => {
-                // Increment PC.
-                *reg.pc_mut() = pc.wrapping_add(4);
+        let op = mmu.read_virt_32(pc);
+        // Increment PC.
+        *reg.pc_mut() = pc.wrapping_add(4);
 
-                let instr = decode_instr(op);
-                self.rd = Some(instr);
+        let instr = decode_instr(op);
+        self.rd = Some(instr);
 
-                Some(Execution { pc, instr })
-            }
-            Err(e) => {
-                exc.push(e.into()).unwrap();
-
-                None
-            }
-        }
+        Some(Execution { pc, instr })
     }
 
     fn execute_queued_instr(
@@ -172,6 +164,7 @@ impl Pipeline {
 
             let mut target = None;
             if let Err(e) = state.execute(reg, mmu, *pc, &mut target) {
+                tracing::error!("Failed to execute instruction: {:?}", e);
                 exc.push(e).unwrap();
             } else if let Some(target) = target {
                 self.advance(exc, mmu, reg, decode_instr);
@@ -747,10 +740,10 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lb" %(rt), #(s)],
         fn: |ctx: Context| {
-            ctx.mmu
-                .read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm))
-                .map_err(|e| e.into())
-                .map(|value| ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value)))
+            let value = ctx.mmu.read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
+
+            Ok(())
         },
     },
     {
@@ -758,10 +751,10 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lbu" %(rt), #(s)],
         fn: |ctx: Context| {
-            ctx.mmu
-                .read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm))
-                .map_err(|e| e.into())
-                .map(|value| ctx.reg.set_gpr(ctx.opx.rt.index, value.into()))
+            let value = ctx.mmu.read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
+
+            Ok(())
         },
     },
     {
@@ -769,10 +762,10 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lh" %(rt), #(s)],
         fn: |ctx: Context| {
-            ctx.mmu
-                .read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm))
-                .map_err(|e| e.into())
-                .map(|value| ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value)))
+            let value = ctx.mmu.read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
+
+            Ok(())
         },
     },
     {
@@ -780,10 +773,10 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lhu" %(rt), #(s)],
         fn: |ctx: Context| {
-            ctx.mmu
-                .read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm))
-                .map_err(|e| e.into())
-                .map(|value| ctx.reg.set_gpr(ctx.opx.rt.index, value.into()))
+            let value = ctx.mmu.read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
+
+            Ok(())
         },
     },
     {
@@ -801,10 +794,10 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lw" %(rt), #(s)],
         fn: |ctx: Context| {
-            ctx.mmu
-                .read_virt_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm))
-                .map_err(|e| e.into())
-                .map(|value| ctx.reg.set_gpr(ctx.opx.rt.index, value))
+            let value = ctx.mmu.read_virt_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            ctx.reg.set_gpr(ctx.opx.rt.index, value);
+
+            Ok(())
         },
     },
     {
@@ -956,10 +949,9 @@ def_instr_and_op_kind!(
         asm: ["sb" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
+            ctx.mmu.write_virt_8(vaddr, ctx.opx.rt.gpr_value as u8);
 
-            ctx.mmu
-                .write_virt_8(vaddr, ctx.opx.rt.gpr_value as u8)
-                .map_err(|e| e.into())
+            Ok(())
         },
     },
     {
@@ -968,10 +960,9 @@ def_instr_and_op_kind!(
         asm: ["sh" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
+            ctx.mmu.write_virt_16(vaddr, ctx.opx.rt.gpr_value as u16);
 
-            ctx.mmu
-                .write_virt_16(vaddr, ctx.opx.rt.gpr_value as u16)
-                .map_err(|e| e.into())
+            Ok(())
         },
     },
     {
@@ -1107,10 +1098,9 @@ def_instr_and_op_kind!(
         asm: ["sw" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
+            ctx.mmu.write_virt_32(vaddr, ctx.opx.rt.gpr_value);
 
-            ctx.mmu
-                .write_virt_32(vaddr, ctx.opx.rt.gpr_value)
-                .map_err(|e| e.into())
+            Ok(())
         },
     },
     {
