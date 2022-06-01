@@ -621,7 +621,13 @@ def_instr_and_op_kind!(
                 }
                 16 => {
                     tracing::trace!("rfe");
-                    // TODO
+
+                    let mut sr = reg::cpr::Status(ctx.reg.cpr(reg::cpr::STATUS_IDX));
+                    sr.set_ie_c(sr.ie_p());
+                    sr.set_ku_c(sr.ku_p());
+                    sr.set_ie_p(sr.ie_o());
+                    sr.set_ku_p(sr.ku_o());
+                    ctx.reg.set_cpr(reg::cpr::STATUS_IDX, sr.0);
 
                     Ok(())
                 }
@@ -1155,7 +1161,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["syscall"],
         fn: |_: Context| {
-            Err(exc::Kind::Syscall)
+            todo!()
         },
     },
     {
