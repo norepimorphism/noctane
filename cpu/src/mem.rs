@@ -187,13 +187,7 @@ macro_rules! def_write_fn {
             self.$access_name(
                 addr,
                 |this, addr| {
-                    this.cache.i.$fn_name(
-                        addr,
-                        value,
-                        |addr| {
-                            this.bus.fetch_cache_line(addr)
-                        },
-                    );
+                    this.cache.i.$fn_name(addr, value);
                     if !this.cache.i.is_isolated() {
                         // When not isolated, write-through to the CPU bus.
                         this.bus.$fn_name(addr, value);

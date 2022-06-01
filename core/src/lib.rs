@@ -44,8 +44,6 @@ pub struct Banks {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::DerefMut as _;
-
     use super::Core;
 
     macro_rules! def_write_to_test {
@@ -63,7 +61,7 @@ mod tests {
             fn assert_success(mem: &mut $ty, addr: u32, bit_width: &str) {
                 assert_eq!(
                     mem.$read_32_name($map_addr(addr), $($read_32_arg),*),
-                    Ok(VALUE),
+                    VALUE,
                     "failed to write {}-bit value",
                     bit_width,
                 );
@@ -87,27 +85,10 @@ mod tests {
     }
 
     #[test]
-    fn write_to_mmu() {
-        let mut core = Core::default();
-        let mut cpu = core.cpu();
-        let mmu = cpu.mmu_mut();
-
-        def_write_to_test!(
-            mmu,
-            noctane_cpu::Mmu,
-            |addr| addr,
-            read_virt_32(),
-            write_virt_8(),
-            write_virt_16(),
-            write_virt_32(),
-        );
-    }
-
-    #[test]
     fn write_to_cpu_memory() {
         let mut core = Core::default();
         let mut cpu = core.cpu();
-        let mem = cpu.mmu_mut().deref_mut();
+        let mem = cpu.mem_mut();
 
         def_write_to_test!(
             mem,
@@ -124,7 +105,7 @@ mod tests {
     fn write_to_cpu_bus() {
         let mut core = Core::default();
         let mut cpu = core.cpu();
-        let bus = cpu.mmu_mut().deref_mut().bus_mut();
+        let bus = cpu.mem_mut().bus_mut();
 
         def_write_to_test!(
             bus,

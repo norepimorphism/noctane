@@ -8,7 +8,7 @@ pub mod decode;
 use std::fmt;
 
 pub use asm::Asm;
-use crate::{Mmu, exc, reg};
+use crate::{Memory, exc, reg};
 
 pub mod i {
     use super::{opn::Gpr, reg};
@@ -134,14 +134,14 @@ impl Pipeline {
     pub fn advance(
         &mut self,
         exc: &mut exc::Queue,
-        mmu: &mut Mmu,
+        mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Option<Execution> {
         let mut pc = reg.pc();
-        self.execute_queued_instr(exc, mmu, reg, decode_instr, &mut pc);
+        self.execute_queued_instr(exc, mem, reg, decode_instr, &mut pc);
 
-        let op = mmu.read_virt_32(pc);
+        let op = mem.read_32(pc);
         // Increment PC.
         *reg.pc_mut() = pc.wrapping_add(4);
 
@@ -154,7 +154,7 @@ impl Pipeline {
     fn execute_queued_instr(
         &mut self,
         exc: &mut exc::Queue,
-        mmu: &mut Mmu,
+        mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
         pc: &mut u32,
@@ -163,12 +163,12 @@ impl Pipeline {
             let mut state = opx::State::read(instr, reg);
 
             let mut target = None;
-            if let Err(e) = state.execute(reg, mmu, *pc, &mut target) {
+            if let Err(e) = state.execute(reg, mem, *pc, &mut target) {
                 tracing::error!("Failed to execute instruction: {:?}", e);
                 exc.push(e).unwrap();
             } else if let Some(target) = target {
-                self.advance(exc, mmu, reg, decode_instr);
-                self.execute_queued_instr(exc, mmu, reg, decode_instr, &mut 0);
+                self.advance(exc, mem, reg, decode_instr);
+                self.execute_queued_instr(exc, mem, reg, decode_instr, &mut 0);
 
                 *pc = target;
             }
@@ -254,7 +254,7 @@ macro_rules! def_instr_and_op_kind {
 
             use std::fmt;
 
-            use super::{Instr, Mmu, exc, reg};
+            use super::{Instr, Memory, exc, reg};
 
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
@@ -297,7 +297,7 @@ macro_rules! def_instr_and_op_kind {
                 pub fn execute(
                     &mut self,
                     reg: &mut reg::File,
-                    mmu: &mut Mmu,
+                    mem: &mut Memory,
                     pc: u32,
                     target: &mut Option<u32>,
                 ) -> Result<(), exc::Kind> {
@@ -361,14 +361,14 @@ macro_rules! def_instr_and_op_kind {
                                 struct Context<'a, 'c, 'b> {
                                     opx: &'a mut super::$ty::State,
                                     reg: &'a mut reg::File,
-                                    mmu: &'a mut Mmu<'c, 'b>,
+                                    mem: &'a mut Memory<'c, 'b>,
                                     pc: u32,
                                     target: &'a mut Option<u32>,
                                 }
 
                                 // tracing::trace!("{:?}", opx);
 
-                                $fn(Context { opx, reg, mmu, pc, target })
+                                $fn(Context { opx, reg, mem, pc, target })
                             }
                         )*
                     }
@@ -748,7 +748,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lb" %(rt), #(s)],
         fn: |ctx: Context| {
-            let value = ctx.mmu.read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
 
             Ok(())
@@ -759,7 +759,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lbu" %(rt), #(s)],
         fn: |ctx: Context| {
-            let value = ctx.mmu.read_virt_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
             Ok(())
@@ -770,7 +770,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lh" %(rt), #(s)],
         fn: |ctx: Context| {
-            let value = ctx.mmu.read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
 
             Ok(())
@@ -781,7 +781,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lhu" %(rt), #(s)],
         fn: |ctx: Context| {
-            let value = ctx.mmu.read_virt_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
             Ok(())
@@ -802,7 +802,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lw" %(rt), #(s)],
         fn: |ctx: Context| {
-            let value = ctx.mmu.read_virt_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
+            let value = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value);
 
             Ok(())
@@ -957,7 +957,7 @@ def_instr_and_op_kind!(
         asm: ["sb" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mmu.write_virt_8(vaddr, ctx.opx.rt.gpr_value as u8);
+            ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8);
 
             Ok(())
         },
@@ -968,7 +968,7 @@ def_instr_and_op_kind!(
         asm: ["sh" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mmu.write_virt_16(vaddr, ctx.opx.rt.gpr_value as u16);
+            ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16);
 
             Ok(())
         },
@@ -1106,7 +1106,7 @@ def_instr_and_op_kind!(
         asm: ["sw" %(rt), #(s)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mmu.write_virt_32(vaddr, ctx.opx.rt.gpr_value);
+            ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value);
 
             Ok(())
         },

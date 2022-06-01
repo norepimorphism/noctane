@@ -135,7 +135,7 @@ impl Debugger<'_> {
     }
 
     fn do_print_i_cache(&self) {
-        println!("{}", self.cpu.mmu().cache().i);
+        println!("{}", self.cpu.mem().cache().i);
     }
 
     fn do_step_loudly(&mut self) {

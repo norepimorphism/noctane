@@ -18,14 +18,12 @@ pub mod cache;
 pub mod exc;
 pub mod instr;
 pub mod mem;
-pub mod mmu;
 pub mod reg;
 
 pub use bus::Bus;
 pub use cache::{i::Cache as ICache, Cache};
 pub use instr::Instr;
 pub use mem::Memory;
-pub use mmu::Mmu;
 
 impl Default for State {
     fn default() -> Self {
@@ -54,7 +52,7 @@ impl State {
             exc: &mut self.exc,
             pipeline: &mut self.pipeline,
             reg: &mut self.reg,
-            mmu: Mmu::new(Memory::new(&mut self.cache, bus)),
+            mem: Memory::new(&mut self.cache, bus),
         }
     }
 }
@@ -63,7 +61,7 @@ pub struct Cpu<'s, 'b> {
     exc: &'s mut exc::Queue,
     pipeline: &'s mut instr::Pipeline,
     reg: &'s mut reg::File,
-    mmu: Mmu<'s, 'b>,
+    mem: Memory<'s, 'b>,
 }
 
 impl<'s, 'b> Cpu<'s, 'b> {
@@ -83,12 +81,12 @@ impl<'s, 'b> Cpu<'s, 'b> {
         &mut self.reg
     }
 
-    pub fn mmu(&self) -> &Mmu<'s, 'b> {
-        &self.mmu
+    pub fn mem(&self) -> &Memory<'s, 'b> {
+        &self.mem
     }
 
-    pub fn mmu_mut(&mut self) -> &mut Mmu<'s, 'b> {
-        &mut self.mmu
+    pub fn mem_mut(&mut self) -> &mut Memory<'s, 'b> {
+        &mut self.mem
     }
 
     pub fn execute_next_instr(&mut self) -> Option<instr::Execution> {
@@ -113,7 +111,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
 
         let instr = self.pipeline.advance(
             &mut self.exc,
-            &mut self.mmu,
+            &mut self.mem,
             &mut self.reg,
             &decode_instr,
         );
@@ -126,7 +124,13 @@ impl<'s, 'b> Cpu<'s, 'b> {
                 reg::cpr::STATUS_IDX => {
                     let sr = reg::cpr::Status(value);
 
-                    self.mmu.cache_mut().i.set_isolated(sr.is_c());
+                    self.mem.cache_mut().i.set_isolated(sr.is_c());
+
+                    if sr.sw_c() {
+                        // This doesn't do anything on the PSX as far as I know. The I-cache is
+                        // basically already configured to function as a D-cache, so it is already
+                        // 'swapped'.
+                    }
 
                     // TODO
                 }
