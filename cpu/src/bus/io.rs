@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use noctane_gpu::Gpu;
 use noctane_proc_macro::gen_cpu_bus_io;
 
@@ -19,7 +21,9 @@ impl Io<'_> {
         macro_rules! get_lut_entry {
             ($mod_name:ident $(,)?) => {
                 (
-                    $mod_name::LUT.get(addr.working - $mod_name::BASE_ADDR).ok_or(()),
+                    $mod_name::LUT
+                        .get(addr.working - $mod_name::BASE_ADDR)
+                        .ok_or(()),
                     stringify!($mod_name),
                 )
             };
@@ -81,7 +85,9 @@ macro_rules! def_read_without_addr {
 macro_rules! def_write_with_addr {
     ($fn_name:ident($ty:ty)) => {
         pub fn $fn_name(&mut self, addr: Address, value: $ty) -> Result<(), ()> {
-            self.access(addr, |this, reg, addr| (reg.$fn_name)(reg, this, addr, value))
+            self.access(addr, |this, reg, addr| {
+                (reg.$fn_name)(reg, this, addr, value)
+            })
         }
     };
 }
@@ -98,10 +104,15 @@ macro_rules! def_write_without_addr {
 // This block defines `read_8`, `read_16`, `read_32`, `write_8`, `write_16`, and `write_32`.
 impl Io<'_> {
     def_read_with_addr!(read_8() -> u8);
+
     def_read_with_addr!(read_16() -> u16);
+
     def_read_without_addr!(read_32() -> u32);
+
     def_write_with_addr!(write_8(u8));
+
     def_write_with_addr!(write_16(u16));
+
     def_write_without_addr!(write_32(u32));
 }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 mod about;
 pub mod game;
 mod log;
@@ -64,18 +66,16 @@ struct Descriptor {
 }
 
 impl Descriptor {
-    fn create_window<'b>(
-        &self,
-        boing: &'b boing::Ui,
-    ) -> anyhow::Result<&'b mut boing::Window<'b>> {
-        boing.create_window(
-            self.title,
-            self.size.0,
-            self.size.1,
-            self.is_main,
-            self.is_main,
-        )
-        .with_context(|| format!("Failed to create \"{}\" window", self.title))
+    fn create_window<'b>(&self, boing: &'b boing::Ui) -> anyhow::Result<&'b mut boing::Window<'b>> {
+        boing
+            .create_window(
+                self.title,
+                self.size.0,
+                self.size.1,
+                self.is_main,
+                self.is_main,
+            )
+            .with_context(|| format!("Failed to create \"{}\" window", self.title))
     }
 }
 

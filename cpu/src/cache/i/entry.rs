@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::fmt;
 
-use crate::mem;
 use super::Address;
+use crate::mem;
 
 impl Default for Entry {
     fn default() -> Self {
@@ -83,11 +85,7 @@ impl Entry {
         }
     }
 
-    pub(super) fn write_partial(
-        &mut self,
-        addr: Address,
-        modify_word: impl FnOnce(&mut u32),
-    ) {
+    pub(super) fn write_partial(&mut self, addr: Address, modify_word: impl FnOnce(&mut u32)) {
         if self.is_valid && self.test_hit(addr) {
             let word = &mut self.line[addr.word_idx];
             modify_word(word);

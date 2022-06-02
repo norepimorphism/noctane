@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 impl<'b> Window<'b> {
     pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
         let x_axis = boing.create_horizontal_axis().unwrap();

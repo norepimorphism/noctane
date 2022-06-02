@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MPL-2.0
+
+use std::cell::Cell;
+
 use anyhow::anyhow;
 use futures::executor::block_on;
-use std::cell::Cell;
 // This is usually a bad idea, but we use *so many* WGPU imports that it would be inconvenient
 // otherwise.
 use wgpu::*;
@@ -34,21 +37,13 @@ impl Renderer {
         let texture_view = Self::new_texture_view(&texture);
 
         let bind_group_layout = Self::new_bind_group_layout(&device);
-        let bind_group = Self::new_bind_group(
-            &device,
-            &bind_group_layout,
-            &texture_view,
-        );
+        let bind_group = Self::new_bind_group(&device, &bind_group_layout, &texture_view);
 
         let surface_format = surface
             .get_preferred_format(&adapter)
             .expect("surface is incompatible with the adapter");
 
-        let pipeline = Self::new_pipeline(
-            &device,
-            &[&bind_group_layout],
-            surface_format,
-        );
+        let pipeline = Self::new_pipeline(&device, &[&bind_group_layout], surface_format);
 
         Ok(Self {
             bind_group,
@@ -89,11 +84,9 @@ impl Renderer {
                 limits: adapter.limits(),
                 ..Default::default()
             },
-            None
+            None,
         ))
-        .map_err(|e| {
-            anyhow::Error::from(e).context("Failed to find a compatible device")
-        })
+        .map_err(|e| anyhow::Error::from(e).context("Failed to find a compatible device"))
     }
 
     fn new_texture_size(size: (u32, u32)) -> Extent3d {
@@ -180,15 +173,15 @@ impl Renderer {
             &self.device,
             &SurfaceConfiguration {
                 usage: {
-                    TextureUsages::TEXTURE_BINDING |
-                    TextureUsages::COPY_DST |
-                    TextureUsages::RENDER_ATTACHMENT
+                    TextureUsages::TEXTURE_BINDING
+                        | TextureUsages::COPY_DST
+                        | TextureUsages::RENDER_ATTACHMENT
                 },
                 format: self.surface_format,
                 width,
                 height,
                 present_mode: PresentMode::Immediate,
-            }
+            },
         )
     }
 
@@ -206,19 +199,21 @@ impl Renderer {
 
         // This cached value is a [`Cell`] because it would be unintuitive for this method to
         // require `&mut self`.
-        self.cached_image_data_layout.get().unwrap_or_else(|| {
-            let layout = ImageDataLayout {
-                offset: 0,
-                bytes_per_row: NonZeroU32::new(4 * self.texture_size.width),
-                rows_per_image: NonZeroU32::new(self.texture_size.height),
-            };
+        self.cached_image_data_layout
+            .get()
+            .unwrap_or_else(|| {
+                let layout = ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: NonZeroU32::new(4 * self.texture_size.width),
+                    rows_per_image: NonZeroU32::new(self.texture_size.height),
+                };
 
-            // Caching the data layout only makes sense if `self.texture_size`, which creating the
-            // layout depends on, is immutable.
-            self.cached_image_data_layout.set(Some(layout));
+                // Caching the data layout only makes sense if `self.texture_size`, which creating
+                // the layout depends on, is immutable.
+                self.cached_image_data_layout.set(Some(layout));
 
-            layout
-        })
+                layout
+            })
     }
 
     pub fn render(&self) {
@@ -232,14 +227,11 @@ impl Renderer {
     }
 
     fn new_command_encoder(&self) -> CommandEncoder {
-        self.device.create_command_encoder(&CommandEncoderDescriptor::default())
+        self.device
+            .create_command_encoder(&CommandEncoderDescriptor::default())
     }
 
-    fn do_render_pass(
-        &self,
-        encoder: &mut CommandEncoder,
-        view: &TextureView,
-    ) {
+    fn do_render_pass(&self, encoder: &mut CommandEncoder, view: &TextureView) {
         let mut pass = Self::new_render_pass(encoder, view);
 
         // Look ma! No vertex buffer!
@@ -260,16 +252,14 @@ impl Renderer {
         };
 
         encoder.begin_render_pass(&RenderPassDescriptor {
-            color_attachments: &[
-                RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(CLEAR_COLOR),
-                        store: true,
-                    },
+            color_attachments: &[RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Clear(CLEAR_COLOR),
+                    store: true,
                 },
-            ],
+            }],
             ..Default::default()
         })
     }

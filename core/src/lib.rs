@@ -1,6 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
@@ -17,9 +15,7 @@ impl Core {
         self.cpu_state.connect_bus(noctane_cpu::Bus {
             main_ram: &mut self.banks.main_ram,
             exp_1: &mut self.banks.exp_1,
-            io: noctane_cpu::bus::Io {
-                gpu: &mut self.gpu,
-            },
+            io: noctane_cpu::bus::Io { gpu: &mut self.gpu },
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })

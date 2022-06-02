@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+
 menu_file_title = File
 menu-item_open-iso_title = Open ISO...
 menu-item_quit_title = Quit

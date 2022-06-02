@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: MPL-2.0
+
 mod entry;
 
 use std::fmt;
 
-use crate::mem;
-
 use entry::Entry;
+
+use crate::mem;
 
 impl From<mem::Address> for Address {
     /// Decomposes a physical address into an instruction cache address.
@@ -27,7 +29,12 @@ impl From<mem::Address> for Address {
         // The tag contains the remaining bits.
         let tag = addr;
 
-        Self { working: it.working, tag, entry_idx, word_idx }
+        Self {
+            working: it.working,
+            tag,
+            entry_idx,
+            word_idx,
+        }
     }
 }
 
@@ -41,7 +48,11 @@ struct Address {
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:05x}:{:02x}:{:1}", self.tag, self.entry_idx, self.word_idx)
+        write!(
+            f,
+            "{:05x}:{:02x}:{:1}",
+            self.tag, self.entry_idx, self.word_idx
+        )
     }
 }
 
@@ -101,7 +112,9 @@ macro_rules! def_read_fn {
 
 impl Cache {
     def_read_fn!(read_8() -> u8 { |word, addr: mem::Address| addr.index_byte_in_word(word) });
+
     def_read_fn!(read_16() -> u16 { |word, addr: mem::Address| addr.index_halfword_in_word(word) });
+
     def_read_fn!(read_32() -> u32 { |word, _| word });
 
     fn read<T>(
@@ -115,44 +128,23 @@ impl Cache {
         extract(entry.read(addr, fetch_line))
     }
 
-    pub fn write_8(
-        &mut self,
-        addr: mem::Address,
-        value: u8,
-    ) {
-        self.write_partial(
-            addr.into(),
-            |mut word| {
-                word[addr.byte_idx] = value;
+    pub fn write_8(&mut self, addr: mem::Address, value: u8) {
+        self.write_partial(addr.into(), |mut word| {
+            word[addr.byte_idx] = value;
 
-                word
-            },
-        )
+            word
+        })
     }
 
-    pub fn write_16(
-        &mut self,
-        addr: mem::Address,
-        value: u16,
-    ) {
-        self.write_partial(
-            addr.into(),
-            |mut word| {
-                word
-                    .as_chunks_mut::<2>()
-                    .0
-                    [addr.halfword_idx] = value.to_be_bytes();
+    pub fn write_16(&mut self, addr: mem::Address, value: u16) {
+        self.write_partial(addr.into(), |mut word| {
+            word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
 
-                word
-            },
-        )
+            word
+        })
     }
 
-    fn write_partial(
-        &mut self,
-        addr: Address,
-        map_word: impl FnOnce([u8; 4]) -> [u8; 4],
-    ) {
+    fn write_partial(&mut self, addr: Address, map_word: impl FnOnce([u8; 4]) -> [u8; 4]) {
         let entry = &mut self.entries[addr.entry_idx];
         if self.is_isolated {
             tracing::trace!(
@@ -168,20 +160,13 @@ impl Cache {
             // PSX, then an isolated partial-write automatically invalidates this cache entry.
             entry.invalidate();
         } else {
-            entry.write_partial(
-                addr,
-                |word| {
-                    *word = u32::from_be_bytes(map_word(word.to_be_bytes()));
-                },
-            );
+            entry.write_partial(addr, |word| {
+                *word = u32::from_be_bytes(map_word(word.to_be_bytes()));
+            });
         }
     }
 
-    pub fn write_32(
-        &mut self,
-        addr: mem::Address,
-        value: u32,
-    ) {
+    pub fn write_32(&mut self, addr: mem::Address, value: u32) {
         let addr = Address::from(addr);
         let entry = &mut self.entries[addr.entry_idx];
         entry.write(addr, value);
@@ -197,7 +182,9 @@ mod tests {
     use super::*;
 
     fn gen_test_addrs() -> impl Iterator<Item = mem::Address> {
-        (0x0000_00000..=0xffff_ffff).step_by(0x800).map(mem::Address::from)
+        (0x0000_00000..=0xffff_ffff)
+            .step_by(0x800)
+            .map(mem::Address::from)
     }
 
     macro_rules! def_read_cache_far_fn {
@@ -225,10 +212,7 @@ mod tests {
                     // one word was written, the cache doesn't yet know what the other words should
                     // be, so it simply marked the entry as invalid. We should expect that a cache
                     // read will request to fetch the full line from memory.
-                    let read = cache.$read_name(
-                        addr,
-                        |_| [written; 4],
-                    );
+                    let read = cache.$read_name(addr, |_| [written; 4]);
 
                     assert_eq!(
                         written as $ty,
@@ -269,14 +253,11 @@ mod tests {
 
                     // Because the cache entry was marked as valid, the new write should've updated
                     // its data. Let's see.
-                    let read = cache.$read_name(
-                        next_addr,
-                        |_| {
-                            // If the read requests to fetch the line again, then something has gone
-                            // wrong.
-                            panic!("fetched cache line twice");
-                        },
-                    );
+                    let read = cache.$read_name(next_addr, |_| {
+                        // If the read requests to fetch the line again, then something has gone
+                        // wrong.
+                        panic!("fetched cache line twice");
+                    });
 
                     assert_eq!(
                         // Remember: the second word is an inverted `written`.

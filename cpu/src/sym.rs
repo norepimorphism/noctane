@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 pub fn for_syscall(code: u32) -> &'static str {
     match code {
         0 => "NoFunction",

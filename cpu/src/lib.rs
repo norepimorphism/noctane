@@ -1,6 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 #![feature(
     bigint_helper_methods,
@@ -10,7 +8,7 @@
     let_else,
     slice_as_chunks,
     type_alias_impl_trait,
-    unchecked_math,
+    unchecked_math
 )]
 
 pub mod bus;
@@ -112,26 +110,23 @@ impl<'s, 'b> Cpu<'s, 'b> {
     ) -> Option<instr::Execution> {
         self.handle_exc();
 
-        let instr = self.pipeline.advance(
-            &mut self.exc,
-            &mut self.mem,
-            &mut self.reg,
-            &decode_instr,
-        );
+        let instr =
+            self.pipeline
+                .advance(&mut self.exc, &mut self.mem, &mut self.reg, &decode_instr);
 
         if let Some(sr) = self.reg.apply_sr() {
             let sr = reg::cpr::Status(sr);
 
-                    self.mem.cache_mut().i.set_isolated(sr.is_c());
+            self.mem.cache_mut().i.set_isolated(sr.is_c());
 
-                    if sr.sw_c() {
-                        // This doesn't do anything on the PSX as far as I know. The I-cache is
-                        // basically already configured to function as a D-cache, so it is already
-                        // 'swapped'.
-                    }
+            if sr.sw_c() {
+                // This doesn't do anything on the PSX as far as I know. The I-cache is
+                // basically already configured to function as a D-cache, so it is already
+                // 'swapped'.
+            }
 
-                    // TODO
-                }
+            // TODO
+        }
 
         instr
     }
@@ -148,7 +143,8 @@ impl<'s, 'b> Cpu<'s, 'b> {
                 }
             }
 
-            self.reg.set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
+            self.reg
+                .set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
             self.reg.set_cpr(reg::cpr::EPC_IDX, exc.epc);
             *self.reg.pc_mut() = exc::VECTOR;
         }

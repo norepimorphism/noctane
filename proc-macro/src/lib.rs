@@ -1,15 +1,11 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 #![feature(entry_insert, let_else, proc_macro_diagnostic)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{
-    parse_macro_input,
-};
+use syn::parse_macro_input;
 
 /// Generates the `noctane_cpu::bus::io` lookup tables (LUTs).
 #[proc_macro]
@@ -123,17 +119,20 @@ mod cpu {
 
                     let mut fields = strukt.fields.into_iter();
 
-                    let name_field = fields.nth(0).ok_or_else(|| {
-                        input.error("expected 'name' field")
-                    })?;
-                    let base_field = fields.nth(0).ok_or_else(|| {
-                        input.error("expected 'base_addr' field")
-                    })?;
-                    let regs_field = fields.nth(0).ok_or_else(|| {
-                        input.error("expected 'regs' field")
-                    })?;
+                    let name_field = fields
+                        .nth(0)
+                        .ok_or_else(|| input.error("expected 'name' field"))?;
+                    let base_field = fields
+                        .nth(0)
+                        .ok_or_else(|| input.error("expected 'base_addr' field"))?;
+                    let regs_field = fields
+                        .nth(0)
+                        .ok_or_else(|| input.error("expected 'regs' field"))?;
                     if fields.next().is_some() {
-                        input.span().unwrap().warning("found extraneous fields");
+                        input
+                            .span()
+                            .unwrap()
+                            .warning("found extraneous fields");
                     }
 
                     let name = name_field.expr;
@@ -142,7 +141,8 @@ mod cpu {
                     let Expr::Array(regs_array) = regs_field.expr else {
                         return Err(input.error("'regs' should be an array"));
                     };
-                    let regs = regs_array.elems
+                    let regs = regs_array
+                        .elems
                         .into_iter()
                         .map(|elem| {
                             let Expr::Struct(strukt) = elem else {
@@ -157,21 +157,24 @@ mod cpu {
 
                             let mut fields = strukt.fields.into_iter();
 
-                            let name_field = fields.nth(0).ok_or_else(|| {
-                                input.error("expected 'name' field")
-                            })?;
+                            let name_field = fields
+                                .nth(0)
+                                .ok_or_else(|| input.error("expected 'name' field"))?;
                             let name = name_field.expr;
 
                             match ident.to_string().as_str() {
                                 "Register" => {
-                                    let read_field = fields.nth(0).ok_or_else(|| {
-                                        input.error("expected 'read_*' field")
-                                    })?;
-                                    let write_field = fields.nth(0).ok_or_else(|| {
-                                        input.error("expected 'write_*' field")
-                                    })?;
+                                    let read_field = fields
+                                        .nth(0)
+                                        .ok_or_else(|| input.error("expected 'read_*' field"))?;
+                                    let write_field = fields
+                                        .nth(0)
+                                        .ok_or_else(|| input.error("expected 'write_*' field"))?;
                                     if fields.next().is_some() {
-                                        input.span().unwrap().warning("found extraneous fields");
+                                        input
+                                            .span()
+                                            .unwrap()
+                                            .warning("found extraneous fields");
                                     }
 
                                     let read_kind = AccessKind::try_from_read(read_field.member)
@@ -201,7 +204,11 @@ mod cpu {
                         })
                         .collect::<syn::Result<Vec<RegStruct>>>()?;
 
-                    Ok(Self { name, base_addr, regs })
+                    Ok(Self {
+                        name,
+                        base_addr,
+                        regs,
+                    })
                 }
             }
 
@@ -227,8 +234,8 @@ mod cpu {
                 ($fn_name:ident $name:ident $name_8:ident $name_16:ident $name_32:ident) => {
                     fn $fn_name(member: Member) -> Option<Self> {
                         let Member::Named(ident) = member else {
-                            return None;
-                        };
+                                                                                        return None;
+                                                                                    };
 
                         match ident.to_string().as_str() {
                             stringify!($name_8) => Some(Self::_8),
@@ -239,7 +246,8 @@ mod cpu {
                                     .span()
                                     .unwrap()
                                     .error(format!(
-                                        "'{0}' field doesn't match any of: '{0}_8', '{0}_16', '{0}_32'",
+                                        "'{0}' field doesn't match any of: '{0}_8', '{0}_16', \
+                                         '{0}_32'",
                                         stringify!($name),
                                     ))
                                     .emit();
@@ -253,6 +261,7 @@ mod cpu {
 
             impl AccessKind {
                 def_try_access_kind_from_member!(try_from_read read read_8 read_16 read_32);
+
                 def_try_access_kind_from_member!(try_from_write write write_8 write_16 write_32);
             }
 
@@ -281,66 +290,72 @@ mod cpu {
             impl ReadFn {
                 pub fn gen_access_fns(self) -> AccessFns {
                     match self.kind {
-                        AccessKind::_8 => AccessFns {
-                            _8: self.expr,
-                            _16: quote! {
-                                |this, io, addr| {
-                                    u16::from_be_bytes([
-                                        (this.read_8)(this, io, addr),
-                                        (this.read_8)(this, io, addr.map_working(|it| it + 1)),
-                                    ])
-                                }
-                            },
-                            _32: quote! {
-                                |this, io| {
-                                    u32::from_be_bytes([
-                                        (this.read_8)(this, io, Address::from(0usize)),
-                                        (this.read_8)(this, io, Address::from(1usize)),
-                                        (this.read_8)(this, io, Address::from(2usize)),
-                                        (this.read_8)(this, io, Address::from(3usize)),
-                                    ])
-                                }
-                            },
-                        },
-                        AccessKind::_16 => AccessFns {
-                            _8: quote! {
-                                |this, io, addr| {
-                                    addr.index_byte_in_halfword((this.read_16)(this, io, addr))
-                                }
-                            },
-                            _16: self.expr,
-                            _32: quote! {
-                                |this, io| {
-                                    let [a, b] = (this.read_16)(
-                                        this,
-                                        io,
-                                        Address::from(0usize),
-                                    )
-                                    .to_be_bytes();
-                                    let [c, d] = (this.read_16)(
-                                        this,
-                                        io,
-                                        Address::from(1usize),
-                                    )
-                                    .to_be_bytes();
+                        AccessKind::_8 => {
+                            AccessFns {
+                                _8: self.expr,
+                                _16: quote! {
+                                    |this, io, addr| {
+                                        u16::from_be_bytes([
+                                            (this.read_8)(this, io, addr),
+                                            (this.read_8)(this, io, addr.map_working(|it| it + 1)),
+                                        ])
+                                    }
+                                },
+                                _32: quote! {
+                                    |this, io| {
+                                        u32::from_be_bytes([
+                                            (this.read_8)(this, io, Address::from(0usize)),
+                                            (this.read_8)(this, io, Address::from(1usize)),
+                                            (this.read_8)(this, io, Address::from(2usize)),
+                                            (this.read_8)(this, io, Address::from(3usize)),
+                                        ])
+                                    }
+                                },
+                            }
+                        }
+                        AccessKind::_16 => {
+                            AccessFns {
+                                _8: quote! {
+                                    |this, io, addr| {
+                                        addr.index_byte_in_halfword((this.read_16)(this, io, addr))
+                                    }
+                                },
+                                _16: self.expr,
+                                _32: quote! {
+                                    |this, io| {
+                                        let [a, b] = (this.read_16)(
+                                            this,
+                                            io,
+                                            Address::from(0usize),
+                                        )
+                                        .to_be_bytes();
+                                        let [c, d] = (this.read_16)(
+                                            this,
+                                            io,
+                                            Address::from(1usize),
+                                        )
+                                        .to_be_bytes();
 
-                                    u32::from_be_bytes([a, b, c, d])
-                                }
-                            },
-                        },
-                        AccessKind::_32 => AccessFns {
-                            _8: quote! {
-                                |this, io, addr| {
-                                    addr.index_byte_in_word((this.read_32)(this, io))
-                                }
-                            },
-                            _16: quote! {
-                                |this, io, addr| {
-                                    addr.index_halfword_in_word((this.read_32)(this, io))
-                                }
-                            },
-                            _32: self.expr,
-                        },
+                                        u32::from_be_bytes([a, b, c, d])
+                                    }
+                                },
+                            }
+                        }
+                        AccessKind::_32 => {
+                            AccessFns {
+                                _8: quote! {
+                                    |this, io, addr| {
+                                        addr.index_byte_in_word((this.read_32)(this, io))
+                                    }
+                                },
+                                _16: quote! {
+                                    |this, io, addr| {
+                                        addr.index_halfword_in_word((this.read_32)(this, io))
+                                    }
+                                },
+                                _32: self.expr,
+                            }
+                        }
                     }
                 }
             }
@@ -353,72 +368,78 @@ mod cpu {
             impl WriteFn {
                 pub fn gen_access_fns(self) -> AccessFns {
                     match self.kind {
-                        AccessKind::_8 => AccessFns {
-                            _8: self.expr,
-                            _16: quote! {
-                                |this, io, addr, value| {
-                                    let [hi, lo] = value.to_be_bytes();
-                                    (this.write_8)(this, io, addr, hi);
-                                    (this.write_8)(this, io, addr.map_working(|it| it + 1), lo);
-                                }
-                            },
-                            _32: quote! {
-                                |this, io, value| {
-                                    let [a, b, c, d] = value.to_be_bytes();
-                                    (this.write_8)(this, io, Address::from(0), a);
-                                    (this.write_8)(this, io, Address::from(1), b);
-                                    (this.write_8)(this, io, Address::from(2), c);
-                                    (this.write_8)(this, io, Address::from(3), d);
-                                }
-                            },
-                        },
-                        AccessKind::_16 => AccessFns {
-                            _8: quote! {
-                                |this, io, addr, value| {
-                                    let mut bytes = (this.read_16)(this, io, addr).to_be_bytes();
-                                    bytes[addr.byte_idx & 0b1] = value;
-                                    (this.write_16)(this, io, addr, u16::from_be_bytes(bytes));
-                                }
-                            },
-                            _16: self.expr,
-                            _32: quote! {
-                                |this, io, value| {
-                                    (this.write_16)(
-                                        this,
-                                        io,
-                                        Address::from(0),
-                                        Address::from(0).index_halfword_in_word(value),
-                                    );
-                                    (this.write_16)(
-                                        this,
-                                        io,
-                                        Address::from(1),
-                                        Address::from(2).index_halfword_in_word(value),
-                                    );
-                                }
-                            },
-                        },
-                        AccessKind::_32 => AccessFns {
-                            _8: quote! {
-                                |this, io, addr, value| {
-                                    let mut bytes = (this.read_32)(this, io).to_be_bytes();
-                                    bytes[addr.byte_idx] = value;
-                                    (this.write_32)(this, io, u32::from_be_bytes(bytes));
-                                }
-                            },
-                            _16: quote! {
-                                |this, io, addr, value| {
-                                    let mut bytes = (this.read_32)(this, io).to_be_bytes();
-                                    bytes
-                                        .as_chunks_mut::<2>()
-                                        .0
-                                        [addr.halfword_idx] = value.to_be_bytes();
+                        AccessKind::_8 => {
+                            AccessFns {
+                                _8: self.expr,
+                                _16: quote! {
+                                    |this, io, addr, value| {
+                                        let [hi, lo] = value.to_be_bytes();
+                                        (this.write_8)(this, io, addr, hi);
+                                        (this.write_8)(this, io, addr.map_working(|it| it + 1), lo);
+                                    }
+                                },
+                                _32: quote! {
+                                    |this, io, value| {
+                                        let [a, b, c, d] = value.to_be_bytes();
+                                        (this.write_8)(this, io, Address::from(0), a);
+                                        (this.write_8)(this, io, Address::from(1), b);
+                                        (this.write_8)(this, io, Address::from(2), c);
+                                        (this.write_8)(this, io, Address::from(3), d);
+                                    }
+                                },
+                            }
+                        }
+                        AccessKind::_16 => {
+                            AccessFns {
+                                _8: quote! {
+                                    |this, io, addr, value| {
+                                        let mut bytes = (this.read_16)(this, io, addr).to_be_bytes();
+                                        bytes[addr.byte_idx & 0b1] = value;
+                                        (this.write_16)(this, io, addr, u16::from_be_bytes(bytes));
+                                    }
+                                },
+                                _16: self.expr,
+                                _32: quote! {
+                                    |this, io, value| {
+                                        (this.write_16)(
+                                            this,
+                                            io,
+                                            Address::from(0),
+                                            Address::from(0).index_halfword_in_word(value),
+                                        );
+                                        (this.write_16)(
+                                            this,
+                                            io,
+                                            Address::from(1),
+                                            Address::from(2).index_halfword_in_word(value),
+                                        );
+                                    }
+                                },
+                            }
+                        }
+                        AccessKind::_32 => {
+                            AccessFns {
+                                _8: quote! {
+                                    |this, io, addr, value| {
+                                        let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                        bytes[addr.byte_idx] = value;
+                                        (this.write_32)(this, io, u32::from_be_bytes(bytes));
+                                    }
+                                },
+                                _16: quote! {
+                                    |this, io, addr, value| {
+                                        let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                        bytes
+                                            .as_chunks_mut::<2>()
+                                            .0
+                                            [addr.halfword_idx] = value.to_be_bytes();
 
-                                    (this.write_32)(this, io, u32::from_be_bytes(bytes));
-                                }
-                            },
-                            _32: self.expr,
-                        },
+                                        (this.write_32)(this, io, u32::from_be_bytes(bytes));
+                                    }
+                                },
+                                _32: self.expr,
+                            }
+                        }
                     }
                 }
             }

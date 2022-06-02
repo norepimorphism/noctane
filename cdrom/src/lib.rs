@@ -1,6 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 // Unless otherwise specified, "Section x.x.x" refers to that from ISO 9660 or ECMA-119. To read
 // along with the code, a free copy of ECMA-119 is available [here].
@@ -9,10 +7,12 @@
 
 mod volume;
 
-use std::{collections::VecDeque, io::{self, Read}};
+use std::{
+    collections::VecDeque,
+    io::{self, Read},
+};
 
 use derivative::Derivative;
-
 pub use entry::Entry;
 pub use volume::{NumTimestamp, Volume};
 
@@ -147,7 +147,10 @@ pub mod entry {
 
     impl Default for Permission {
         fn default() -> Self {
-            Self { read: true, execute: true }
+            Self {
+                read: true,
+                execute: true,
+            }
         }
     }
 }
@@ -170,7 +173,9 @@ impl FileSystem {
         let mut data = Vec::new();
 
         tracing::info!("Reading the entire CD-ROM image into memory...");
-        let data_len = reader.read_to_end(&mut data).map_err(crate::Error::Io)?;
+        let data_len = reader
+            .read_to_end(&mut data)
+            .map_err(crate::Error::Io)?;
         tracing::debug!("data_len: {}", data_len);
 
         // TODO: Is there a valid reason why these would be inequal?
@@ -185,42 +190,45 @@ impl FileSystem {
 
         for desc in vol.descriptors() {
             match desc? {
-                /*
-                volume::Descriptor::BootRecord(desc) => {
-                    boot_records.push(Region {
-                        id: desc.boot_id.to_str()?.into(),
-                        system_id: desc.boot_sys_id.to_str()?.into(),
-                        data: desc.data.into(),
-                    });
-                }
-                volume::Descriptor::Partition(desc) => {
-                    let start: usize = u32::from(desc.vol_part_addr)
-                        .try_into()
-                        .map_err(|_| Error::IntegerOverflow)?;
-                    let size: usize = u32::from(desc.vol_part_size)
-                        .try_into()
-                        .map_err(|_| Error::IntegerOverflow)?;
-
-                    let data = vol
-                        .bytes()
-                        .get(start..(start + size))
-                        .ok_or(Error::ExpectedLogicalSector)
-                        .map(|it| it.to_vec())?;
-
-                    partitions.push(Region {
-                        id: desc.vol_part_id.to_str()?.into(),
-                        system_id: desc.sys_id.to_str()?.into(),
-                        data,
-                    });
-                }
-                */
+                // volume::Descriptor::BootRecord(desc) => {
+                // boot_records.push(Region {
+                // id: desc.boot_id.to_str()?.into(),
+                // system_id: desc.boot_sys_id.to_str()?.into(),
+                // data: desc.data.into(),
+                // });
+                // }
+                // volume::Descriptor::Partition(desc) => {
+                // let start: usize = u32::from(desc.vol_part_addr)
+                // .try_into()
+                // .map_err(|_| Error::IntegerOverflow)?;
+                // let size: usize = u32::from(desc.vol_part_size)
+                // .try_into()
+                // .map_err(|_| Error::IntegerOverflow)?;
+                //
+                // let data = vol
+                // .bytes()
+                // .get(start..(start + size))
+                // .ok_or(Error::ExpectedLogicalSector)
+                // .map(|it| it.to_vec())?;
+                //
+                // partitions.push(Region {
+                // id: desc.vol_part_id.to_str()?.into(),
+                // system_id: desc.sys_id.to_str()?.into(),
+                // data,
+                // });
+                // }
                 volume::Descriptor::Primary(desc) => {
                     root_dirs.push(Directory::read_tree(desc.directories.into_iter())?);
                 }
             }
         }
 
-        Ok(Self { system_area, boot_records, partitions, root_dirs })
+        Ok(Self {
+            system_area,
+            boot_records,
+            partitions,
+            root_dirs,
+        })
     }
 }
 
@@ -277,7 +285,8 @@ impl Directory {
             .rev();
 
         if let Some((_, last_dir)) = dirs.next() {
-            let last_parent_idx = last_dir.parent_num
+            let last_parent_idx = last_dir
+                .parent_num
                 .try_into()
                 .map_err(|_| Error::IntegerOverflow)?;
             let last_dir = last_dir.into();
@@ -288,7 +297,9 @@ impl Directory {
 
                 root_dir.entries.push(Entry::Directory(last_dir));
                 while let Some((_, dir)) = dirs.next() {
-                    root_dir.entries.push(Entry::Directory(dir.into()));
+                    root_dir
+                        .entries
+                        .push(Entry::Directory(dir.into()));
                 }
             } else {
                 let mut pools = VecDeque::new();
@@ -299,7 +310,8 @@ impl Directory {
                 pools[last_parent_idx - 1] = vec![last_dir];
 
                 while let Some((idx, dir)) = dirs.next() {
-                    let parent_idx: usize = dir.parent_num
+                    let parent_idx: usize = dir
+                        .parent_num
                         .try_into()
                         .map_err(|_| Error::IntegerOverflow)?;
                     let mut dir = Directory::from(dir);
@@ -345,7 +357,8 @@ impl From<volume::Directory> for Directory {
             // TODO
             attr: None,
         };
-        let entries = it.files
+        let entries = it
+            .files
             .into_iter()
             .map(|it| Entry::File(it.into()))
             .collect();

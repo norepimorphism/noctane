@@ -1,7 +1,13 @@
+// SPDX-License-Identifier: MPL-2.0
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![feature(backtrace)]
 
-use std::{backtrace::{Backtrace, BacktraceStatus}, fmt::Write as _, process::ExitCode};
+use std::{
+    backtrace::{Backtrace, BacktraceStatus},
+    fmt::Write as _,
+    process::ExitCode,
+};
 
 fn main() -> ExitCode {
     if let Err(e) = noctane_ui::run() {

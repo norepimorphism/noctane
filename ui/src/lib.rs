@@ -1,7 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
+// SPDX-License-Identifier: MPL-2.0
 mod log;
 mod menu_bar;
 mod window;
@@ -10,33 +7,27 @@ use std::cell::Cell;
 
 use anyhow::Context as _;
 use i18n_embed::{
+    fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
-    fluent::{FluentLanguageLoader, fluent_language_loader},
 };
+use menu_bar::MenuBar;
 use rust_embed::RustEmbed;
 use window::Windows;
 
-use menu_bar::MenuBar;
-
 pub fn run() -> Result<(), anyhow::Error> {
     let mut noctane = noctane::Core::default();
-    let boing = boing::Ui::new()
-        .context("Failed to initialize GUI")?;
+    let boing = boing::Ui::new().context("Failed to initialize GUI")?;
 
     let (log_source, log_sink) = crossbeam_channel::unbounded();
-    let log_sink = log::Sink::new(&boing, log_sink)
-        .context("Failed to initialize logging")?;
+    let log_sink = log::Sink::new(&boing, log_sink).context("Failed to initialize logging")?;
 
     // Logging ceases when this guard dies.
     let _log_guard = log::setup(log::Source::new(log_source));
 
-    let i18n = create_i18n()
-        .context("Failed to setup i18n")?;
-    let mut menu_bar = MenuBar::new(&i18n, &boing)
-        .context("Failed to create menu bar")?;
+    let i18n = create_i18n().context("Failed to setup i18n")?;
+    let mut menu_bar = MenuBar::new(&i18n, &boing).context("Failed to create menu bar")?;
 
-    let mut windows = Windows::new(&boing)
-        .context("Failed to create windows")?;
+    let mut windows = Windows::new(&boing).context("Failed to create windows")?;
     windows.log.set_child(log_sink.entry());
 
     let should_quit = Cell::new(false);
@@ -68,7 +59,11 @@ pub fn run() -> Result<(), anyhow::Error> {
 
         // SAFETY: *tracing* only writes ACSII logs, so the input to `log_sink` *should* be valid
         // UTF-8.
-        unsafe { log_sink.try_refresh().context("Failed to refresh log sink")? };
+        unsafe {
+            log_sink
+                .try_refresh()
+                .context("Failed to refresh log sink")?
+        };
     }
 
     Ok(())

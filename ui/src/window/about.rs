@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use rust_embed::RustEmbed;
 
 impl<'b> Window<'b> {
@@ -23,7 +25,10 @@ fn create_logo(boing: &boing::Ui) -> &mut boing::Image {
 
     let image = boing.create_image(94.0, 22.0).unwrap();
     image.push(
-        &mut Images::get("noctane.bin").unwrap().data.into_owned(),
+        &mut Images::get("noctane.bin")
+            .unwrap()
+            .data
+            .into_owned(),
         94,
         22,
         4,
@@ -35,7 +40,9 @@ fn create_logo(boing: &boing::Ui) -> &mut boing::Image {
 fn create_version_label(boing: &boing::Ui) -> &mut boing::Label {
     let version = env!("CARGO_PKG_VERSION");
 
-    boing.create_label(format!("Version {}", version)).unwrap()
+    boing
+        .create_label(format!("Version {}", version))
+        .unwrap()
 }
 
 pub struct Window<'b>(&'b mut boing::Window<'b>);

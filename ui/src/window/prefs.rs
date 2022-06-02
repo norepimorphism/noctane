@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 impl<'b> Window<'b> {
     pub fn new(boing: &'b boing::Ui, window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
         let ok_button = boing.create_pushbutton("OK").unwrap();
@@ -20,7 +22,9 @@ impl<'b> Window<'b> {
 
 fn create_tab(boing: &boing::Ui) -> &mut boing::Tab {
     let tab = boing.create_tab().unwrap();
-    let cpu_page = tab.push_new_page("CPU", create_cpu_page(boing)).unwrap();
+    let cpu_page = tab
+        .push_new_page("CPU", create_cpu_page(boing))
+        .unwrap();
     tab.set_page_margined(cpu_page, true);
 
     tab
@@ -40,7 +44,9 @@ fn create_instr_decode_group(boing: &boing::Ui) -> &mut boing::Group {
     let interpreter_option = options.push_new_item("Interpreter").unwrap();
     options.set_selected_item(interpreter_option);
 
-    let group = boing.create_group("Instruction Decoding").unwrap();
+    let group = boing
+        .create_group("Instruction Decoding")
+        .unwrap();
     group.set_margined(true);
     group.set_child(options);
 
@@ -53,10 +59,10 @@ fn create_bios_group(boing: &boing::Ui) -> &mut boing::Group {
 
     let path_button = boing.create_pushbutton("Select").unwrap();
     path_button.on_clicked(|_| {
-        if let Ok(Some(path)) = native_dialog::FileDialog::new()
-            .show_open_single_file()
-        {
-            path_field.set_text(format!("{}", path.display())).unwrap();
+        if let Ok(Some(path)) = native_dialog::FileDialog::new().show_open_single_file() {
+            path_field
+                .set_text(format!("{}", path.display()))
+                .unwrap();
         }
     });
 

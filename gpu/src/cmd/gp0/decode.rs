@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use bit::BitIndex as _;
 
 use super::Command;

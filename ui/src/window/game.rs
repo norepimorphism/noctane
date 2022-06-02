@@ -1,22 +1,14 @@
+// SPDX-License-Identifier: MPL-2.0
+
 mod gfx;
 
 use std::ops::{Deref, DerefMut};
 
 impl Window {
     pub fn new(width: usize, height: usize) -> Self {
-        let window = minifb::Window::new(
-            "Game",
-            width,
-            height,
-            minifb::WindowOptions::default(),
-        )
-        .unwrap();
-        let gfx = gfx::Renderer::new(
-            &window,
-            wgpu::Backends::all(),
-            (640, 480),
-        )
-        .unwrap();
+        let window =
+            minifb::Window::new("Game", width, height, minifb::WindowOptions::default()).unwrap();
+        let gfx = gfx::Renderer::new(&window, wgpu::Backends::all(), (640, 480)).unwrap();
 
         Self { inner: window, gfx }
     }

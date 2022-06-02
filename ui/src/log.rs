@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::io;
 
 use anyhow::Context as _;
@@ -7,7 +9,8 @@ impl<'b> Sink<'b> {
         boing: &'b boing::Ui,
         inner: crossbeam_channel::Receiver<Vec<u8>>,
     ) -> anyhow::Result<Self> {
-        let entry = boing.create_non_wrapping_multiline_text_entry()
+        let entry = boing
+            .create_non_wrapping_multiline_text_entry()
             .context("Failed to create log text entry")?;
         entry.set_read_only(true);
 
@@ -51,10 +54,9 @@ pub struct Source {
 
 impl io::Write for Source {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.inner.send(buf.to_vec())
-            .map_err(|_| {
-                io::Error::new(io::ErrorKind::NotConnected, "Log sink was disconnected")
-            })?;
+        self.inner.send(buf.to_vec()).map_err(|_| {
+            io::Error::new(io::ErrorKind::NotConnected, "Log sink was disconnected")
+        })?;
 
         Ok(buf.len())
     }
@@ -90,10 +92,11 @@ pub fn setup(source: Source) -> tracing_appender::non_blocking::WorkerGuard {
             // TODO: It would be awesome if these directives could be parsed at compile-time.
             DIRECTIVES
                 .iter()
-                .map(|it| it.parse().expect("Failed to parse directive '{}': {}"))
-                .fold(EnvFilter::default(), |filter, it| {
-                    filter.add_directive(it)
+                .map(|it| {
+                    it.parse()
+                        .expect("Failed to parse directive '{}': {}")
                 })
+                .fold(EnvFilter::default(), |filter, it| filter.add_directive(it))
                 .add_directive(tracing::Level::DEBUG.into())
         })
         .init();

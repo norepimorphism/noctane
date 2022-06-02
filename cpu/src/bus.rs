@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 //! The CPU memory bus.
 //!
 //! This is the stage at which memory accesses are delegated to the appropriate memory bank.
@@ -21,7 +23,6 @@ macro_rules! def_bank {
         impl $name {
             /// The base address, relative to the start of each memory segment, of this memory bank.
             pub const BASE_ADDR: usize = $addr;
-
             const LEN: usize = make_index($size);
         }
 
@@ -113,21 +114,19 @@ impl Bus<'_> {
         access_io: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
     ) -> T {
         macro_rules! get_bank {
-            ($field_name:ident, $struct_name:ident $(,)?) => {
-                {
-                    addr.working -= $struct_name::BASE_ADDR;
-                    tracing::trace!(
-                        "Accessing `cpu_bus.{}[{:#010x}]`",
-                        stringify!($field_name),
-                        addr.working,
-                    );
+            ($field_name:ident, $struct_name:ident $(,)?) => {{
+                addr.working -= $struct_name::BASE_ADDR;
+                tracing::trace!(
+                    "Accessing `cpu_bus.{}[{:#010x}]`",
+                    stringify!($field_name),
+                    addr.working,
+                );
 
-                    self.$field_name
-                        .get_mut(make_index(addr.working))
-                        .map(|it| access_word(it))
-                        .ok_or(())
-                }
-            };
+                self.$field_name
+                    .get_mut(make_index(addr.working))
+                    .map(|it| access_word(it))
+                    .ok_or(())
+            }};
         }
 
         // To avoid explicitly defining a range for each memory bank, we can simply use an
@@ -136,9 +135,7 @@ impl Bus<'_> {
         match addr.working {
             Bios::BASE_ADDR.. => get_bank!(bios, Bios),
             Exp3::BASE_ADDR.. => get_bank!(exp_3, Exp3),
-            Self::IO_BASE_ADDR.. => {
-                access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR))
-            }
+            Self::IO_BASE_ADDR.. => access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR)),
             Exp1::BASE_ADDR.. => get_bank!(exp_1, Exp1),
             MainRam::BASE_ADDR.. => get_bank!(main_ram, MainRam),
             _ => Err(()),
@@ -149,37 +146,21 @@ impl Bus<'_> {
     pub fn read_8(&mut self, addr: Address) -> u8 {
         self.access(
             addr,
-            |word| {
-                addr.index_byte_in_word(*word)
-            },
-            |this, addr| {
-                this.io.read_8(addr)
-            },
+            |word| addr.index_byte_in_word(*word),
+            |this, addr| this.io.read_8(addr),
         )
     }
 
     pub fn read_16(&mut self, addr: Address) -> u16 {
         self.access(
             addr,
-            |word| {
-                addr.index_halfword_in_word(*word)
-            },
-            |this, addr| {
-                this.io.read_16(addr)
-            },
+            |word| addr.index_halfword_in_word(*word),
+            |this, addr| this.io.read_16(addr),
         )
     }
 
     pub fn read_32(&mut self, addr: Address) -> u32 {
-        self.access(
-            addr,
-            |word| {
-                *word
-            },
-            |this, addr| {
-                this.io.read_32(addr)
-            },
-        )
+        self.access(addr, |word| *word, |this, addr| this.io.read_32(addr))
     }
 
     pub fn write_8(&mut self, addr: Address, value: u8) {
@@ -190,9 +171,7 @@ impl Bus<'_> {
                 bytes[addr.byte_idx] = value;
                 *word = u32::from_be_bytes(bytes);
             },
-            |this, addr| {
-                this.io.write_8(addr, value)
-            },
+            |this, addr| this.io.write_8(addr, value),
         )
     }
 
@@ -204,9 +183,7 @@ impl Bus<'_> {
                 bytes.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
                 *word = u32::from_be_bytes(bytes);
             },
-            |this, addr| {
-                this.io.write_16(addr, value)
-            },
+            |this, addr| this.io.write_16(addr, value),
         )
     }
 
@@ -216,9 +193,7 @@ impl Bus<'_> {
             |word| {
                 *word = value;
             },
-            |this, addr| {
-                this.io.write_32(addr, value)
-            },
+            |this, addr| this.io.write_32(addr, value),
         )
     }
 

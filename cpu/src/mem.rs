@@ -1,25 +1,27 @@
+// SPDX-License-Identifier: MPL-2.0
+
 //! Cached CPU memory.
 //!
 //! This is the stage at which 16-bit addresses are stripped of their bottom bit, 32-bit addresses
 //! are stripped of their bottom two bits, and accesses are delegated to either the CPU cache (see
 //! [`crate::cache`]) or memory bus (see [`bus`]).
 
-use crate::{Cache, bus::Bus};
+use crate::{bus::Bus, Cache};
 
 impl From<usize> for Address {
     fn from(init: usize) -> Self {
-       Self::new(init, init)
+        Self::new(init, init)
     }
 }
 
 impl Address {
     pub const fn new(init: usize, working: usize) -> Self {
-       Self {
-           init,
-           working,
-           halfword_idx: (init >> 1) & 0b1,
-           byte_idx: init & 0b11,
-       }
+        Self {
+            init,
+            working,
+            halfword_idx: (init >> 1) & 0b1,
+            byte_idx: init & 0b11,
+        }
     }
 }
 
@@ -157,16 +159,11 @@ macro_rules! def_read_fn {
             let value = self.$access_name(
                 addr,
                 |this, addr| {
-                    this.cache.i.$fn_name(
-                        addr,
-                        |addr| {
-                            this.bus.fetch_cache_line(addr)
-                        },
-                    )
+                    this.cache
+                        .i
+                        .$fn_name(addr, |addr| this.bus.fetch_cache_line(addr))
                 },
-                |this, addr| {
-                    this.bus.$fn_name(addr)
-                },
+                |this, addr| this.bus.$fn_name(addr),
                 |_, _| {
                     // TODO
                     0
@@ -193,9 +190,7 @@ macro_rules! def_write_fn {
                         this.bus.$fn_name(addr, value);
                     }
                 },
-                |this, addr| {
-                    this.bus.$fn_name(addr, value)
-                },
+                |this, addr| this.bus.$fn_name(addr, value),
                 |_, _| {
                     // TODO
                 },
@@ -206,14 +201,20 @@ macro_rules! def_write_fn {
 
 impl Memory<'_, '_> {
     def_access!(access_8 8);
+
     def_access!(access_16 16);
+
     def_access!(access_32 32);
 
     def_read_fn!(read_8 access_8 u8);
+
     def_read_fn!(read_16 access_16 u16);
+
     def_read_fn!(read_32 access_32 u32);
 
     def_write_fn!(write_8 access_8 u8);
+
     def_write_fn!(write_16 access_16 u16);
+
     def_write_fn!(write_32 access_32 u32);
 }

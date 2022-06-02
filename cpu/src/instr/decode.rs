@@ -1,15 +1,8 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 use bit::BitIndex as _;
-use super::{
-    Instr,
-    i,
-    j,
-    opx,
-    r,
-};
+
+use super::{i, j, opx, r, Instr};
 
 impl Instr {
     pub const OP_SPECIAL: u8 = 0;
@@ -38,12 +31,19 @@ macro_rules! def_decode_instr_part {
 
 impl Instr {
     def_decode_instr_part!(decode_op, OP, u8);
+
     def_decode_instr_part!(decode_target, TARGET, u32);
+
     def_decode_instr_part!(decode_imm, IMM, u16);
+
     def_decode_instr_part!(decode_rs, RS, u8);
+
     def_decode_instr_part!(decode_rt, RT, u8);
+
     def_decode_instr_part!(decode_rd, RD, u8);
+
     def_decode_instr_part!(decode_shamt, SHAMT, u8);
+
     def_decode_instr_part!(decode_funct, FUNCT, u8);
 }
 

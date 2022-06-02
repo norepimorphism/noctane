@@ -1,13 +1,16 @@
+// SPDX-License-Identifier: MPL-2.0
+
 #![feature(slice_as_chunks)]
 
 use noctane_cpu::instr::Instr;
 
 fn main() {
-    let rom_filepath = std::env::args().nth(1).expect("expected ROM filepath");
+    let rom_filepath = std::env::args()
+        .nth(1)
+        .expect("expected ROM filepath");
     let rom = std::fs::read(rom_filepath).expect("failed to read ROM");
 
-    rom
-        .as_chunks()
+    rom.as_chunks()
         .0
         .into_iter()
         .enumerate()

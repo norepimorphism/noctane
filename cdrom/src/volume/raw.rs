@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::fmt;
 
 use derivative::Derivative;
@@ -18,7 +20,7 @@ pub enum DeserializeError {
 impl de::Error for DeserializeError {
     fn custom<T>(msg: T) -> Self
     where
-        T:fmt::Display,
+        T: fmt::Display,
     {
         Self::Message(msg.to_string())
     }
@@ -78,7 +80,8 @@ macro_rules! def_deserialize_native_endian {
         {
             const TYPE_SIZE: usize = std::mem::size_of::<$ty>();
 
-            let it = self.input
+            let it = self
+                .input
                 .get(0..TYPE_SIZE)
                 .ok_or(DeserializeError::$exp)
                 .map(|it| <[u8; TYPE_SIZE]>::try_from(it).expect("type size mismatch"))
@@ -119,15 +122,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         deserialize_ignored_any()
     }
 
-    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        let it = self.take(1).ok_or(DeserializeError::ExpectedU8)?[0];
-
-        visitor.visit_u8(it)
-    }
-
     // While the spec. indicates that either little-, big- or middle-endian representations
     // for multi-byte integers may be used, I have only seen them in middle-endian. It is
     // probably erroneous to assume that of all integer fields, but it works for now.
@@ -145,6 +139,15 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     def_deserialize_native_endian! {
         fn: deserialize_u64<'de> -> Result<u64, ExpectedU64>,
         visit: visit_u64,
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        let it = self.take(1).ok_or(DeserializeError::ExpectedU8)?[0];
+
+        visitor.visit_u8(it)
     }
 
     fn deserialize_struct<V>(
@@ -190,10 +193,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             }
         }
 
-        visitor.visit_seq(Access {
-            de: &mut self,
-            len,
-        })
+        visitor.visit_seq(Access { de: &mut self, len })
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -201,7 +201,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: de::Visitor<'de>,
     {
         let len = usize::from(self.take(1).ok_or(DeserializeError::ExpectedU8)?[0]);
-        let data = self.take(len).ok_or(DeserializeError::ExpectedU8)?;
+        let data = self
+            .take(len)
+            .ok_or(DeserializeError::ExpectedU8)?;
 
         visitor.visit_borrowed_bytes(data)
     }

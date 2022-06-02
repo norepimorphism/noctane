@@ -1,15 +1,20 @@
+// SPDX-License-Identifier: MPL-2.0
+
 mod raw;
 
 use std::fmt;
 
+pub use raw::DeserializeError;
 use serde::Deserialize as _;
 
 use crate::Error;
-pub use raw::DeserializeError;
 
 impl Volume {
     pub fn new(logical_sector_size: usize, data: Vec<u8>) -> Self {
-        Self { logical_sector_size, data }
+        Self {
+            logical_sector_size,
+            data,
+        }
     }
 }
 
@@ -31,7 +36,9 @@ impl Volume {
     }
 
     pub fn data_area(&self) -> Result<&[u8], Error> {
-        self.data.get(self.system_area_size()..).ok_or(Error::ExpectedDataArea)
+        self.data
+            .get(self.system_area_size()..)
+            .ok_or(Error::ExpectedDataArea)
     }
 
     pub fn descriptors(&self) -> impl '_ + Iterator<Item = Result<Descriptor, Error>> {
@@ -112,7 +119,9 @@ impl PrimaryDescriptor {
             vol,
             u16::from(raw.logical_block_size).into(),
             Self::select_path_table_lba(&raw).into(),
-            u32::from(raw.path_table_size).try_into().map_err(|_| Error::IntegerOverflow)?,
+            u32::from(raw.path_table_size)
+                .try_into()
+                .map_err(|_| Error::IntegerOverflow)?,
         )?;
 
         Ok(Self { directories })
@@ -135,7 +144,10 @@ impl PrimaryDescriptor {
         let start_addr = lba * logical_block_size;
         let end_addr = start_addr + size;
 
-        let bytes = vol.data.get(start_addr..end_addr).ok_or(Error::ExpectedPathTable)?;
+        let bytes = vol
+            .data
+            .get(start_addr..end_addr)
+            .ok_or(Error::ExpectedPathTable)?;
         let mut de = raw::Deserializer::from_bytes(bytes);
 
         let records = Self::iter_directories(vol, logical_block_size, &mut de)
@@ -163,7 +175,7 @@ impl PrimaryDescriptor {
                 }
             };
 
-            let extent_lba =  match u32::from(raw_record.extent_lba)
+            let extent_lba = match u32::from(raw_record.extent_lba)
                 .try_into()
                 .map_err(|_| Error::IntegerOverflow)
             {
@@ -172,11 +184,7 @@ impl PrimaryDescriptor {
                     return Some(Err(e));
                 }
             };
-            let files = match Self::read_directory(
-                vol,
-                logical_block_size,
-                extent_lba,
-            ) {
+            let files = match Self::read_directory(vol, logical_block_size, extent_lba) {
                 Ok(it) => it,
                 Err(e) => {
                     return Some(Err(e));
@@ -188,7 +196,11 @@ impl PrimaryDescriptor {
                 let _ = table_de.take(1);
             }
 
-            Some(Ok(Directory { parent_num, id, files }))
+            Some(Ok(Directory {
+                parent_num,
+                id,
+                files,
+            }))
         })
     }
 
@@ -198,7 +210,10 @@ impl PrimaryDescriptor {
         lba: usize,
     ) -> Result<Vec<File>, Error> {
         let start_addr = lba * logical_block_size;
-        let bytes = vol.data.get(start_addr..).ok_or(Error::ExpectedExtent)?;
+        let bytes = vol
+            .data
+            .get(start_addr..)
+            .ok_or(Error::ExpectedExtent)?;
         let mut de = raw::Deserializer::from_bytes(bytes);
 
         let files = Self::iter_files(&mut de)
@@ -296,12 +311,7 @@ impl fmt::Display for NumTimestamp {
         write!(
             f,
             "{}/{}/{} {:02}:{:02}:{:02}",
-            self.month,
-            self.day,
-            self.year,
-            self.hour,
-            self.minute,
-            self.second,
+            self.month, self.day, self.year, self.hour, self.minute, self.second,
         )?;
 
         let gmt_offset_as_min = self.gmt_offset * 15;

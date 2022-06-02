@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 impl<'b> Window<'b> {
     pub fn new(window: &'b mut boing::Window<'b>) -> anyhow::Result<Self> {
         window.set_resizeable(true);

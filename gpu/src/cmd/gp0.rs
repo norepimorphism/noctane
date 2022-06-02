@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 pub mod decode;
 
 macro_rules! def_cmd_and_kind {

@@ -1,24 +1,26 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::fmt;
 
 impl Default for File {
     fn default() -> Self {
-       let mut this = Self {
-           // This is the reset vector.
-           // TODO: We should do something more proper in the future, like having a method called
-           // `reset` that sets the PC to this.
-           pc: 0xbfc0_0000,
-           hi: 0,
-           lo: 0,
-           gprs: [0; 32],
-           cprs: [0; 32],
-           sr_is_dirty: false,
-           pending_cause: None,
-       };
+        let mut this = Self {
+            // This is the reset vector.
+            // TODO: We should do something more proper in the future, like having a method called
+            // `reset` that sets the PC to this.
+            pc: 0xbfc0_0000,
+            hi: 0,
+            lo: 0,
+            gprs: [0; 32],
+            cprs: [0; 32],
+            sr_is_dirty: false,
+            pending_cause: None,
+        };
 
-       // PRId has a special default.
-       this.cprs[cpr::PRID_IDX] = cpr::Prid::default().0;
+        // PRId has a special default.
+        this.cprs[cpr::PRID_IDX] = cpr::Prid::default().0;
 
-       this
+        this
     }
 }
 
@@ -87,11 +89,7 @@ impl File {
     }
 
     pub fn gpr(&self, index: usize) -> u32 {
-        if index == 0 {
-            0
-        } else {
-            self.gprs[index]
-        }
+        if index == 0 { 0 } else { self.gprs[index] }
     }
 
     pub fn set_gpr(&mut self, index: usize, value: u32) {
@@ -126,11 +124,11 @@ pub mod cpr {
 
     use crate::exc::Exception;
 
-    pub const BAD_VADDR_IDX:    usize = 8;
-    pub const STATUS_IDX:       usize = 12;
-    pub const CAUSE_IDX:        usize = 13;
-    pub const EPC_IDX:          usize = 14;
-    pub const PRID_IDX:         usize = 15;
+    pub const BAD_VADDR_IDX: usize = 8;
+    pub const STATUS_IDX: usize = 12;
+    pub const CAUSE_IDX: usize = 13;
+    pub const EPC_IDX: usize = 14;
+    pub const PRID_IDX: usize = 15;
 
     bitfield! {
         pub struct Status(u32);

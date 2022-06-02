@@ -1,18 +1,12 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// SPDX-License-Identifier: MPL-2.0
 
 use std::{cell::Cell, fs::File};
 
 use anyhow::Context as _;
-
 use i18n_embed::fluent::FluentLanguageLoader;
 
 impl<'b> MenuBar<'b> {
-    pub fn new<'l>(
-        i18n: &'l FluentLanguageLoader,
-        boing: &'b boing::Ui,
-    ) -> anyhow::Result<Self> {
+    pub fn new<'l>(i18n: &'l FluentLanguageLoader, boing: &'b boing::Ui) -> anyhow::Result<Self> {
         let mut ctx = Context::<'l, 'b> { i18n, boing };
 
         Ok(Self {
@@ -35,7 +29,9 @@ impl<'l, 'b> Context<'l, 'b> {
     }
 
     fn create_file_menu(&mut self) -> anyhow::Result<FileMenu<'b>> {
-        let menu = self.boing.create_menu(self.fl("menu_file_title"))
+        let menu = self
+            .boing
+            .create_menu(self.fl("menu_file_title"))
             .context("Failed to create \"File\" menu")?;
         let open_iso = self.create_open_iso_item(menu)?;
         menu.push_separator();
@@ -57,7 +53,9 @@ impl<'l, 'b> Context<'l, 'b> {
     }
 
     fn create_edit_menu(&mut self) -> anyhow::Result<EditMenu<'b>> {
-        let menu = self.boing.create_menu(self.fl("menu_edit_title"))
+        let menu = self
+            .boing
+            .create_menu(self.fl("menu_edit_title"))
             .context("Failed to create \"Edit\" menu")?;
         let prefs = self.create_prefs_item(menu)?;
 
@@ -71,7 +69,9 @@ impl<'l, 'b> Context<'l, 'b> {
     }
 
     fn create_view_menu(&mut self) -> anyhow::Result<ViewMenu<'b>> {
-        let menu = self.boing.create_menu(self.fl("menu_view_title"))
+        let menu = self
+            .boing
+            .create_menu(self.fl("menu_view_title"))
             .context("Failed to create \"View\" menu")?;
         let log = self.create_log_item(menu)?;
 
@@ -85,7 +85,9 @@ impl<'l, 'b> Context<'l, 'b> {
     }
 
     fn create_help_menu(&mut self) -> anyhow::Result<HelpMenu<'b>> {
-        let menu = self.boing.create_menu(self.fl("menu_help_title"))
+        let menu = self
+            .boing
+            .create_menu(self.fl("menu_help_title"))
             .context("Failed to create \"Help\" menu")?;
         self.setup_website_item(menu)?;
         menu.push_separator();
@@ -97,7 +99,8 @@ impl<'l, 'b> Context<'l, 'b> {
     fn setup_website_item(&mut self, menu: &boing::Menu<'b>) -> anyhow::Result<()> {
         static REPO_URL: &str = "https://github.com/norepimorphism/noctane";
 
-        let item = menu.push_new_item(self.fl("menu-item_website_title"))
+        let item = menu
+            .push_new_item(self.fl("menu-item_website_title"))
             .context("Failed to append \"Website\" menu item")?;
         item.on_clicked(|_| {
             let _ = open::that(REPO_URL);
@@ -128,7 +131,7 @@ pub struct FileMenu<'b> {
 pub struct OpenIsoItem<'b>(&'b mut boing::MenuItem<'b>);
 
 impl<'b> OpenIsoItem<'b> {
-   pub fn setup(&'b mut self, noctane: &'b mut noctane::Core) {
+    pub fn setup(&'b mut self, noctane: &'b mut noctane::Core) {
         self.0.on_clicked(|_| {
             if let Ok(Some(iso_path)) = native_dialog::FileDialog::new()
                 .add_filter("CD-ROM Image", &["iso"])
