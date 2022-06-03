@@ -433,6 +433,10 @@ macro_rules! def_instr_and_op_kind {
                                     fn calc_ret_addr(&self) -> u32 {
                                         self.reg.pc().wrapping_add(4)
                                     }
+
+                                    fn raise_exc(&self, code: u32) -> Exception {
+                                        Exception::new(code, self.reg.pc())
+                                    }
                                 }
 
                                 // tracing::trace!("{:?}", opx);
@@ -484,7 +488,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
+                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -501,7 +505,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(sign_extend_16(ctx.opx.imm) as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
+                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rt.index, result as u32);
 
@@ -544,7 +548,7 @@ def_instr_and_op_kind!(
     {
         name: Andi,
         type: i,
-        asm: ["andi" %(rt), %(rs), #(s)],
+        asm: ["andi" %(rt), %(rs), #(u)],
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value & u32::from(ctx.opx.imm));
 
@@ -581,7 +585,7 @@ def_instr_and_op_kind!(
                     tracing::trace!("bgezal");
                     todo!();
                 }
-                _ => Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr)),
+                _ => Err(ctx.raise_exc(exc::code::RESERVED_INSTR)),
             }
         },
     },
@@ -638,7 +642,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["break"],
         fn: |ctx: Context| {
-            Err(Exception::new(exc::code::BREAKPOINT, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::BREAKPOINT))
         },
     },
     {
@@ -658,7 +662,7 @@ def_instr_and_op_kind!(
                         tracing::trace!("cfc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                     }
                     4 => {
                         tracing::trace!("mtc0");
@@ -670,27 +674,27 @@ def_instr_and_op_kind!(
                         tracing::trace!("ctc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                     }
                     _ => {
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                     }
                 }
                 // The PSX CPU doesn't implement an MMU... so page table instructions are reserved.
                 1 => {
                     tracing::trace!("tlbr");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                 }
                 2 => {
                     tracing::trace!("tlbwi");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                 }
                 8 => {
                     tracing::trace!("tlbp");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                 }
                 16 => {
                     tracing::trace!("rfe");
@@ -705,7 +709,7 @@ def_instr_and_op_kind!(
                     Ok(())
                 }
                 _ => {
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
+                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
                 }
             }
         },
@@ -716,7 +720,7 @@ def_instr_and_op_kind!(
         asm: ["cop1"],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -734,7 +738,7 @@ def_instr_and_op_kind!(
         asm: ["cop3"],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -819,7 +823,7 @@ def_instr_and_op_kind!(
     {
         name: Lb,
         type: i,
-        asm: ["lb" %(rt), #(s)],
+        asm: ["lb" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
@@ -830,7 +834,7 @@ def_instr_and_op_kind!(
     {
         name: Lbu,
         type: i,
-        asm: ["lbu" %(rt), #(s)],
+        asm: ["lbu" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
@@ -841,7 +845,7 @@ def_instr_and_op_kind!(
     {
         name: Lh,
         type: i,
-        asm: ["lh" %(rt), #(s)],
+        asm: ["lh" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
@@ -852,7 +856,7 @@ def_instr_and_op_kind!(
     {
         name: Lhu,
         type: i,
-        asm: ["lhu" %(rt), #(s)],
+        asm: ["lhu" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
@@ -873,7 +877,7 @@ def_instr_and_op_kind!(
     {
         name: Lw,
         type: i,
-        asm: ["lw" %(rt), #(s)],
+        asm: ["lw" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let value = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value);
@@ -893,7 +897,7 @@ def_instr_and_op_kind!(
         asm: ["lwc1" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -911,7 +915,7 @@ def_instr_and_op_kind!(
         asm: ["lwc3" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -1017,7 +1021,7 @@ def_instr_and_op_kind!(
     {
         name: Ori,
         type: i,
-        asm: ["ori" %(rt), %(rs), #(s)],
+        asm: ["ori" %(rt), %(rs), #(u)],
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value | u32::from(ctx.opx.imm));
 
@@ -1027,7 +1031,7 @@ def_instr_and_op_kind!(
     {
         name: Sb,
         type: i,
-        asm: ["sb" %(rt), #(s)],
+        asm: ["sb" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8);
@@ -1038,7 +1042,7 @@ def_instr_and_op_kind!(
     {
         name: Sh,
         type: i,
-        asm: ["sh" %(rt), #(s)],
+        asm: ["sh" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16);
@@ -1155,7 +1159,7 @@ def_instr_and_op_kind!(
                 .overflowing_sub(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
+                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -1176,7 +1180,7 @@ def_instr_and_op_kind!(
     {
         name: Sw,
         type: i,
-        asm: ["sw" %(rt), #(s)],
+        asm: ["sw" %(rt), #(s), %(rs)],
         fn: |ctx: Context| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value);
@@ -1196,7 +1200,7 @@ def_instr_and_op_kind!(
         asm: ["swc1" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -1214,7 +1218,7 @@ def_instr_and_op_kind!(
         asm: ["swc3" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
         },
     },
     {
@@ -1234,7 +1238,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["syscall"],
         fn: |ctx: Context| {
-            Err(Exception::new(exc::code::SYSCALL, ctx.instr_addr))
+            Err(ctx.raise_exc(exc::code::SYSCALL))
         },
     },
     {
@@ -1250,7 +1254,7 @@ def_instr_and_op_kind!(
     {
         name: Xori,
         type: i,
-        asm: ["xori" %(rt), %(rs), #(s)],
+        asm: ["xori" %(rt), %(rs), #(u)],
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value ^ u32::from(ctx.opx.imm));
 

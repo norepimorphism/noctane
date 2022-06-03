@@ -51,7 +51,12 @@ impl fmt::Display for Operand {
                 write!(f, "r{}", it)
             }
             Self::SInt(it) => {
-                write!(f, "{}", format_int!(it, it.abs()))
+                let sign = match it.signum() {
+                    -1 => "-",
+                    _ => "",
+                };
+
+                write!(f, "{}{}", sign, format_int!(it, it.abs()))
             }
             Self::UInt(it) => {
                 write!(f, "{}", format_int!(it, *it))
