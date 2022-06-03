@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! CPU and COP0 registers.
+
 use std::fmt;
 
 impl Default for File {
@@ -24,15 +26,15 @@ impl Default for File {
     }
 }
 
+/// The register file.
+///
+/// Why is it called a 'file', anyway?
 #[derive(Debug)]
 pub struct File {
-    /// The program counter.
     pc: u32,
     hi: u32,
     lo: u32,
-    /// General-purpose registers.
     gprs: [u32; 32],
-    /// System coprocessor (COP0) registers.
     cprs: [u32; 32],
     sr_is_dirty: bool,
     pending_cause: Option<cpr::Cause>,
@@ -57,7 +59,11 @@ impl fmt::Display for File {
         writeln!(f, "r14:{:08x} r30:{:08x}", self.gprs[14], self.gprs[30])?;
         writeln!(f, "r15:{:08x} r31:{:08x}", self.gprs[15], self.gprs[31])?;
         writeln!(f, "hi: {:08x} lo: {:08x}", self.hi, self.lo)?;
-        // TODO: Write control registers.
+        writeln!(f, "BadVaddr: {:08x}", self.cprs[cpr::BAD_VADDR_IDX])?;
+        writeln!(f, "SR:       {:08x}", self.cprs[cpr::STATUS_IDX])?;
+        writeln!(f, "Cause:    {:08x}", self.cprs[cpr::CAUSE_IDX])?;
+        writeln!(f, "EPC:      {:08x}", self.cprs[cpr::EPC_IDX])?;
+        writeln!(f, "PRId:     {:08x}", self.cprs[cpr::PRID_IDX])?;
 
         Ok(())
     }
@@ -177,7 +183,7 @@ pub mod cpr {
             let mut this = Self(0);
             this.set_imp(3);
             // I have no idea what Sony set this to.
-            this.set_rev(0xaaaa);
+            this.set_rev(0xaa);
 
             this
         }
