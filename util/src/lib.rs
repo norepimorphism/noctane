@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::{fmt, io};
+pub mod sym;
+
+use std::io;
 
 pub fn dump_hex(w: &mut impl io::Write, pc: u32, bytes: [u8; 4]) {
     write!(

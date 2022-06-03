@@ -31,33 +31,26 @@ macro_rules! def_decode_instr_part {
 
 impl Instr {
     def_decode_instr_part!(decode_op, OP, u8);
-
     def_decode_instr_part!(decode_target, TARGET, u32);
-
     def_decode_instr_part!(decode_imm, IMM, u16);
-
     def_decode_instr_part!(decode_rs, RS, u8);
-
     def_decode_instr_part!(decode_rt, RT, u8);
-
     def_decode_instr_part!(decode_rd, RD, u8);
-
     def_decode_instr_part!(decode_shamt, SHAMT, u8);
-
     def_decode_instr_part!(decode_funct, FUNCT, u8);
 }
 
 mod enc_range {
     use std::ops::Range;
 
-    pub const FUNCT: Range<usize> = 0..6;
-    pub const SHAMT: Range<usize> = 6..11;
-    pub const RD: Range<usize> = 11..16;
-    pub const RT: Range<usize> = 16..21;
-    pub const RS: Range<usize> = 21..26;
-    pub const IMM: Range<usize> = 0..16;
-    pub const TARGET: Range<usize> = 0..26;
-    pub const OP: Range<usize> = 26..32;
+    pub const FUNCT:    Range<usize> = 0..6;
+    pub const SHAMT:    Range<usize> = 6..11;
+    pub const RD:       Range<usize> = 11..16;
+    pub const RT:       Range<usize> = 16..21;
+    pub const RS:       Range<usize> = 21..26;
+    pub const IMM:      Range<usize> = 0..16;
+    pub const TARGET:   Range<usize> = 0..26;
+    pub const OP:       Range<usize> = 26..32;
 }
 
 impl opx::Kind {

@@ -146,7 +146,7 @@ pub struct Pipeline {
     // "Lies!", you say. "How can there be 5 pipestages when there is only one field?" As it turns
     // out, only one field is needed to represent all 5 pipestages. See the [`Self::advance`] method
     // for details.
-    rd: Option<Fetch>,
+    rd: Option<Fetched>,
 }
 
 impl fmt::Display for Pipeline {
@@ -164,9 +164,11 @@ impl fmt::Display for Pipeline {
 
 /// The result of an instruction fetch.
 #[derive(Clone, Copy, Debug)]
-pub struct Fetch {
+pub struct Fetched {
     /// The program address at which the fetched instruction is located.
     pub addr: u32,
+    /// The original opcode of the instruction fetched.
+    pub op: u32,
     /// The instruction fetched.
     pub instr: Instr,
 }
@@ -181,7 +183,7 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Fetch {
+    ) -> Fetched {
         self.execute_queued_instr(exc, mem, reg, decode_instr);
         let fetch = self.fetch_next_instr(mem, reg, decode_instr);
         self.rd = Some(fetch);
@@ -230,14 +232,14 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Fetch {
+    ) -> Fetched {
         let pc = reg.pc();
         let op = mem.read_32(pc);
         let instr = decode_instr(op);
         // Increment the PC.
         *reg.pc_mut() = pc.wrapping_add(4);
 
-        Fetch { addr: pc, instr }
+        Fetched { addr: pc, op, instr }
     }
 }
 

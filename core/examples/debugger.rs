@@ -86,7 +86,7 @@ impl Debugger<'_> {
                 Ok(())
             }
             "s" | "sl" => {
-                self.do_step_loudly();
+                self.do_step_loudly(None);
 
                 Ok(())
             }
@@ -117,14 +117,16 @@ impl Debugger<'_> {
 
     fn do_continue(&mut self, be_quiet: bool) {
         loop {
+            let pc = self.cpu.reg().pc();
+            let mut hit_breakpoint = self.breakpoints.get(&pc).is_some();
+
             if be_quiet {
                 self.do_step_quietly();
             } else {
-                self.do_step_loudly();
+                self.do_step_loudly(Some(&mut hit_breakpoint));
             }
 
-            let pc = self.cpu.reg().pc();
-            if self.breakpoints.get(&pc).is_some() {
+            if hit_breakpoint {
                 println!("BREAK @ {:#010x}", pc);
                 break;
             }
@@ -139,10 +141,37 @@ impl Debugger<'_> {
         println!("{}", self.cpu.mem().cache().i);
     }
 
-    fn do_step_loudly(&mut self) {
-        if let Some(exec) = self.cpu.execute_next_instr() {
-            println!("{:08x}   {}", exec.pc, exec.instr.asm());
+    fn do_step_loudly(&mut self, hit_breakpoint: Option<&mut bool>) {
+        let fetched = self.cpu.execute_next_instr();
+        print!("{:08x}   {}", fetched.addr, fetched.instr.asm());
+
+        let comment = match fetched.instr {
+            noctane_cpu::Instr::Break(_) => {
+                if let Some(it) = hit_breakpoint {
+                    *it = true;
+                }
+
+                // See RM[A-21].
+                let code = (fetched.op >> 6) & ((1 << 21) - 1);
+                let comment = noctane_util::sym::for_break(code)
+                    .map(|sym| format!("{}()", sym))
+                    .unwrap_or_else(|| format!("{:#05x}", code));
+
+                Some(comment)
+            }
+            noctane_cpu::Instr::Syscall(_) => {
+                // Sony stores a code identifying the function of the syscall in the *r4* register.
+                let code = self.cpu.reg().gpr(4);
+
+                Some(noctane_util::sym::for_syscall(code).to_string())
+            }
+            _ => None,
+        };
+        if let Some(comment) = comment {
+            print!("\t\t; {}", comment);
         }
+
+        println!();
     }
 
     fn do_step_quietly(&mut self) {

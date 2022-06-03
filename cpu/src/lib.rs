@@ -71,7 +71,6 @@ pub mod exc;
 pub mod instr;
 pub mod mem;
 pub mod reg;
-pub mod sym;
 
 pub use bus::Bus;
 pub use cache::{i::Cache as ICache, Cache};
@@ -198,7 +197,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`reg`]: Self::reg
     /// [`execute_instr`]: Self::execute_instr
     /// [`execute_opcode`]: Self::execute_opcode
-    pub fn execute_next_instr(&mut self) -> instr::Fetch {
+    pub fn execute_next_instr(&mut self) -> instr::Fetched {
         // TODO: Don't unwrap!
         self.advance_pipeline(|op| Instr::decode(op).unwrap())
     }
@@ -206,14 +205,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Executes the given instruction.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_instr(&mut self, instr: Instr) -> instr::Fetch {
+    pub fn execute_instr(&mut self, instr: Instr) -> instr::Fetched {
         self.advance_pipeline(|_| instr)
     }
 
     /// Executes the instruction decodeable from the given opcode.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_opcode(&mut self, op: u32) -> instr::Fetch {
+    pub fn execute_opcode(&mut self, op: u32) -> instr::Fetched {
         // TODO: Don't unwrap!
         self.advance_pipeline(|_| Instr::decode(op).unwrap())
     }
@@ -230,13 +229,13 @@ impl<'s, 'b> Cpu<'s, 'b> {
     pub fn advance_pipeline(
         &mut self,
         decode_instr: impl Fn(u32) -> Instr,
-    ) -> instr::Fetch {
+    ) -> instr::Fetched {
         // Handling exceptions comes first as this method may alter the PC, which is used to fetch
         // future instructions in [`Pipeline::advance`].
         self.handle_exc();
 
         // Actually advance the pipeline.
-        let fetch =
+        let fetched =
             self.pipeline
                 .advance(&mut self.exc, &mut self.mem, &mut self.reg, &decode_instr);
 
@@ -255,24 +254,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
             // TODO
         }
 
-        fetch
+        fetched
     }
 
     /// Handles the next exception in the exception queue, if one exists.
     fn handle_exc(&mut self) {
         // Exceptions are pushed in the back, so pop from the front.
         if let Some(exc) = self.exc.pop_front() {
-            match exc.code {
-                exc::code::SYSCALL => {
-                    // TODO: This is probably the responsibility of the debugger.
-
-                    let code = self.reg.gpr(4);
-                    tracing::info!("Syscall: {}()", sym::for_syscall(code));
-                }
-                _ => {
-                    tracing::error!("Exception: {:?}", exc);
-                }
-            }
+            tracing::error!("Exception: {:?}", exc);
 
             // Set the Cause and EPC registers.
             self.reg
