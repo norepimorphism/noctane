@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! Cached CPU memory.
+//! Potentially-cacheable CPU memory.
 //!
-//! This is the stage at which 16-bit addresses are stripped of their bottom bit, 32-bit addresses
-//! are stripped of their bottom two bits, and accesses are delegated to either the CPU cache (see
-//! [`crate::cache`]) or memory bus (see [`bus`]).
+//! This is the stage at which program addresses are translated to physical addresses and stripped
+//! of their bottommost bits, and accesses are delegated to either the CPU cache (see
+//! [`cache`]) or memory bus (see [`bus`]).
+//!
+//! [`cache`]: crate::cache
+//! [`bus`]: crate::bus
 
 use crate::{bus::Bus, Cache};
 
@@ -15,7 +18,8 @@ impl From<usize> for Address {
 }
 
 impl Address {
-    pub const fn new(init: usize, working: usize) -> Self {
+    /// Creates a new `Address`.
+    pub(crate) const fn new(init: usize, working: usize) -> Self {
         Self {
             init,
             working,
@@ -25,31 +29,31 @@ impl Address {
     }
 }
 
-/// A physical memory address.
+/// A 32-bit program (i.e. virtual) or physical address.
 #[derive(Clone, Copy)]
 pub struct Address {
-    pub init: usize,
-    pub working: usize,
-    pub halfword_idx: usize,
-    pub byte_idx: usize,
+    pub(crate) init: usize,
+    pub(crate) working: usize,
+    pub(crate) halfword_idx: usize,
+    pub(crate) byte_idx: usize,
 }
 
 impl Address {
-    pub fn map_working(mut self, mut f: impl FnMut(usize) -> usize) -> Self {
+    pub(crate) fn map_working(mut self, mut f: impl FnMut(usize) -> usize) -> Self {
         self.working = f(self.working);
 
         self
     }
 
-    pub fn index_byte_in_word(&self, word: u32) -> u8 {
+    pub(crate) fn index_byte_in_word(&self, word: u32) -> u8 {
         word.to_be_bytes()[self.byte_idx]
     }
 
-    pub fn index_byte_in_halfword(&self, halfword: u16) -> u8 {
+    pub(crate) fn index_byte_in_halfword(&self, halfword: u16) -> u8 {
         halfword.to_be_bytes()[self.byte_idx & 0b1]
     }
 
-    pub fn index_halfword_in_word(&self, word: u32) -> u16 {
+    pub(crate) fn index_halfword_in_word(&self, word: u32) -> u16 {
         u16::from_be_bytes(word.to_be_bytes().as_chunks::<2>().0[self.halfword_idx])
     }
 }

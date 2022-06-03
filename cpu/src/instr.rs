@@ -12,15 +12,19 @@ use crate::{exc, reg, Memory};
 pub mod i {
     use super::{opn::Gpr, reg};
 
-    /// An I-type instruction.
+    /// An I-type instruction, where 'I' stands for 'immediate'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
+        /// The *rs* operand.
         pub rs: u8,
+        /// The *rt* operand.
         pub rt: u8,
+        /// The *imm* operand.
         pub imm: u16,
     }
 
     impl State {
+        /// Creates a new `State`.
         pub fn read(reg: &reg::File, instr: Instr) -> Self {
             Self {
                 rs: Gpr::read(reg, instr.rs.into()),
@@ -30,10 +34,14 @@ pub mod i {
         }
     }
 
+    /// The working state of an I-type instruction.
     #[derive(Debug)]
     pub struct State {
+        /// The register described by the *rs* operand.
         pub rs: Gpr,
+        /// The register described by the *rt* operand.
         pub rt: Gpr,
+        /// The *imm* operand.
         pub imm: u16,
     }
 }
@@ -41,22 +49,30 @@ pub mod i {
 pub mod j {
     use super::reg;
 
-    /// A J-type instruction.
+    /// A J-type instruction, where 'J' stands for 'jump'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
+        /// The target program address of this jump.
         pub target: u32,
     }
 
     impl State {
+        /// Creates a new `State`.
         pub fn read(_: &reg::File, instr: Instr) -> Self {
+            // If we don't even use the [`reg::File`] that was passed to us, then what's the point
+            // of it being in the function signature? The reason is due to macro repetition
+            // generalizing the function signature of `_::State::read` methods; it's not really
+            // enough of an issue for me to care enough to fix it.
             Self {
                 target: instr.target,
             }
         }
     }
 
+    /// The working state of a J-type instruction.
     #[derive(Debug)]
     pub struct State {
+        /// The target program address of this jump.
         pub target: u32,
     }
 }
@@ -67,14 +83,22 @@ pub mod r {
     /// An R-type instruction.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
+        /// The *rs* operand.
         pub rs: u8,
+        /// The *rt* operand.
         pub rt: u8,
+        /// The *rd* operand.
+        ///
+        /// This is commonly used as a destination register.
         pub rd: u8,
+        /// The *shamt* operand, which stands for 'shift amount'.
         pub shamt: u8,
+        /// The *funct* operand.
         pub funct: u8,
     }
 
     impl State {
+        /// Creates a new `State`.
         pub fn read(reg: &reg::File, instr: Instr) -> Self {
             Self {
                 rs: Gpr::read(reg, instr.rs.into()),
@@ -86,12 +110,18 @@ pub mod r {
         }
     }
 
+    /// The working state of an R-type instruction.
     #[derive(Debug)]
     pub struct State {
+        /// The register described by the *rs* operand.
         pub rs: Gpr,
+        /// The register described by the *rt* operand.
         pub rt: Gpr,
+        /// The register described by the *rd* operand.
         pub rd: Gpr,
+        /// The *shamt* operand, which stands for 'shift amount'.
         pub shamt: u8,
+        /// The *funct* operand.
         pub funct: u8,
     }
 }
@@ -106,9 +136,17 @@ pub mod r {
 /// 3. Arithmetic/Logic Unit (ALU)
 /// 4. Memory access (MEM)
 /// 5. Write Back (WB)
+///
+/// This structure is the queue that holds these 5 instructions.
 #[derive(Default)]
 pub struct Pipeline {
-    rd: Option<(u32, Instr)>,
+    // The slot for instructions which have been fetched and are ready for the "Read and Decode"
+    // pipestage.
+    //
+    // "Lies!", you say. "How can there be 5 pipestages when there is only one field?" As it turns
+    // out, only one field is needed to represent all 5 pipestages. See the [`Self::advance`] method
+    // for details.
+    rd: Option<Fetch>,
 }
 
 impl fmt::Display for Pipeline {
@@ -118,36 +156,37 @@ impl fmt::Display for Pipeline {
             "{}",
             self.rd.as_ref().map_or_else(
                 || String::from("(none)"),
-                |(_, instr)| instr.asm().to_string(),
+                |slot| slot.instr.asm().to_string(),
             ),
         )
     }
 }
 
-pub struct Execution {
-    pub pc: u32,
+/// The result of an instruction fetch.
+#[derive(Clone, Copy, Debug)]
+pub struct Fetch {
+    /// The program address at which the fetched instruction is located.
+    pub addr: u32,
+    /// The instruction fetched.
     pub instr: Instr,
 }
 
 impl Pipeline {
+    /// Advances each instruction contained within this pipeline to the next stage of execution.
+    ///
+    /// The `decode_instr` argument decodes a given opcode into an instruction.
     pub fn advance(
         &mut self,
         exc: &mut exc::Queue,
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Option<Execution> {
-        let mut pc = reg.pc();
-        self.execute_queued_instr(exc, mem, reg, decode_instr, &mut pc);
+    ) -> Fetch {
+        self.execute_queued_instr(exc, mem, reg, decode_instr);
+        let fetch = self.fetch_next_instr(mem, reg, decode_instr);
+        self.rd = Some(fetch);
 
-        let op = mem.read_32(pc);
-        // Increment PC.
-        *reg.pc_mut() = pc.wrapping_add(4);
-
-        let instr = decode_instr(op);
-        self.rd = Some((pc, instr));
-
-        Some(Execution { pc, instr })
+        fetch
     }
 
     fn execute_queued_instr(
@@ -156,21 +195,49 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-        next_pc: &mut u32,
     ) {
-        if let Some((pc, instr)) = self.rd.take() {
-            let mut state = opx::State::read(instr, reg);
+        if let Some(slot) = self.rd.take() {
+            let mut state = opx::State::read(slot.instr, reg);
 
             let mut target = None;
-            if let Err(e) = state.execute(reg, mem, pc, *next_pc, &mut target) {
+            let exec = state.execute(reg, mem, slot.addr, &mut target);
+            if let Err(e) = exec {
+                // An exception occurred, so we push it to the back of the exception queue.
                 exc.push_back(e);
             } else if let Some(target) = target {
-                self.advance(exc, mem, reg, decode_instr);
-                self.execute_queued_instr(exc, mem, reg, decode_instr, &mut 0);
+                // This is a jump instruction, and it is requesting to jump to the program address
+                // identified by `target`. Per the MIPS I architecture, the instruction in the delay
+                // slot, or the instruction following the jump instruction, *must* be executed
+                // before the branch is taken (if it is taken) (RM[1-7]). So, we want to do the
+                // following:
+                // - fetch the instruction in the delay slot
+                // - execute the instruction in the delay slot
+                // - fetch the instruction located at `target`
+                //
+                // The last step already occurs at the end of [`Self::advance`], so we only need to
+                // do the first two ourselves.
 
-                *next_pc = target;
+                let fetch = self.fetch_next_instr(mem, reg, decode_instr);
+                self.rd = Some(fetch);
+                self.execute_queued_instr(exc, mem, reg, decode_instr);
+                *reg.pc_mut() = target;
             }
         }
+    }
+
+    fn fetch_next_instr(
+        &mut self,
+        mem: &mut Memory,
+        reg: &mut reg::File,
+        decode_instr: &impl Fn(u32) -> Instr,
+    ) -> Fetch {
+        let pc = reg.pc();
+        let op = mem.read_32(pc);
+        let instr = decode_instr(op);
+        // Increment the PC.
+        *reg.pc_mut() = pc.wrapping_add(4);
+
+        Fetch { addr: pc, instr }
     }
 }
 
@@ -296,8 +363,7 @@ macro_rules! def_instr_and_op_kind {
                     &mut self,
                     reg: &mut reg::File,
                     mem: &mut Memory,
-                    pc: u32,
-                    next_pc: u32,
+                    instr_addr: u32,
                     target: &mut Option<u32>,
                 ) -> Result<(), Exception> {
                     #[inline(always)]
@@ -321,28 +387,6 @@ macro_rules! def_instr_and_op_kind {
                         base.wrapping_add(offset)
                     }
 
-                    fn calc_branch_target(pc: u32, value: u16) -> u32 {
-                        let base = pc;
-                        let offset = sign_extend_16(value << 2);
-                        tracing::trace!(
-                            "Calc. branch target (base={:#010x}, offset={:#010x})",
-                            base,
-                            offset,
-                        );
-
-                        base.wrapping_add(offset)
-                    }
-
-                    #[inline(always)]
-                    fn calc_jump_target(pc: u32, value: u32) -> u32 {
-                        (pc & !((1 << 28) - 1)) | (value << 2)
-                    }
-
-                    #[inline(always)]
-                    fn calc_ret_addr(pc: u32) -> u32 {
-                        pc.wrapping_add(4)
-                    }
-
                     #[inline(always)]
                     fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
                         tracing::debug!(
@@ -361,14 +405,37 @@ macro_rules! def_instr_and_op_kind {
                                     opx: &'a mut super::$ty::State,
                                     reg: &'a mut reg::File,
                                     mem: &'a mut Memory<'c, 'b>,
-                                    pc: u32,
-                                    next_pc: u32,
+                                    instr_addr: u32,
                                     target: &'a mut Option<u32>,
+                                }
+
+                                impl Context<'_, '_, '_> {
+                                    fn calc_branch_target(&self, value: u16) -> u32 {
+                                        let base = self.reg.pc();
+                                        let offset = sign_extend_16(value << 2);
+                                        tracing::trace!(
+                                            "Calc. branch target (base={:#010x}, offset={:#010x})",
+                                            base,
+                                            offset,
+                                        );
+
+                                        base.wrapping_add(offset)
+                                    }
+
+                                    #[inline(always)]
+                                    fn calc_jump_target(&self, value: u32) -> u32 {
+                                        (self.reg.pc() & !((1 << 28) - 1)) | (value << 2)
+                                    }
+
+                                    #[inline(always)]
+                                    fn calc_ret_addr(&self) -> u32 {
+                                        self.reg.pc().wrapping_add(4)
+                                    }
                                 }
 
                                 // tracing::trace!("{:?}", opx);
 
-                                $fn(Context { opx, reg, mem, pc, next_pc, target })
+                                $fn(Context { opx, reg, mem, instr_addr, target })
                             }
                         )*
                     }
@@ -415,7 +482,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -432,7 +499,7 @@ def_instr_and_op_kind!(
                 .overflowing_add(sign_extend_16(ctx.opx.imm) as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rt.index, result as u32);
 
@@ -491,7 +558,7 @@ def_instr_and_op_kind!(
                 0 => {
                     tracing::trace!("bltz");
                     if (ctx.opx.rs.gpr_value as i32) < 0 {
-                        *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                        *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
                     }
 
                     Ok(())
@@ -499,7 +566,7 @@ def_instr_and_op_kind!(
                 1 => {
                     tracing::trace!("bgez");
                     if (ctx.opx.rs.gpr_value as i32) >= 0 {
-                        *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                        *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
                     }
 
                     Ok(())
@@ -512,7 +579,7 @@ def_instr_and_op_kind!(
                     tracing::trace!("bgezal");
                     todo!();
                 }
-                _ => Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc)),
+                _ => Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr)),
             }
         },
     },
@@ -522,7 +589,7 @@ def_instr_and_op_kind!(
         asm: ["beq" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value == ctx.opx.rt.gpr_value {
-                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
             }
 
             Ok(())
@@ -534,7 +601,7 @@ def_instr_and_op_kind!(
         asm: ["bgtz" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) > 0 {
-                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
             }
 
             Ok(())
@@ -546,7 +613,7 @@ def_instr_and_op_kind!(
         asm: ["blez" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) <= 0 {
-                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
             }
 
             Ok(())
@@ -558,7 +625,7 @@ def_instr_and_op_kind!(
         asm: ["bne" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value != ctx.opx.rt.gpr_value {
-                *ctx.target = Some(calc_branch_target(ctx.next_pc, ctx.opx.imm));
+                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
             }
 
             Ok(())
@@ -569,7 +636,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["break"],
         fn: |ctx: Context| {
-            Err(Exception::new(exc::code::BREAKPOINT, ctx.pc))
+            Err(Exception::new(exc::code::BREAKPOINT, ctx.instr_addr))
         },
     },
     {
@@ -589,7 +656,7 @@ def_instr_and_op_kind!(
                         tracing::trace!("cfc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                     }
                     4 => {
                         tracing::trace!("mtc0");
@@ -601,27 +668,27 @@ def_instr_and_op_kind!(
                         tracing::trace!("ctc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                     }
                     _ => {
-                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                        Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                     }
                 }
                 // The PSX CPU doesn't implement an MMU... so page table instructions are reserved.
                 1 => {
                     tracing::trace!("tlbr");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                 }
                 2 => {
                     tracing::trace!("tlbwi");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                 }
                 8 => {
                     tracing::trace!("tlbp");
 
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                 }
                 16 => {
                     tracing::trace!("rfe");
@@ -636,7 +703,7 @@ def_instr_and_op_kind!(
                     Ok(())
                 }
                 _ => {
-                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.pc))
+                    Err(Exception::new(exc::code::RESERVED_INSTR, ctx.instr_addr))
                 }
             }
         },
@@ -647,7 +714,7 @@ def_instr_and_op_kind!(
         asm: ["cop1"],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -665,7 +732,7 @@ def_instr_and_op_kind!(
         asm: ["cop3"],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -698,7 +765,7 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["j" *()],
         fn: |ctx: Context| {
-            *ctx.target = Some(calc_jump_target(ctx.next_pc, ctx.opx.target));
+            *ctx.target = Some(ctx.calc_jump_target(ctx.opx.target));
 
             Ok(())
         },
@@ -708,8 +775,8 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["jal" *()],
         fn: |ctx: Context| {
-            let target_addr = calc_jump_target(ctx.next_pc, ctx.opx.target);
-            let ret_addr = calc_ret_addr(ctx.next_pc);
+            let target_addr = ctx.calc_jump_target(ctx.opx.target);
+            let ret_addr = ctx.calc_ret_addr();
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
@@ -724,7 +791,7 @@ def_instr_and_op_kind!(
         asm: ["jalr" %(rd), %(rs)],
         fn: |ctx: Context| {
             let target_addr = ctx.opx.rs.gpr_value;
-            let ret_addr = calc_ret_addr(ctx.next_pc);
+            let ret_addr = ctx.calc_ret_addr();
 
             *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
@@ -824,7 +891,7 @@ def_instr_and_op_kind!(
         asm: ["lwc1" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -842,7 +909,7 @@ def_instr_and_op_kind!(
         asm: ["lwc3" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -1086,7 +1153,7 @@ def_instr_and_op_kind!(
                 .overflowing_sub(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.pc))
+                Err(Exception::new(exc::code::INTEGER_OVERFLOW, ctx.instr_addr))
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
@@ -1127,7 +1194,7 @@ def_instr_and_op_kind!(
         asm: ["swc1" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -1145,7 +1212,7 @@ def_instr_and_op_kind!(
         asm: ["swc3" %(rt), #(s)],
         fn: |ctx: Context| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.pc))
+            Err(Exception::new(exc::code::COP_UNUSABLE, ctx.instr_addr))
         },
     },
     {
@@ -1165,7 +1232,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["syscall"],
         fn: |ctx: Context| {
-            Err(Exception::new(exc::code::SYSCALL, ctx.pc))
+            Err(Exception::new(exc::code::SYSCALL, ctx.instr_addr))
         },
     },
     {

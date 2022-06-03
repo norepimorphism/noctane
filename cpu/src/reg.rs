@@ -6,7 +6,7 @@ use std::fmt;
 
 impl Default for File {
     fn default() -> Self {
-        let mut this = Self {
+        Self {
             // This is the reset vector.
             // TODO: We should do something more proper in the future, like having a method called
             // `reset` that sets the PC to this.
@@ -16,13 +16,7 @@ impl Default for File {
             gprs: [0; 32],
             cprs: [0; 32],
             sr_is_dirty: false,
-            pending_cause: None,
-        };
-
-        // PRId has a special default.
-        this.cprs[cpr::PRID_IDX] = cpr::Prid::default().0;
-
-        this
+        }
     }
 }
 
@@ -37,7 +31,6 @@ pub struct File {
     gprs: [u32; 32],
     cprs: [u32; 32],
     sr_is_dirty: bool,
-    pending_cause: Option<cpr::Cause>,
 }
 
 impl fmt::Display for File {
@@ -59,63 +52,101 @@ impl fmt::Display for File {
         writeln!(f, "r14:{:08x} r30:{:08x}", self.gprs[14], self.gprs[30])?;
         writeln!(f, "r15:{:08x} r31:{:08x}", self.gprs[15], self.gprs[31])?;
         writeln!(f, "hi: {:08x} lo: {:08x}", self.hi, self.lo)?;
-        writeln!(f, "BadVaddr: {:08x}", self.cprs[cpr::BAD_VADDR_IDX])?;
-        writeln!(f, "SR:       {:08x}", self.cprs[cpr::STATUS_IDX])?;
-        writeln!(f, "Cause:    {:08x}", self.cprs[cpr::CAUSE_IDX])?;
-        writeln!(f, "EPC:      {:08x}", self.cprs[cpr::EPC_IDX])?;
-        writeln!(f, "PRId:     {:08x}", self.cprs[cpr::PRID_IDX])?;
+        writeln!(f, "BadVaddr: {:08x}", self.cpr(cpr::BAD_VADDR_IDX))?;
+        writeln!(f, "SR:       {:08x}", self.cpr(cpr::STATUS_IDX))?;
+        writeln!(f, "Cause:    {:08x}", self.cpr(cpr::CAUSE_IDX))?;
+        writeln!(f, "EPC:      {:08x}", self.cpr(cpr::EPC_IDX))?;
+        writeln!(f, "PRId:     {:08x}", self.cpr(cpr::PRID_IDX))?;
 
         Ok(())
     }
 }
 
 impl File {
+    /// The program counter (PC).
     pub fn pc(&self) -> u32 {
         self.pc
     }
 
+    /// A mutable reference to the program counter (PC).
     pub fn pc_mut(&mut self) -> &mut u32 {
         &mut self.pc
     }
 
+    /// The HI register.
     pub fn hi(&self) -> u32 {
         self.hi
     }
 
+    /// A mutable reference to the HI register.
     pub fn hi_mut(&mut self) -> &mut u32 {
         &mut self.hi
     }
 
+    /// The LO register.
     pub fn lo(&self) -> u32 {
         self.lo
     }
 
+    /// A mutable reference to the LO register.
     pub fn lo_mut(&mut self) -> &mut u32 {
         &mut self.lo
     }
 
+    /// Returns the value of the general-purpose register (GPR) identified by the given zero-based
+    /// index.
     pub fn gpr(&self, index: usize) -> u32 {
         if index == 0 { 0 } else { self.gprs[index] }
     }
 
+    /// Sets the value of the general purpose register (GPR) identified by the given zero-based
+    /// index.
     pub fn set_gpr(&mut self, index: usize, value: u32) {
         self.gprs[index] = value;
     }
 
+    /// Returns the value of the control register identified by the given zero-based index.
     pub fn cpr(&self, index: usize) -> u32 {
-        self.cprs[index]
+        if index == cpr::PRID_IDX {
+            // Unlike the other control registers, the PRId is read-only (RM[3-4]). As such, its
+            // value is hardcoded here.
+
+            let mut prid = cpr::Prid(0);
+
+            // R3000As supposedly have the 'Imp' value set to 3 (RM[3-4]).
+            prid.set_imp(3);
+            // I have no idea what Sony set this to. If you know, please file an issue to the
+            // Noctane GitHub!
+            prid.set_rev(0xaa);
+
+            prid.0
+        } else {
+            self.cprs[index]
+        }
     }
 
+    /// Sets the value of the control register identified by the given zero-based index.
     pub fn set_cpr(&mut self, index: usize, value: u32) {
-        if index == cpr::STATUS_IDX {
+        if (index == cpr::STATUS_IDX) && (value != self.cprs[cpr::STATUS_IDX]) {
+            // When the status register (SR) is modified, we set the following flag to indicate to
+            // the CPU that it should update itself accordingly. When the CPU calls the
+            // [`Self::altered_sr`] method, this flag is cleared.
             self.sr_is_dirty = true;
         }
 
+        // It is possible to overwrite the PRId register using this, but that's OK as its value is
+        // hardcoded, as shown above in [`Self::cpr`].
         self.cprs[index] = value;
     }
 
-    pub fn apply_sr(&mut self) -> Option<u32> {
+    /// Returns the new value of the status register (SR) if it was modified since this method was
+    /// last called.
+    ///
+    /// This method is useful for updating the CPU in response to SR modifications.
+    pub fn altered_sr(&mut self) -> Option<u32> {
         if self.sr_is_dirty {
+            // Clear this flag so that this method returns `None` if it is called again without
+            // modifying the SR.
             self.sr_is_dirty = false;
 
             Some(self.cprs[cpr::STATUS_IDX])
@@ -126,17 +157,25 @@ impl File {
 }
 
 pub mod cpr {
+    //! Control registers.
+
     use bitfield::bitfield;
 
     use crate::exc::Exception;
 
+    /// The index of the BadVaddr register.
     pub const BAD_VADDR_IDX: usize = 8;
+    /// The index of the status register (SR).
     pub const STATUS_IDX: usize = 12;
+    /// The index of the Cause register.
     pub const CAUSE_IDX: usize = 13;
+    /// The index of the EPC register.
     pub const EPC_IDX: usize = 14;
+    /// The index of the PRId register.
     pub const PRID_IDX: usize = 15;
 
     bitfield! {
+        /// The status register (SR).
         pub struct Status(u32);
         pub ie_c, set_ie_c: 0;
         pub ku_c, set_ku_c: 1;
@@ -170,6 +209,7 @@ pub mod cpr {
     }
 
     bitfield! {
+        /// The Cause register.
         pub struct Cause(u32);
         impl Debug;
         pub exc_code, set_exc_code: 6, 2;
@@ -178,18 +218,8 @@ pub mod cpr {
         pub bd, set_bd: 31;
     }
 
-    impl Default for Prid {
-        fn default() -> Self {
-            let mut this = Self(0);
-            this.set_imp(3);
-            // I have no idea what Sony set this to.
-            this.set_rev(0xaa);
-
-            this
-        }
-    }
-
     bitfield! {
+        /// The PRId register.
         pub struct Prid(u32);
         pub rev, set_rev: 7, 0;
         pub imp, set_imp: 15, 8;

@@ -31,8 +31,8 @@
 // CW33000, it is largely compatible with the R3000, and I could not find a more comprehensive
 // resource than what IDT has provided.
 //
-// Furthermore, the convention RM(c-p) will reference a specific page (p) within a chapter (c) of
-// the RM. For example, RM(13-1) references the first page of the 13th chapter, which is titled
+// Furthermore, the convention RM[c-p] will reference a specific page (p) within a chapter (c) of
+// the RM. For example, RM[13-1] references the first page of the 13th chapter, which is titled
 // "Instruction Timing and Optimization".
 //
 // The terms 'address region' and 'program address' are the same as those specified in the RM. See
@@ -48,7 +48,7 @@
 //   referring to program addresses. *kuseg* and *kseg0* are 'cacheable', which means the I-cache
 //   is first consulted for all accesses (unless it is disabled, of course).
 //
-// [here]: <https://cgi.cse.unsw.edu.au/~cs3231/doc/R3000.pdf>
+// [here]: https://cgi.cse.unsw.edu.au/~cs3231/doc/R3000.pdf
 
 #![feature(
     // [`u32::widening_mul`] is used once in [`instr`].
@@ -73,38 +73,23 @@ pub mod mem;
 pub mod reg;
 pub mod sym;
 
-use std::collections::VecDeque;
-
 pub use bus::Bus;
 pub use cache::{i::Cache as ICache, Cache};
 pub use instr::Instr;
 pub use mem::Memory;
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            cache: Cache::default(),
-            exc: VecDeque::new(),
-            pipeline: instr::Pipeline::default(),
-            reg: reg::File::default(),
-        }
-    }
-}
-
 /// The state of a [`Cpu`].
 ///
 /// This type does little on its own. However, it is the ancestor of all `Cpu`s. To produce a
-/// `Cpu` from a `State`, use the [`State::connect_bus`] method.
+/// `Cpu` from a `State`, use the [`connect_bus`] method.
+///
+/// [`connect_bus`]: Self::connect_bus
+#[derive(Default)]
 pub struct State {
     /// The exception queue.
     ///
-    /// Exceptions are not necessarily errors---they are, more accurately, interruptions in normal
-    /// code execution, which may be caused by errors (e.g., misaligned addresses, signed integer
-    /// overflow), but which may also be manually triggered by the user with instructions such as
-    /// `syscall` and `break`.
-    ///
     /// Per the MIPS I architecture, exceptions are queued in instruction-order and processed
-    /// sequentially. This is the queue that holds such exceptions.
+    /// sequentially (RM[4-1]). This is the queue that holds such exceptions.
     pub exc: exc::Queue,
     /// The I-cache and scratchpad, collectively.
     ///
@@ -139,7 +124,7 @@ impl State {
     /// `State` that produced it.
     ///
     /// This method is very cheap, so don't shy away from calling it before executing every next
-    /// instruction. (That's what `noctane_core::Core` does, even.)
+    /// instruction if necessary.
     pub fn connect_bus<'s, 'b>(&'s mut self, bus: crate::Bus<'b>) -> Cpu<'s, 'b> {
         Cpu {
             exc: &mut self.exc,
@@ -155,11 +140,16 @@ impl State {
 /// This type is produced by calling the [`State::connect_bus`] method. A `Cpu`'s lifetime is thus
 /// bound to that of the `State` that produced it.
 ///
-/// To get started with executing instructions, see the [`Cpu::execute_next_instr`],
-/// [`Cpu::execute_instr`], and [`Cpu::execute_opcode`] methods. If custom instruction decoding is
-/// desired, see [`Cpu::advance_pipeline`].
+/// To get started with executing instructions, see the [`execute_next_instr`],
+/// [`execute_instr`], and [`execute_opcode`] methods. If custom instruction decoding is
+/// desired, see [`advance_pipeline`].
 ///
 /// See the module documentation for more information.
+///
+/// [`execute_next_instr`]: Self::execute_next_instr
+/// [`execute_instr`]: Self::execute_instr
+/// [`execute_opcode`]: Self::execute_opcode
+/// [`advance_pipeline`]: Self::advance_pipeline
 pub struct Cpu<'s, 'b> {
     exc: &'s mut exc::Queue,
     pipeline: &'s mut instr::Pipeline,
@@ -202,9 +192,13 @@ impl<'s, 'b> Cpu<'s, 'b> {
     ///
     /// This method returns the result of the execution.
     ///
-    /// To view the current value of the PC, see the [`Cpu::reg`] method. Or, to execute a specific
-    /// instruction or opcode, see [`Cpu::execute_instr`] and [`Cpu::execute_opcode`], respectively.
-    pub fn execute_next_instr(&mut self) -> Option<instr::Execution> {
+    /// To view the current value of the PC, see the [`reg`] method. Or, to execute a specific
+    /// instruction or opcode, see [`execute_instr`] and [`execute_opcode`], respectively.
+    ///
+    /// [`reg`]: Self::reg
+    /// [`execute_instr`]: Self::execute_instr
+    /// [`execute_opcode`]: Self::execute_opcode
+    pub fn execute_next_instr(&mut self) -> instr::Fetch {
         // TODO: Don't unwrap!
         self.advance_pipeline(|op| Instr::decode(op).unwrap())
     }
@@ -212,14 +206,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Executes the given instruction.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_instr(&mut self, instr: Instr) -> Option<instr::Execution> {
+    pub fn execute_instr(&mut self, instr: Instr) -> instr::Fetch {
         self.advance_pipeline(|_| instr)
     }
 
     /// Executes the instruction decodeable from the given opcode.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_opcode(&mut self, op: u32) -> Option<instr::Execution> {
+    pub fn execute_opcode(&mut self, op: u32) -> instr::Fetch {
         // TODO: Don't unwrap!
         self.advance_pipeline(|_| Instr::decode(op).unwrap())
     }
@@ -227,25 +221,28 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Processes the current stage, and then advances to the next stage, of each instruction
     /// queued in the instruction pipeline.
     ///
-    /// The `decode_instr` argument decodes the given opcode into an instruction. A sane default for
-    /// this function, which is used in [`Cpu::execute_next_instr`] and [`Cpu::execute_opcode`], is
+    /// The `decode_instr` argument decodes a given opcode into an instruction. A sane default for
+    /// this function, which is used in [`execute_next_instr`] and [`execute_opcode`], is
     /// to call upon [`Instr::decode`].
+    ///
+    /// [`execute_next_instr`]: Self::execute_next_instr
+    /// [`execute_opcode`]: Self::execute_opcode
     pub fn advance_pipeline(
         &mut self,
         decode_instr: impl Fn(u32) -> Instr,
-    ) -> Option<instr::Execution> {
+    ) -> instr::Fetch {
         // Handling exceptions comes first as this method may alter the PC, which is used to fetch
         // future instructions in [`Pipeline::advance`].
         self.handle_exc();
 
         // Actually advance the pipeline.
-        let exec =
+        let fetch =
             self.pipeline
                 .advance(&mut self.exc, &mut self.mem, &mut self.reg, &decode_instr);
 
         // If the status register (SR) was modified, we need to apply the changes before returning
         // control back to the caller.
-        if let Some(sr) = self.reg.apply_sr() {
+        if let Some(sr) = self.reg.altered_sr() {
             let sr = reg::cpr::Status(sr);
 
             self.mem.cache_mut().i.set_isolated(sr.is_c());
@@ -258,7 +255,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
             // TODO
         }
 
-        exec
+        fetch
     }
 
     /// Handles the next exception in the exception queue, if one exists.
@@ -277,7 +274,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
                 }
             }
 
-            // Set CAUSE and EPC.
+            // Set the Cause and EPC registers.
             self.reg
                 .set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
             self.reg.set_cpr(reg::cpr::EPC_IDX, exc.epc);
