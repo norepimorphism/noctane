@@ -65,33 +65,43 @@ impl Debugger<'_> {
     fn process_command<'a>(&mut self, cmd: &str, args: impl Iterator<Item = &'a str>) {
         let result = match cmd {
             "+b" => self.do_add_breakpoint(args),
-            "c" | "cl" => {
-                self.do_continue(false);
+            "c" => {
+                self.do_continue(|this| this.step());
 
                 Ok(())
             }
-            "cq" => {
-                self.do_continue(true);
+            "cl" => {
+                self.do_continue(|this| this.step_lightly());
+
+                Ok(())
+            }
+            "cs" => {
+                self.do_continue(|this| this.step_silently());
 
                 Ok(())
             }
             "pr" => {
-                self.do_print_reg();
+                self.print_reg();
 
                 Ok(())
             }
             "px" => {
-                self.do_print_i_cache();
+                self.print_i_cache();
 
                 Ok(())
             }
-            "s" | "sl" => {
-                self.do_step_loudly(None);
+            "s" => {
+                self.step();
 
                 Ok(())
             }
-            "sq" => {
-                self.do_step_quietly();
+            "sl" => {
+                self.step_lightly();
+
+                Ok(())
+            }
+            "ss" => {
+                self.step_silently();
 
                 Ok(())
             }
@@ -115,42 +125,67 @@ impl Debugger<'_> {
         Ok(())
     }
 
-    fn do_continue(&mut self, be_quiet: bool) {
+    fn do_continue(
+        &mut self,
+        mut step: impl FnMut(&mut Self,
+    ) -> noctane_cpu::instr::Fetched) {
         loop {
-            let pc = self.cpu.reg().pc();
-            let mut hit_breakpoint = self.breakpoints.get(&pc).is_some();
-
-            if be_quiet {
-                self.do_step_quietly();
-            } else {
-                self.do_step_loudly(Some(&mut hit_breakpoint));
-            }
-
+            let fetched = step(self);
+            let hit_breakpoint =
+                matches!(fetched.instr, noctane_cpu::Instr::Break(_)) ||
+                self.breakpoints.get(&fetched.addr).is_some();
             if hit_breakpoint {
-                println!("BREAK @ {:#010x}", pc);
+                println!("BREAK @ {:#010x}", fetched.addr);
                 break;
             }
         }
     }
 
-    fn do_print_reg(&self) {
+    fn print_reg(&self) {
         println!("{}", self.cpu.reg());
     }
 
-    fn do_print_i_cache(&self) {
+    fn print_i_cache(&self) {
         println!("{}", self.cpu.mem().cache().i);
     }
 
-    fn do_step_loudly(&mut self, hit_breakpoint: Option<&mut bool>) {
+    fn step(&mut self) -> noctane_cpu::instr::Fetched {
         let fetched = self.cpu.execute_next_instr();
+        self.print_instr(fetched);
+        if let Some(comment) = self.gen_comment(fetched) {
+            self.print_comment(comment);
+        }
+        println!();
+
+        fetched
+    }
+
+    fn step_lightly(&mut self) -> noctane_cpu::instr::Fetched {
+        let fetched = self.cpu.execute_next_instr();
+        if let Some(comment) = self.gen_comment(fetched) {
+            self.print_instr(fetched);
+            self.print_comment(comment);
+            println!();
+        }
+
+        fetched
+    }
+
+    fn step_silently(&mut self) -> noctane_cpu::instr::Fetched {
+        self.cpu.execute_next_instr()
+    }
+
+    fn print_instr(&self, fetched: noctane_cpu::instr::Fetched) {
         print!("{:08x}   {}", fetched.addr, fetched.instr.asm());
+    }
 
-        let comment = match fetched.instr {
+    fn print_comment(&self, comment: String) {
+        print!("\t\t; {}", comment);
+    }
+
+    fn gen_comment(&self, fetched: noctane_cpu::instr::Fetched) -> Option<String> {
+        match fetched.instr {
             noctane_cpu::Instr::Break(_) => {
-                if let Some(it) = hit_breakpoint {
-                    *it = true;
-                }
-
                 // See RM[A-21].
                 let code = (fetched.op >> 6) & ((1 << 21) - 1);
                 let comment = noctane_util::sym::for_break(code)
@@ -162,19 +197,21 @@ impl Debugger<'_> {
             noctane_cpu::Instr::Syscall(_) => {
                 // Sony stores a code identifying the function of the syscall in the *r4* register.
                 let code = self.cpu.reg().gpr(4);
+                let comment = format!("{}()", noctane_util::sym::for_syscall(code));
 
-                Some(noctane_util::sym::for_syscall(code).to_string())
+                Some(comment)
             }
-            _ => None,
-        };
-        if let Some(comment) = comment {
-            print!("\t\t; {}", comment);
+            _ => {
+                let r9 = self.cpu.reg().gpr(9);
+                let sym = match fetched.addr {
+                    0xa0 => noctane_util::sym::for_a_func(r9),
+                    0xb0 => noctane_util::sym::for_b_func(r9),
+                    0xc0 => noctane_util::sym::for_c_func(r9),
+                    _ => None,
+                };
+
+                sym.map(|it| format!("{}()", it))
+            }
         }
-
-        println!();
-    }
-
-    fn do_step_quietly(&mut self) {
-        self.cpu.execute_next_instr();
     }
 }
