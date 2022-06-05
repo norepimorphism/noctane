@@ -131,7 +131,7 @@ impl Debugger<'_> {
         loop {
             let exec = step(self);
             let hit_breakpoint =
-                matches!(exec.behavior.map_err(|it| it.code).err(), Some(noctane_cpu::exc::code::BREAKPOINT)) ||
+                matches!(exec.pc_behavior.map_err(|it| it.code).err(), Some(noctane_cpu::exc::code::BREAKPOINT)) ||
                 self.breakpoints.get(&exec.fetched.addr).is_some();
             if hit_breakpoint {
                 println!("BREAK @ {:#010x}", exec.fetched.addr);
@@ -174,7 +174,7 @@ impl Debugger<'_> {
     }
 
     fn print_bios_call(&mut self, exec: &noctane_cpu::instr::Execution) {
-        if let Ok(noctane_cpu::instr::Behavior::Calls(target_addr)) | Ok(noctane_cpu::instr::Behavior::Jumps(target_addr)) = exec.behavior {
+        if let Ok(noctane_cpu::instr::PcBehavior::Jumps { target_addr, .. }) = exec.pc_behavior {
             macro_rules! print_table_call {
                 ($table_name:ident $fn_name:ident) => {
                     {
@@ -203,7 +203,7 @@ impl Debugger<'_> {
     }
 
     fn print_exception(&self, exec: &noctane_cpu::instr::Execution) {
-        if let Err(exc) = exec.behavior {
+        if let Err(exc) = exec.pc_behavior {
             match exc.code {
                 noctane_cpu::exc::code::BREAKPOINT => {
                     // See RM[A-21].

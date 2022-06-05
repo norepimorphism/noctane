@@ -243,17 +243,6 @@ impl<'s, 'b> Cpu<'s, 'b> {
             // TODO
         }
 
-        if let Err(exc) = exec.behavior {
-            // Set the Cause and EPC registers.
-            self.reg
-                .set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
-            self.reg.set_cpr(reg::cpr::EPC_IDX, exc.epc);
-
-            // Finally, set the PC to the exception vector.
-            // TODO: [`exc::VECTOR`] is not always the correct vector; there are corner cases.
-            *self.reg.pc_mut() = exc::VECTOR;
-        }
-
         exec
     }
 }
