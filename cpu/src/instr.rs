@@ -1,13 +1,34 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! CPU instructions.
+//!
+//! The PSX CPU is compatible with the 32-bit MIPS ISA. The exact composition of an instruction is
+//! explained in-depth in the [`decode`] module, but briefly, each instruction is tagged with an
+//! identifying opcode, and the remaining bits are used to store parameters.
+//!
+//! When the [intruction pipeline](Pipeline) is advanced, the following occurs:
+//! - A new instruction is fetched at the program address represented by the program counter (PC)
+//!   register.
+//! - The instruction is decoded using [`Instr::decode`].
+//! - The registers whose values are necessary for the execution of the instruction are fetched.
+//! - The instruction is finally executed.
+//! - If the instruction modified the PC&mdash;meaning it is a 'jump' or 'branch' instruction
+//!   &mdash;the instruction following the one just executed, or that which is in the 'delay slot',
+//!   is prepped to be executed in the next pipeline advancement, after which execution will proceed
+//!   to the target location.
+//! - Otherwise, the PC is simply incremented by the size of one instruction such that it points
+//!   to the next instruction.
+
 pub mod asm;
 pub mod decode;
 
 pub use asm::Asm;
 
-use crate::{exc::{self, Exception}, reg, Memory};
+use crate::{exc, reg, Memory};
 
 pub mod i {
+    //! Immediate-type (I-type) instructions.
+
     use super::{opn::Gpr, reg};
 
     /// An I-type instruction, where 'I' stands for 'immediate'.
@@ -45,6 +66,8 @@ pub mod i {
 }
 
 pub mod j {
+    //! Jump-type (J-type) instructions.
+
     use super::reg;
 
     /// A J-type instruction, where 'J' stands for 'jump'.
@@ -76,9 +99,11 @@ pub mod j {
 }
 
 pub mod r {
+    //! Register-type (R-type) instructions.
+
     use super::{opn::Gpr, reg};
 
-    /// An R-type instruction.
+    /// An R-type instruction, where 'R' stands for 'register'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct Instr {
         /// The *rs* operand.
@@ -116,6 +141,8 @@ pub mod r {
         /// The register described by the *rt* operand.
         pub rt: Gpr,
         /// The register described by the *rd* operand.
+        ///
+        /// This is commonly used as a destination register.
         pub rd: Gpr,
         /// The *shamt* operand, which stands for 'shift amount'.
         pub shamt: u8,
@@ -138,11 +165,17 @@ pub mod r {
 /// This structure is the queue that holds these 5 instructions.
 #[derive(Default)]
 pub struct Pipeline {
+    /// Information pertaining to potential upcoming jumps.
     jump_info: Option<JumpInfo>,
 }
 
+/// Information pertaining to a jump.
 pub struct JumpInfo {
+    /// The target address.
     pub target_addr: u32,
+    /// The instruction fetch following the jump instruction.
+    ///
+    /// This is commonly known as the 'delay slot'.
     pub delay_slot: Fetched,
 }
 
@@ -157,39 +190,56 @@ pub struct Fetched {
     pub instr: Instr,
 }
 
+/// The result of an instruction execution.
 #[derive(Clone, Debug)]
-pub struct Execution {
+pub struct Executed {
+    /// The instruction that was fetched and eventually executed.
     pub fetched: Fetched,
-    pub pc_behavior: Result<PcBehavior, Exception>,
+    /// The behavior of the program counter (PC) after this instruction was executed.
+    pub pc_behavior: PcBehavior,
 }
 
+/// The behavior of a CPU's program counter (PC) after an instruction is executed.
 #[derive(Clone, Copy, Debug)]
 pub enum PcBehavior {
-    /// This instruction jumps to a new program address.
+    /// The CPU jumps to a new program address.
     Jumps {
+        /// The kind of jump.
+        kind: JumpKind,
+        /// The target program address.
         target_addr: u32,
-        return_status: Option<JumpReturnStatus>,
     },
+    /// The CPU increments the PC by the size of one instruction.
     Increments,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum JumpReturnStatus {
-    WillReturn,
-    IsReturning,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JumpKind {
+    /// This is a function call.
+    ///
+    /// Once this function ends, execution is returned to the function immediately above it in the
+    /// callstack.
+    Call,
+    /// This jumps to an exception vector.
+    Exception,
+    /// This returns from a function.
+    Return,
+    /// This is a normal jump to a new program address in which execution is never automatically
+    /// returned to the previous PC address.
+    WithoutReturn,
 }
 
 impl PcBehavior {
     pub fn jumps_without_return(target_addr: u32) -> Self {
-        Self::Jumps { target_addr, return_status: None }
+        Self::Jumps { kind: JumpKind::WithoutReturn, target_addr }
     }
 
     pub fn calls(target_addr: u32) -> Self {
-        Self::Jumps { target_addr, return_status: Some(JumpReturnStatus::WillReturn) }
+        Self::Jumps { kind: JumpKind::Call, target_addr }
     }
 
     pub fn returns(target_addr: u32) -> Self {
-        Self::Jumps { target_addr, return_status: Some(JumpReturnStatus::IsReturning) }
+        Self::Jumps { kind: JumpKind::Return, target_addr }
     }
 }
 
@@ -202,7 +252,7 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Execution {
+    ) -> Executed {
         if let Some(jump_info) = self.jump_info.take() {
             let exec = self.execute_fetched(
                 jump_info.delay_slot,
@@ -232,11 +282,10 @@ impl Pipeline {
     ) -> Fetched {
         let pc = reg.pc();
         let op = mem.read_32(pc);
-        let instr = decode_instr(op);
         // Increment the PC.
         *reg.pc_mut() = pc.wrapping_add(4);
 
-        Fetched { addr: pc, op, instr }
+        Fetched { addr: pc, op, instr: decode_instr(op) }
     }
 
     fn execute_fetched(
@@ -245,11 +294,19 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Execution {
+    ) -> Executed {
         let mut state = opx::State::read(fetched.instr, reg);
-        let pc_behavior = state.execute(reg, mem, fetched.addr);
+        let pc_behavior = state.execute(reg, mem);
         match &pc_behavior {
-            Ok(PcBehavior::Jumps { target_addr, .. }) => {
+            PcBehavior::Increments => {
+                // The PC was already incremented.
+            }
+            PcBehavior::Jumps { kind: JumpKind::Exception, target_addr } => {
+                // To my knowledge, unlike other types of jumps, raising an exception does not
+                // execute the instruction in the delay slot.
+                *reg.pc_mut() = *target_addr;
+            }
+            PcBehavior::Jumps { target_addr, .. } => {
                 // This is a jump instruction, and it is requesting to jump to the program address
                 // identified by `target_addr`. Per the MIPS I architecture, the instruction in the
                 // delay slot, or the instruction following the jump instruction, *must* be executed
@@ -257,22 +314,24 @@ impl Pipeline {
                 let delay_slot = self.fetch_next_instr(mem, reg, decode_instr);
                 self.jump_info = Some(JumpInfo { target_addr: *target_addr, delay_slot });
             }
-            Ok(PcBehavior::Increments) => {
-                // We already incremented the PC in [`Self::fetch_next_instr`], so there's nothing
-                // to do here.
-            },
-            Err(exc) => {
-                // Set the Cause and EPC registers.
-                reg.set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(*exc).0);
-                reg.set_cpr(reg::cpr::EPC_IDX, exc.epc);
-
-                // Finally, set the PC to the exception vector.
-                // TODO: [`exc::VECTOR`] is not always the correct vector; there are corner cases.
-                *reg.pc_mut() = exc::VECTOR;
-            }
         }
 
-        Execution { fetched, pc_behavior }
+        // If the status register (SR) was modified, we need to apply the changes before returning
+        // control back to the caller.
+        if let Some(sr) = reg.altered_sr() {
+            let sr = reg::cpr::Status(sr);
+
+            mem.cache_mut().i.set_isolated(sr.is_c());
+
+            if sr.sw_c() {
+                // This doesn't do anything in the PSX as far as I know. The I-cache is more-or-less
+                // configured to function as a D-cache, so it is basically already 'swapped'.
+            }
+
+            // TODO
+        }
+
+        Executed { fetched, pc_behavior }
     }
 }
 
@@ -354,7 +413,7 @@ macro_rules! def_instr_and_op_kind {
 
             use std::fmt;
 
-            use super::{Instr, Memory, PcBehavior, exc::{self, Exception}, reg};
+            use super::{Instr, JumpKind, Memory, PcBehavior, exc::self, i, j, r, reg};
 
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
@@ -398,85 +457,88 @@ macro_rules! def_instr_and_op_kind {
                     &mut self,
                     reg: &mut reg::File,
                     mem: &mut Memory,
-                    instr_addr: u32,
-                ) -> Result<PcBehavior, Exception> {
-                    #[inline(always)]
-                    fn sign_extend_16(value: u16) -> u32 {
-                        ((value as i16) as i32) as u32
-                    }
-
-                    #[inline(always)]
-                    fn sign_extend_8(value: u8) -> u32 {
-                        ((value as i8) as i32) as u32
-                    }
-
-                    fn calc_vaddr(base: u32, offset: u16) -> u32 {
-                        let offset = sign_extend_16(offset);
-                        tracing::trace!(
-                            "Calc. virtual address (base={:#010x}, offset={:#010x})",
-                            base,
-                            offset,
-                        );
-
-                        base.wrapping_add(offset)
-                    }
-
-                    #[inline(always)]
-                    fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
-                        tracing::debug!(
-                            "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
-                            target_addr,
-                            ret_addr,
-                            sp,
-                        );
-                    }
-
+                ) -> PcBehavior {
                     match self {
                         $(
                             #[allow(dead_code)]
                             State::$variant_name(ref mut opx) => {
-                                struct Context<'a, 'c, 'b> {
-                                    opx: &'a mut super::$ty::State,
-                                    reg: &'a mut reg::File,
-                                    mem: &'a mut Memory<'c, 'b>,
-                                    instr_addr: u32,
-                                }
-
-                                impl Context<'_, '_, '_> {
-                                    fn calc_branch_target(&self, value: u16) -> u32 {
-                                        let base = self.reg.pc();
-                                        let offset = sign_extend_16(value << 2);
-                                        tracing::trace!(
-                                            "Calc. branch target (base={:#010x}, offset={:#010x})",
-                                            base,
-                                            offset,
-                                        );
-
-                                        base.wrapping_add(offset)
-                                    }
-
-                                    #[inline(always)]
-                                    fn calc_jump_target(&self, value: u32) -> u32 {
-                                        (self.reg.pc() & !((1 << 28) - 1)) | (value << 2)
-                                    }
-
-                                    #[inline(always)]
-                                    fn calc_ret_addr(&self) -> u32 {
-                                        self.reg.pc().wrapping_add(4)
-                                    }
-
-                                    fn raise_exc(&self, code: u32) -> Exception {
-                                        Exception::new(code, self.reg.pc())
-                                    }
-                                }
-
-                                // tracing::trace!("{:?}", opx);
-
-                                $fn(Context { opx, reg, mem, instr_addr })
+                                $fn(Context { opx, reg, mem })
                             }
                         )*
                     }
                 }
+            }
+
+            struct Context<'a, 'c, 'b, S> {
+                opx: &'a mut S,
+                reg: &'a mut reg::File,
+                mem: &'a mut Memory<'c, 'b>,
+            }
+
+            impl<S> Context<'_, '_, '_, S> {
+                fn calc_branch_target(&self, value: u16) -> u32 {
+                    let base = self.reg.pc();
+                    let offset = sign_extend_16(value << 2);
+                    tracing::trace!(
+                        "Calc. branch target (base={:#010x}, offset={:#010x})",
+                        base,
+                        offset,
+                    );
+
+                    base.wrapping_add(offset)
+                }
+
+                #[inline(always)]
+                fn calc_jump_target(&self, value: u32) -> u32 {
+                    (self.reg.pc() & !((1 << 28) - 1)) | (value << 2)
+                }
+
+                #[inline(always)]
+                fn calc_ret_addr(&self) -> u32 {
+                    self.reg.pc().wrapping_add(4)
+                }
+
+                fn raise_exc(&mut self, code: u32) -> PcBehavior {
+                    let mut cause = reg::cpr::Cause(0);
+                    cause.set_exc_code(code);
+
+                    // Set the Cause and EPC registers.
+                    self.reg.set_cpr(reg::cpr::CAUSE_IDX, cause.0);
+                    self.reg.set_cpr(reg::cpr::EPC_IDX, self.reg.pc());
+
+                    PcBehavior::Jumps { kind: JumpKind::Exception, target_addr: exc::VECTOR }
+                }
+            }
+
+            #[inline(always)]
+            fn sign_extend_16(value: u16) -> u32 {
+                ((value as i16) as i32) as u32
+            }
+
+            #[inline(always)]
+            fn sign_extend_8(value: u8) -> u32 {
+                ((value as i8) as i32) as u32
+            }
+
+            fn calc_vaddr(base: u32, offset: u16) -> u32 {
+                let offset = sign_extend_16(offset);
+                tracing::trace!(
+                    "Calc. virtual address (base={:#010x}, offset={:#010x})",
+                    base,
+                    offset,
+                );
+
+                base.wrapping_add(offset)
+            }
+
+            #[inline(always)]
+            fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
+                tracing::debug!(
+                    "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
+                    target_addr,
+                    ret_addr,
+                    sp,
+                );
             }
         }
 
@@ -514,16 +576,16 @@ def_instr_and_op_kind!(
         name: Add,
         type: r,
         asm: ["add" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<r::State>| {
             let (result, overflowed) = (ctx.opx.rs.gpr_value as i32)
                 .overflowing_add(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
+                ctx.raise_exc(exc::code::INTEGER_OVERFLOW)
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -531,16 +593,16 @@ def_instr_and_op_kind!(
         name: Addi,
         type: i,
         asm: ["addi" %(rt), %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             let (result, overflowed) = (ctx.opx.rs.gpr_value as i32)
                 .overflowing_add(sign_extend_16(ctx.opx.imm) as i32);
 
             if overflowed {
-                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
+                ctx.raise_exc(exc::code::INTEGER_OVERFLOW)
             } else {
                 ctx.reg.set_gpr(ctx.opx.rt.index, result as u32);
 
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -548,66 +610,66 @@ def_instr_and_op_kind!(
         name: Addiu,
         type: i,
         asm: ["addiu" %(rt), %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             // This operation is unsigned, so no need to test for overflow.
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value.wrapping_add(sign_extend_16(ctx.opx.imm)));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Addu,
         type: r,
         asm: ["addu" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             // This operation is unsigned, so no need to test for overflow.
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value.wrapping_add(ctx.opx.rt.gpr_value));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: And,
         type: r,
         asm: ["and" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value & ctx.opx.rt.gpr_value);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Andi,
         type: i,
         asm: ["andi" %(rt), %(rs), #(u)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value & u32::from(ctx.opx.imm));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: BCond,
         type: i,
         asm: ["b.cond" %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             match ctx.opx.rt.index {
                 0 => {
                     tracing::trace!("bltz");
 
                     if (ctx.opx.rs.gpr_value as i32) < 0 {
-                        Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                        PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
                     } else {
-                        Ok(PcBehavior::Increments)
+                        PcBehavior::Increments
                     }
                 }
                 1 => {
                     tracing::trace!("bgez");
 
                     if (ctx.opx.rs.gpr_value as i32) >= 0 {
-                        Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                        PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
                     } else {
-                        Ok(PcBehavior::Increments)
+                        PcBehavior::Increments
                     }
                 }
                 16 => {
@@ -618,7 +680,7 @@ def_instr_and_op_kind!(
                     tracing::trace!("bgezal");
                     todo!();
                 }
-                _ => Err(ctx.raise_exc(exc::code::RESERVED_INSTR)),
+                _ => ctx.raise_exc(exc::code::RESERVED_INSTR),
             }
         },
     },
@@ -626,11 +688,11 @@ def_instr_and_op_kind!(
         name: Beq,
         type: i,
         asm: ["beq" %(rs), %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             if ctx.opx.rs.gpr_value == ctx.opx.rt.gpr_value {
-                Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
             } else {
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -638,11 +700,11 @@ def_instr_and_op_kind!(
         name: Bgtz,
         type: i,
         asm: ["bgtz" %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             if (ctx.opx.rs.gpr_value as i32) > 0 {
-                Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
             } else {
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -650,11 +712,11 @@ def_instr_and_op_kind!(
         name: Blez,
         type: i,
         asm: ["blez" %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             if (ctx.opx.rs.gpr_value as i32) <= 0 {
-                Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
             } else {
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -662,11 +724,11 @@ def_instr_and_op_kind!(
         name: Bne,
         type: i,
         asm: ["bne" %(rs), %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             if ctx.opx.rs.gpr_value != ctx.opx.rt.gpr_value {
-                Ok(PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm)))
+                PcBehavior::jumps_without_return(ctx.calc_branch_target(ctx.opx.imm))
             } else {
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -674,60 +736,60 @@ def_instr_and_op_kind!(
         name: Break,
         type: i,
         asm: ["break"],
-        fn: |ctx: Context| {
-            Err(ctx.raise_exc(exc::code::BREAKPOINT))
+        fn: |mut ctx: Context<i::State>| {
+            ctx.raise_exc(exc::code::BREAKPOINT)
         },
     },
     {
         name: Cop0,
         type: i,
         asm: ["cop0"],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             match ctx.opx.imm & 0b111111 {
                 0 => match ctx.opx.rs.index {
                     0 => {
                         tracing::trace!("mfc0");
                         ctx.reg.set_gpr(ctx.opx.rt.index, ctx.reg.cpr((ctx.opx.imm >> 11).into()));
 
-                        Ok(PcBehavior::Increments)
+                        PcBehavior::Increments
                     }
                     2 => {
                         tracing::trace!("cfc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                        ctx.raise_exc(exc::code::RESERVED_INSTR)
                     }
                     4 => {
                         tracing::trace!("mtc0");
                         ctx.reg.set_cpr(usize::from(ctx.opx.imm >> 11), ctx.opx.rt.gpr_value);
 
-                        Ok(PcBehavior::Increments)
+                        PcBehavior::Increments
                     }
                     6 => {
                         tracing::trace!("ctc0");
 
                         // COP0 doesn't support this instruction.
-                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                        ctx.raise_exc(exc::code::RESERVED_INSTR)
                     }
                     _ => {
-                        Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                        ctx.raise_exc(exc::code::RESERVED_INSTR)
                     }
                 }
                 // The PSX CPU doesn't implement an MMU... so page table instructions are reserved.
                 1 => {
                     tracing::trace!("tlbr");
 
-                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                    ctx.raise_exc(exc::code::RESERVED_INSTR)
                 }
                 2 => {
                     tracing::trace!("tlbwi");
 
-                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                    ctx.raise_exc(exc::code::RESERVED_INSTR)
                 }
                 8 => {
                     tracing::trace!("tlbp");
 
-                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                    ctx.raise_exc(exc::code::RESERVED_INSTR)
                 }
                 16 => {
                     tracing::trace!("rfe");
@@ -739,10 +801,10 @@ def_instr_and_op_kind!(
                     sr.set_ku_p(sr.ku_o());
                     ctx.reg.set_cpr(reg::cpr::STATUS_IDX, sr.0);
 
-                    Ok(PcBehavior::Increments)
+                    PcBehavior::Increments
                 }
                 _ => {
-                    Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
+                    ctx.raise_exc(exc::code::RESERVED_INSTR)
                 }
             }
         },
@@ -751,9 +813,9 @@ def_instr_and_op_kind!(
         name: Cop1,
         type: i,
         asm: ["cop1"],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
@@ -769,85 +831,85 @@ def_instr_and_op_kind!(
         name: Cop3,
         type: i,
         asm: ["cop3"],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
         name: Div,
         type: r,
         asm: ["div"  %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             // Note: MIPS I specifies that division by 0 is undefined, but to be safe, we'll
             // hardcode it to the fairly-reasonable value of 0.
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value.checked_div(ctx.opx.rt.gpr_value).unwrap_or(0);
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value % ctx.opx.rt.gpr_value;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Divu,
         type: r,
         asm: ["divu"  %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             // See `Div`.
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value.checked_div(ctx.opx.rt.gpr_value).unwrap_or(0);
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value % ctx.opx.rt.gpr_value;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: J,
         type: j,
         asm: ["j" *()],
-        fn: |ctx: Context| {
-            Ok(PcBehavior::jumps_without_return(ctx.calc_jump_target(ctx.opx.target)))
+        fn: |ctx: Context<j::State>| {
+            PcBehavior::jumps_without_return(ctx.calc_jump_target(ctx.opx.target))
         },
     },
     {
         name: Jal,
         type: j,
         asm: ["jal" *()],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<j::State>| {
             let target_addr = ctx.calc_jump_target(ctx.opx.target);
             let ret_addr = ctx.calc_ret_addr();
 
             ctx.reg.set_gpr(31, ret_addr);
             log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
-            Ok(PcBehavior::calls(target_addr))
+            PcBehavior::calls(target_addr)
         },
     },
     {
         name: Jalr,
         type: r,
         asm: ["jalr" %(rd), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             let target_addr = ctx.opx.rs.gpr_value;
             let ret_addr = ctx.calc_ret_addr();
 
             ctx.reg.set_gpr(31, ret_addr);
             log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
-            Ok(PcBehavior::calls(target_addr))
+            PcBehavior::calls(target_addr)
         },
     },
     {
         name: Jr,
         type: r,
         asm: ["jr" %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             let target_addr = ctx.opx.rs.gpr_value;
 
             if ctx.opx.rs.index == 31 {
                 tracing::debug!("Leaving function");
 
-                Ok(PcBehavior::returns(target_addr))
+                PcBehavior::returns(target_addr)
             } else {
-                Ok(PcBehavior::jumps_without_return(target_addr))
+                PcBehavior::jumps_without_return(target_addr)
             }
         },
     },
@@ -855,80 +917,80 @@ def_instr_and_op_kind!(
         name: Lb,
         type: i,
         asm: ["lb" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lbu,
         type: i,
         asm: ["lbu" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lh,
         type: i,
         asm: ["lh" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lhu,
         type: i,
         asm: ["lhu" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lui,
         type: i,
         asm: ["lui" %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, u32::from(ctx.opx.imm) << 16);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lw,
         type: i,
         asm: ["lw" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let value = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Lwc0,
         type: i,
         asm: ["lwc0" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_: Context<i::State>| todo!(),
     },
     {
         name: Lwc1,
         type: i,
         asm: ["lwc1" %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
@@ -944,68 +1006,68 @@ def_instr_and_op_kind!(
         name: Lwc3,
         type: i,
         asm: ["lwc3" %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
         name: Lwl,
         type: i,
         asm: ["lwl" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_| todo!(),
     },
     {
         name: Lwr,
         type: i,
         asm: ["lwr" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_| todo!(),
     },
     {
         name: Mfhi,
         type: r,
         asm: ["mfhi" %(rd)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.reg.hi());
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Mflo,
         type: r,
         asm: ["mflo" %(rd)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.reg.lo());
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Mthi,
         type: r,
         asm: ["mthi" %(rd)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Mtlo,
         type: r,
         asm: ["mtlo" %(rd)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Mult,
         type: r,
         asm: ["mult" %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             // SAFETY: Overflow is contained within `value`; this is currently how
             // [`u32::widening_mul`] is implemented.
             let value: u64 = unsafe {
@@ -1014,187 +1076,187 @@ def_instr_and_op_kind!(
             *ctx.reg.lo_mut() = value as u32;
             *ctx.reg.hi_mut() = (value >> 32) as u32;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Multu,
         type: r,
         asm: ["multu"  %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             let (lo, hi) = ctx.opx.rs.gpr_value.widening_mul(ctx.opx.rt.gpr_value);
             *ctx.reg.lo_mut() = lo;
             *ctx.reg.hi_mut() = hi;
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Nor,
         type: r,
         asm: ["nor" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, !(ctx.opx.rs.gpr_value | ctx.opx.rt.gpr_value));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Or,
         type: r,
         asm: ["or" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value | ctx.opx.rt.gpr_value);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Ori,
         type: i,
         asm: ["ori" %(rt), %(rs), #(u)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value | u32::from(ctx.opx.imm));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sb,
         type: i,
         asm: ["sb" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sh,
         type: i,
         asm: ["sh" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sll,
         type: r,
         asm: ["sll" %(rd), %(rt), ^()],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value << ctx.opx.shamt);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sllv,
         type: r,
         asm: ["sllv" %(rd), %(rt), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value << (ctx.opx.rs.gpr_value & 0b11111));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Slt,
         type: r,
         asm: ["slt" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rs.gpr_value as i32) < (ctx.opx.rt.gpr_value as i32)) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Slti,
         type: i,
         asm: ["slti" %(rt), %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ((ctx.opx.rs.gpr_value as i32) < (sign_extend_16(ctx.opx.imm) as i32)) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sltiu,
         type: i,
         asm: ["sltiu" %(rt), %(rs), #(s)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, (ctx.opx.rs.gpr_value < sign_extend_16(ctx.opx.imm)) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sltu,
         type: r,
         asm: ["sltu" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, (ctx.opx.rs.gpr_value < ctx.opx.rt.gpr_value) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sra,
         type: r,
         asm: ["sra" %(rd), %(rt), ^()],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rt.gpr_value as i32) >> ctx.opx.shamt) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Srav,
         type: r,
         asm: ["srav"  %(rd), %(rt), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rt.gpr_value as i32) >> (ctx.opx.rs.gpr_value & 0b11111)) as u32);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Srl,
         type: r,
         asm: ["srl" %(rd), %(rt), ^()],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value >> ctx.opx.shamt);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Srlv,
         type: r,
         asm: ["srlv"  %(rd), %(rt), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value >> (ctx.opx.rs.gpr_value & 0b11111));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sub,
         type: r,
         asm: ["sub" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<r::State>| {
             let (result, overflowed) = (ctx.opx.rs.gpr_value as i32)
                 .overflowing_sub(ctx.opx.rt.gpr_value as i32);
 
             if overflowed {
-                Err(ctx.raise_exc(exc::code::INTEGER_OVERFLOW))
+                ctx.raise_exc(exc::code::INTEGER_OVERFLOW)
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
-                Ok(PcBehavior::Increments)
+                PcBehavior::Increments
             }
         },
     },
@@ -1202,36 +1264,36 @@ def_instr_and_op_kind!(
         name: Subu,
         type: r,
         asm: ["subu" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value.wrapping_sub(ctx.opx.rt.gpr_value));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Sw,
         type: i,
         asm: ["sw" %(rt), #(s), %(rs)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Swc0,
         type: i,
         asm: ["swc0" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_| todo!(),
     },
     {
         name: Swc1,
         type: i,
         asm: ["swc1" %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #1.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
@@ -1247,49 +1309,49 @@ def_instr_and_op_kind!(
         name: Swc3,
         type: i,
         asm: ["swc3" %(rt), #(s)],
-        fn: |ctx: Context| {
+        fn: |mut ctx: Context<i::State>| {
             // The PSX CPU lacks a coprocessor #3.
-            Err(ctx.raise_exc(exc::code::COP_UNUSABLE))
+            ctx.raise_exc(exc::code::COP_UNUSABLE)
         },
     },
     {
         name: Swl,
         type: i,
         asm: ["swl" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_| todo!(),
     },
     {
         name: Swr,
         type: i,
         asm: ["swr" %(rt), #(s)],
-        fn: |_: Context| todo!(),
+        fn: |_| todo!(),
     },
     {
         name: Syscall,
         type: i,
         asm: ["syscall"],
-        fn: |ctx: Context| {
-            Err(ctx.raise_exc(exc::code::SYSCALL))
+        fn: |mut ctx: Context<i::State>| {
+            ctx.raise_exc(exc::code::SYSCALL)
         },
     },
     {
         name: Xor,
         type: r,
         asm: ["xor" %(rd), %(rs), %(rt)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<r::State>| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value ^ ctx.opx.rt.gpr_value);
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
     {
         name: Xori,
         type: i,
         asm: ["xori" %(rt), %(rs), #(u)],
-        fn: |ctx: Context| {
+        fn: |ctx: Context<i::State>| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value ^ u32::from(ctx.opx.imm));
 
-            Ok(PcBehavior::Increments)
+            PcBehavior::Increments
         },
     },
 );

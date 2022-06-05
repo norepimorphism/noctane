@@ -74,6 +74,7 @@ pub mod reg;
 
 pub use bus::Bus;
 pub use cache::{i::Cache as ICache, Cache};
+pub use exc::Exception;
 pub use instr::Instr;
 pub use mem::Memory;
 
@@ -100,7 +101,7 @@ pub struct State {
     ///
     /// Per the MIPS I architecture, instructions are 'pipelined' in which up to five instructions
     /// may be simultaneously queued in varying stages of execution and each advanced to the next
-    /// stage at every clock cycle. This field contains that queue.
+    /// stage at every clock cycle. This field represents that queue.
     pub pipeline: instr::Pipeline,
     /// The register file.
     ///
@@ -190,7 +191,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`reg`]: Self::reg
     /// [`execute_instr`]: Self::execute_instr
     /// [`execute_opcode`]: Self::execute_opcode
-    pub fn execute_next_instr(&mut self) -> instr::Execution {
+    pub fn execute_next_instr(&mut self) -> instr::Executed {
         // TODO: Don't unwrap!
         self.advance_pipeline(|op| Instr::decode(op).unwrap())
     }
@@ -198,14 +199,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Executes the given instruction.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_instr(&mut self, instr: Instr) -> instr::Execution {
+    pub fn execute_instr(&mut self, instr: Instr) -> instr::Executed {
         self.advance_pipeline(|_| instr)
     }
 
     /// Executes the instruction decodeable from the given opcode.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_opcode(&mut self, op: u32) -> instr::Execution {
+    pub fn execute_opcode(&mut self, op: u32) -> instr::Executed {
         // TODO: Don't unwrap!
         self.advance_pipeline(|_| Instr::decode(op).unwrap())
     }
@@ -222,27 +223,19 @@ impl<'s, 'b> Cpu<'s, 'b> {
     pub fn advance_pipeline(
         &mut self,
         decode_instr: impl Fn(u32) -> Instr,
-    ) -> instr::Execution {
-        // Actually advance the pipeline.
-        let exec =
-            self.pipeline
-                .advance(&mut self.mem, &mut self.reg, &decode_instr);
+    ) -> instr::Executed {
+        self.pipeline.advance(&mut self.mem, &mut self.reg, &decode_instr)
+    }
 
-        // If the status register (SR) was modified, we need to apply the changes before returning
-        // control back to the caller.
-        if let Some(sr) = self.reg.altered_sr() {
-            let sr = reg::cpr::Status(sr);
+    /// The last exception produced by an instruction execution.
+    ///
+    /// This always returns an exception&mdash;even if no exception actually occurred. This is
+    /// because it generates one from the Cause and EPC CPU registers, which have no concept of
+    /// optionality.
+    pub fn last_exception(&self) -> Exception {
+        let cause = reg::cpr::Cause(self.reg.cpr(reg::cpr::CAUSE_IDX));
+        let epc = self.reg.cpr(reg::cpr::EPC_IDX);
 
-            self.mem.cache_mut().i.set_isolated(sr.is_c());
-
-            if sr.sw_c() {
-                // This doesn't do anything in the PSX as far as I know. The I-cache is more-or-less
-                // configured to function as a D-cache, so it is basically already 'swapped'.
-            }
-
-            // TODO
-        }
-
-        exec
+        Exception { code: cause.exc_code(), epc }
     }
 }

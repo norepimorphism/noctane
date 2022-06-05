@@ -61,7 +61,7 @@ impl Exception {
 
 /// A CPU exception.
 ///
-/// Exceptions are not necessarily errors---they are, more accurately, interruptions in normal
+/// Exceptions are not necessarily errors&mdash;they are, more accurately, interruptions in normal
 /// code execution, which may be caused by errors (e.g., misaligned addresses, signed integer
 /// overflow), but which may also be manually triggered by the user with instructions such as
 /// `syscall` and `break`.
