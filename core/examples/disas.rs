@@ -16,7 +16,7 @@ fn main() {
         .enumerate()
         .for_each(|(i, bytes)| {
             let enc_instr = u32::from_le_bytes(*bytes);
-            noctane_util::dump_hex(&mut std::io::stdout(), i as u32, *bytes);
+            noctane_util::hex::dump(&mut std::io::stdout(), i as u32, *bytes);
             if let Some(instr) = Instr::decode(enc_instr) {
                 println!("   {}", instr.asm())
             } else {

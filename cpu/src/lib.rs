@@ -197,7 +197,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`reg`]: Self::reg
     /// [`execute_instr`]: Self::execute_instr
     /// [`execute_opcode`]: Self::execute_opcode
-    pub fn execute_next_instr(&mut self) -> instr::Fetched {
+    pub fn execute_next_instr(&mut self) -> instr::Execution {
         // TODO: Don't unwrap!
         self.advance_pipeline(|op| Instr::decode(op).unwrap())
     }
@@ -205,14 +205,14 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Executes the given instruction.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_instr(&mut self, instr: Instr) -> instr::Fetched {
+    pub fn execute_instr(&mut self, instr: Instr) -> instr::Execution {
         self.advance_pipeline(|_| instr)
     }
 
     /// Executes the instruction decodeable from the given opcode.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_opcode(&mut self, op: u32) -> instr::Fetched {
+    pub fn execute_opcode(&mut self, op: u32) -> instr::Execution {
         // TODO: Don't unwrap!
         self.advance_pipeline(|_| Instr::decode(op).unwrap())
     }
@@ -229,7 +229,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
     pub fn advance_pipeline(
         &mut self,
         decode_instr: impl Fn(u32) -> Instr,
-    ) -> instr::Fetched {
+    ) -> instr::Execution {
         // Handling exceptions comes first as this method may alter the PC, which is used to fetch
         // future instructions in [`Pipeline::advance`].
         self.handle_exc();

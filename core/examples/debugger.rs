@@ -127,15 +127,14 @@ impl Debugger<'_> {
 
     fn do_continue(
         &mut self,
-        mut step: impl FnMut(&mut Self,
-    ) -> noctane_cpu::instr::Fetched) {
+        mut step: impl FnMut(&mut Self) -> noctane_cpu::instr::Execution) {
         loop {
-            let fetched = step(self);
+            let exec = step(self);
             let hit_breakpoint =
-                matches!(fetched.instr, noctane_cpu::Instr::Break(_)) ||
-                self.breakpoints.get(&fetched.addr).is_some();
+                matches!(exec.exc.map(|it| it.code), Some(noctane_cpu::exc::code::BREAKPOINT)) ||
+                self.breakpoints.get(&exec.fetched.addr).is_some();
             if hit_breakpoint {
-                println!("BREAK @ {:#010x}", fetched.addr);
+                println!("BREAK @ {:#010x}", exec.fetched.addr);
                 break;
             }
         }
@@ -149,68 +148,54 @@ impl Debugger<'_> {
         println!("{}", self.cpu.mem().cache().i);
     }
 
-    fn step(&mut self) -> noctane_cpu::instr::Fetched {
-        let fetched = self.cpu.execute_next_instr();
-        self.print_instr(fetched);
-        if let Some(comment) = self.gen_comment(fetched) {
-            self.print_comment(comment);
-        }
-        println!();
+    fn step(&mut self) -> noctane_cpu::instr::Execution {
+        let exec = self.cpu.execute_next_instr();
+        self.print_fetch(&exec.fetched);
+        self.print_exception(&exec);
 
-        fetched
+        exec
     }
 
-    fn step_lightly(&mut self) -> noctane_cpu::instr::Fetched {
-        let fetched = self.cpu.execute_next_instr();
-        if let Some(comment) = self.gen_comment(fetched) {
-            self.print_instr(fetched);
-            self.print_comment(comment);
-            println!();
-        }
+    fn step_lightly(&mut self) -> noctane_cpu::instr::Execution {
+        let exec = self.cpu.execute_next_instr();
+        self.print_exception(&exec);
 
-        fetched
+        exec
     }
 
-    fn step_silently(&mut self) -> noctane_cpu::instr::Fetched {
+    fn step_silently(&mut self) -> noctane_cpu::instr::Execution {
         self.cpu.execute_next_instr()
     }
 
-    fn print_instr(&self, fetched: noctane_cpu::instr::Fetched) {
-        print!("{:08x}   {}", fetched.addr, fetched.instr.asm());
+    fn print_fetch(&self, fetched: &noctane_cpu::instr::Fetched) {
+        println!("{:08x}   {}", fetched.addr, fetched.instr.asm());
     }
 
-    fn print_comment(&self, comment: String) {
-        print!("\t\t; {}", comment);
-    }
-
-    fn gen_comment(&self, fetched: noctane_cpu::instr::Fetched) -> Option<String> {
-        match fetched.instr {
-            noctane_cpu::Instr::Break(_) => {
-                // See RM[A-21].
-                let code = (fetched.op >> 6) & ((1 << 21) - 1);
-                let comment = noctane_util::sym::for_break(code)
-                    .map(|sym| format!("{}()", sym))
-                    .unwrap_or_else(|| format!("{:#05x}", code));
-
-                Some(comment)
-            }
-            noctane_cpu::Instr::Syscall(_) => {
-                // Sony stores a code identifying the function of the syscall in the *r4* register.
-                let code = self.cpu.reg().gpr(4);
-                let comment = format!("{}()", noctane_util::sym::for_syscall(code));
-
-                Some(comment)
-            }
-            _ => {
-                let r9 = self.cpu.reg().gpr(9);
-                let sym = match fetched.addr {
-                    0xa0 => noctane_util::sym::for_a_func(r9),
-                    0xb0 => noctane_util::sym::for_b_func(r9),
-                    0xc0 => noctane_util::sym::for_c_func(r9),
-                    _ => None,
-                };
-
-                sym.map(|it| format!("{}()", it))
+    fn print_exception(&self, exec: &noctane_cpu::instr::Execution) {
+        if let Some(exc) = exec.exc {
+            match exc.code {
+                noctane_cpu::exc::code::BREAKPOINT => {
+                    // See RM[A-21].
+                    let code = (exec.fetched.op >> 6) & ((1 << 21) - 1);
+                    if let Some(call) = noctane_util::bios::func::Call::try_from_break(
+                        self.cpu.reg(),
+                        code,
+                    ) {
+                        println!("{}", call);
+                    }
+                }
+                noctane_cpu::exc::code::SYSCALL => {
+                    // Sony stores a code identifying the function of the syscall in the *r4*
+                    // register.
+                    let code = self.cpu.reg().gpr(4);
+                    println!(
+                        "{}",
+                        noctane_util::bios::func::Call::from_syscall(self.cpu.reg(), code),
+                    );
+                }
+                _ => {
+                    println!("!!! EXCEPTION !!!");
+                }
             }
         }
     }

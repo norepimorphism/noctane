@@ -11,7 +11,6 @@ bit = "0.1"
 bitfield = "0.13"
 const_queue = "0.1"
 noctane-gpu = { path = "../gpu" }
-noctane-util = { path = "../util" }
 noctane-proc-macro = { path = "../proc-macro" }
 tracing = "0.1"
 

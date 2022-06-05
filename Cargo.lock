@@ -1392,7 +1392,6 @@ dependencies = [
  "const_queue",
  "noctane-gpu",
  "noctane-proc-macro",
- "noctane-util",
  "rand",
  "tracing",
 ]
@@ -1441,6 +1440,9 @@ dependencies = [
 [[package]]
 name = "noctane-util"
 version = "0.1.0"
+dependencies = [
+ "noctane-cpu",
+]
 
 [[package]]
 name = "nom"

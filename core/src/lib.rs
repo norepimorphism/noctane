@@ -12,13 +12,13 @@ pub struct Core {
 
 impl Core {
     pub fn cpu(&mut self) -> Cpu {
-        self.cpu_state.connect_bus(noctane_cpu::Bus {
-            main_ram: &mut self.banks.main_ram,
-            exp_1: &mut self.banks.exp_1,
-            io: noctane_cpu::bus::Io { gpu: &mut self.gpu },
-            exp_3: &mut self.banks.exp_3,
-            bios: &mut self.banks.bios,
-        })
+        self.cpu_state.connect_bus(noctane_cpu::Bus::new(
+            &mut self.banks.main_ram,
+            &mut self.banks.exp_1,
+            noctane_cpu::bus::Io { gpu: &mut self.gpu },
+            &mut self.banks.exp_3,
+            &mut self.banks.bios,
+        ))
     }
 
     pub fn banks(&self) -> &Banks {

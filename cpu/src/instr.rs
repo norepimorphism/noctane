@@ -3,11 +3,9 @@
 pub mod asm;
 pub mod decode;
 
-use std::fmt;
-
 pub use asm::Asm;
 
-use crate::{exc, reg, Memory};
+use crate::{exc::{self, Exception}, reg, Memory};
 
 pub mod i {
     use super::{opn::Gpr, reg};
@@ -140,30 +138,16 @@ pub mod r {
 /// This structure is the queue that holds these 5 instructions.
 #[derive(Default)]
 pub struct Pipeline {
-    // The slot for instructions which have been fetched and are ready for the "Read and Decode"
-    // pipestage.
-    //
-    // "Lies!", you say. "How can there be 5 pipestages when there is only one field?" As it turns
-    // out, only one field is needed to represent all 5 pipestages. See the [`Self::advance`] method
-    // for details.
-    rd: Option<Fetched>,
+    jump_info: Option<JumpInfo>,
 }
 
-impl fmt::Display for Pipeline {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.rd.as_ref().map_or_else(
-                || String::from("(none)"),
-                |slot| slot.instr.asm().to_string(),
-            ),
-        )
-    }
+pub struct JumpInfo {
+    pub target_addr: u32,
+    pub delay_slot: Fetched,
 }
 
 /// The result of an instruction fetch.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Fetched {
     /// The program address at which the fetched instruction is located.
     pub addr: u32,
@@ -171,6 +155,23 @@ pub struct Fetched {
     pub op: u32,
     /// The instruction fetched.
     pub instr: Instr,
+}
+
+#[derive(Clone, Debug)]
+pub struct Execution {
+    pub fetched: Fetched,
+    pub behavior: Option<Behavior>,
+    pub exc: Option<Exception>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Behavior {
+    /// This instruction calls a function.
+    Calls,
+    /// The instruction jumps to a new program address.
+    Jumps,
+    /// This instruction returns from the current function.
+    Returns,
 }
 
 impl Pipeline {
@@ -183,47 +184,25 @@ impl Pipeline {
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
-    ) -> Fetched {
-        self.execute_queued_instr(exc, mem, reg, decode_instr);
-        let fetch = self.fetch_next_instr(mem, reg, decode_instr);
-        self.rd = Some(fetch);
+    ) -> Execution {
+        if let Some(jump_info) = self.jump_info.take() {
+            let exec = self.execute_fetched(
+                jump_info.delay_slot,
+                mem,
+                reg,
+                decode_instr,
+            );
+            *reg.pc_mut() = jump_info.target_addr;
 
-        fetch
-    }
-
-    fn execute_queued_instr(
-        &mut self,
-        exc: &mut exc::Queue,
-        mem: &mut Memory,
-        reg: &mut reg::File,
-        decode_instr: &impl Fn(u32) -> Instr,
-    ) {
-        if let Some(slot) = self.rd.take() {
-            let mut state = opx::State::read(slot.instr, reg);
-
-            let mut target = None;
-            let exec = state.execute(reg, mem, slot.addr, &mut target);
-            if let Err(e) = exec {
-                // An exception occurred, so we push it to the back of the exception queue.
-                exc.push_back(e);
-            } else if let Some(target) = target {
-                // This is a jump instruction, and it is requesting to jump to the program address
-                // identified by `target`. Per the MIPS I architecture, the instruction in the delay
-                // slot, or the instruction following the jump instruction, *must* be executed
-                // before the branch is taken (if it is taken) (RM[1-7]). So, we want to do the
-                // following:
-                // - fetch the instruction in the delay slot
-                // - execute the instruction in the delay slot
-                // - fetch the instruction located at `target`
-                //
-                // The last step already occurs at the end of [`Self::advance`], so we only need to
-                // do the first two ourselves.
-
-                let fetch = self.fetch_next_instr(mem, reg, decode_instr);
-                self.rd = Some(fetch);
-                self.execute_queued_instr(exc, mem, reg, decode_instr);
-                *reg.pc_mut() = target;
-            }
+            exec
+        } else {
+            let fetched = self.fetch_next_instr(mem, reg, decode_instr);
+            self.execute_fetched(
+                fetched,
+                mem,
+                reg,
+                decode_instr,
+            )
         }
     }
 
@@ -240,6 +219,30 @@ impl Pipeline {
         *reg.pc_mut() = pc.wrapping_add(4);
 
         Fetched { addr: pc, op, instr }
+    }
+
+    fn execute_fetched(
+        &mut self,
+        fetched: Fetched,
+        mem: &mut Memory,
+        reg: &mut reg::File,
+        decode_instr: &impl Fn(u32) -> Instr,
+    ) -> Execution {
+        let mut target_addr = None;
+        let mut state = opx::State::read(fetched.instr, reg);
+        let result = state.execute(reg, mem, fetched.addr, &mut target_addr);
+        let mut exc = result.err();
+
+        if let Some(target_addr) = target_addr {
+            // This is a jump instruction, and it is requesting to jump to the program address
+            // identified by `target_addr`. Per the MIPS I architecture, the instruction in the
+            // delay slot, or the instruction following the jump instruction, *must* be executed
+            // before the branch is taken (if it is taken) (RM[1-7]).
+            let delay_slot = self.fetch_next_instr(mem, reg, decode_instr);
+            self.jump_info = Some(JumpInfo { target_addr, delay_slot });
+        }
+
+        Execution { fetched, behavior: None, exc }
     }
 }
 
