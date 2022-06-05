@@ -205,20 +205,14 @@ macro_rules! def_write_fn {
 
 impl Memory<'_, '_> {
     def_access!(access_8 8);
-
     def_access!(access_16 16);
-
     def_access!(access_32 32);
 
     def_read_fn!(read_8 access_8 u8);
-
     def_read_fn!(read_16 access_16 u16);
-
     def_read_fn!(read_32 access_32 u32);
 
     def_write_fn!(write_8 access_8 u8);
-
     def_write_fn!(write_16 access_16 u16);
-
     def_write_fn!(write_32 access_32 u32);
 }

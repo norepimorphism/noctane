@@ -2,11 +2,6 @@
 
 //! CPU exceptions.
 
-use std::collections::VecDeque;
-
-/// A double-ended queue of [`Exception`]s.
-pub type Queue = VecDeque<Exception>;
-
 /// The physical address to which execution is (usually) routed after an exception occurs.
 pub const VECTOR: u32 = 0x8000_0080;
 

@@ -160,18 +160,18 @@ pub struct Fetched {
 #[derive(Clone, Debug)]
 pub struct Execution {
     pub fetched: Fetched,
-    pub behavior: Option<Behavior>,
-    pub exc: Option<Exception>,
+    pub behavior: Result<Behavior, Exception>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum Behavior {
     /// This instruction calls a function.
-    Calls,
+    Calls(u32),
     /// The instruction jumps to a new program address.
-    Jumps,
+    Jumps(u32),
     /// This instruction returns from the current function.
     Returns,
+    Normal,
 }
 
 impl Pipeline {
@@ -180,7 +180,6 @@ impl Pipeline {
     /// The `decode_instr` argument decodes a given opcode into an instruction.
     pub fn advance(
         &mut self,
-        exc: &mut exc::Queue,
         mem: &mut Memory,
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
@@ -228,21 +227,18 @@ impl Pipeline {
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Execution {
-        let mut target_addr = None;
         let mut state = opx::State::read(fetched.instr, reg);
-        let result = state.execute(reg, mem, fetched.addr, &mut target_addr);
-        let mut exc = result.err();
-
-        if let Some(target_addr) = target_addr {
-            // This is a jump instruction, and it is requesting to jump to the program address
+        let behavior = state.execute(reg, mem, fetched.addr);
+        if let Ok(Behavior::Calls(target_addr)) | Ok(Behavior::Jumps(target_addr)) = &behavior {
+            // This is a jump/call instruction, and it is requesting to jump to the program address
             // identified by `target_addr`. Per the MIPS I architecture, the instruction in the
             // delay slot, or the instruction following the jump instruction, *must* be executed
             // before the branch is taken (if it is taken) (RM[1-7]).
             let delay_slot = self.fetch_next_instr(mem, reg, decode_instr);
-            self.jump_info = Some(JumpInfo { target_addr, delay_slot });
+            self.jump_info = Some(JumpInfo { target_addr: *target_addr, delay_slot });
         }
 
-        Execution { fetched, behavior: None, exc }
+        Execution { fetched, behavior }
     }
 }
 
@@ -324,7 +320,7 @@ macro_rules! def_instr_and_op_kind {
 
             use std::fmt;
 
-            use super::{Instr, Memory, exc::{self, Exception}, reg};
+            use super::{Behavior, Instr, Memory, exc::{self, Exception}, reg};
 
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
@@ -369,8 +365,7 @@ macro_rules! def_instr_and_op_kind {
                     reg: &mut reg::File,
                     mem: &mut Memory,
                     instr_addr: u32,
-                    target: &mut Option<u32>,
-                ) -> Result<(), Exception> {
+                ) -> Result<Behavior, Exception> {
                     #[inline(always)]
                     fn sign_extend_16(value: u16) -> u32 {
                         ((value as i16) as i32) as u32
@@ -411,7 +406,6 @@ macro_rules! def_instr_and_op_kind {
                                     reg: &'a mut reg::File,
                                     mem: &'a mut Memory<'c, 'b>,
                                     instr_addr: u32,
-                                    target: &'a mut Option<u32>,
                                 }
 
                                 impl Context<'_, '_, '_> {
@@ -444,7 +438,7 @@ macro_rules! def_instr_and_op_kind {
 
                                 // tracing::trace!("{:?}", opx);
 
-                                $fn(Context { opx, reg, mem, instr_addr, target })
+                                $fn(Context { opx, reg, mem, instr_addr })
                             }
                         )*
                     }
@@ -495,7 +489,7 @@ def_instr_and_op_kind!(
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
-                Ok(())
+                Ok(Behavior::Normal)
             }
         },
     },
@@ -512,7 +506,7 @@ def_instr_and_op_kind!(
             } else {
                 ctx.reg.set_gpr(ctx.opx.rt.index, result as u32);
 
-                Ok(())
+                Ok(Behavior::Normal)
             }
         },
     },
@@ -524,7 +518,7 @@ def_instr_and_op_kind!(
             // This operation is unsigned, so no need to test for overflow.
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value.wrapping_add(sign_extend_16(ctx.opx.imm)));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -535,7 +529,7 @@ def_instr_and_op_kind!(
             // This operation is unsigned, so no need to test for overflow.
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value.wrapping_add(ctx.opx.rt.gpr_value));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -545,7 +539,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value & ctx.opx.rt.gpr_value);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -555,7 +549,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value & u32::from(ctx.opx.imm));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -566,19 +560,21 @@ def_instr_and_op_kind!(
             match ctx.opx.rt.index {
                 0 => {
                     tracing::trace!("bltz");
-                    if (ctx.opx.rs.gpr_value as i32) < 0 {
-                        *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
-                    }
 
-                    Ok(())
+                    if (ctx.opx.rs.gpr_value as i32) < 0 {
+                        Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+                    } else {
+                        Ok(Behavior::Normal)
+                    }
                 }
                 1 => {
                     tracing::trace!("bgez");
-                    if (ctx.opx.rs.gpr_value as i32) >= 0 {
-                        *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
-                    }
 
-                    Ok(())
+                    if (ctx.opx.rs.gpr_value as i32) >= 0 {
+                        Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+                    } else {
+                        Ok(Behavior::Normal)
+                    }
                 }
                 16 => {
                     tracing::trace!("bltzal");
@@ -598,10 +594,10 @@ def_instr_and_op_kind!(
         asm: ["beq" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value == ctx.opx.rt.gpr_value {
-                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
+                Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+            } else {
+                Ok(Behavior::Normal)
             }
-
-            Ok(())
         },
     },
     {
@@ -610,10 +606,10 @@ def_instr_and_op_kind!(
         asm: ["bgtz" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) > 0 {
-                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
+                Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+            } else {
+                Ok(Behavior::Normal)
             }
-
-            Ok(())
         },
     },
     {
@@ -622,10 +618,10 @@ def_instr_and_op_kind!(
         asm: ["blez" %(rs), #(s)],
         fn: |ctx: Context| {
             if (ctx.opx.rs.gpr_value as i32) <= 0 {
-                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
+                Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+            } else {
+                Ok(Behavior::Normal)
             }
-
-            Ok(())
         },
     },
     {
@@ -634,10 +630,10 @@ def_instr_and_op_kind!(
         asm: ["bne" %(rs), %(rt), #(s)],
         fn: |ctx: Context| {
             if ctx.opx.rs.gpr_value != ctx.opx.rt.gpr_value {
-                *ctx.target = Some(ctx.calc_branch_target(ctx.opx.imm));
+                Ok(Behavior::Jumps(ctx.calc_branch_target(ctx.opx.imm)))
+            } else {
+                Ok(Behavior::Normal)
             }
-
-            Ok(())
         },
     },
     {
@@ -659,7 +655,7 @@ def_instr_and_op_kind!(
                         tracing::trace!("mfc0");
                         ctx.reg.set_gpr(ctx.opx.rt.index, ctx.reg.cpr((ctx.opx.imm >> 11).into()));
 
-                        Ok(())
+                        Ok(Behavior::Normal)
                     }
                     2 => {
                         tracing::trace!("cfc0");
@@ -671,7 +667,7 @@ def_instr_and_op_kind!(
                         tracing::trace!("mtc0");
                         ctx.reg.set_cpr(usize::from(ctx.opx.imm >> 11), ctx.opx.rt.gpr_value);
 
-                        Ok(())
+                        Ok(Behavior::Normal)
                     }
                     6 => {
                         tracing::trace!("ctc0");
@@ -709,7 +705,7 @@ def_instr_and_op_kind!(
                     sr.set_ku_p(sr.ku_o());
                     ctx.reg.set_cpr(reg::cpr::STATUS_IDX, sr.0);
 
-                    Ok(())
+                    Ok(Behavior::Normal)
                 }
                 _ => {
                     Err(ctx.raise_exc(exc::code::RESERVED_INSTR))
@@ -754,7 +750,7 @@ def_instr_and_op_kind!(
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value.checked_div(ctx.opx.rt.gpr_value).unwrap_or(0);
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value % ctx.opx.rt.gpr_value;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -766,7 +762,7 @@ def_instr_and_op_kind!(
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value.checked_div(ctx.opx.rt.gpr_value).unwrap_or(0);
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value % ctx.opx.rt.gpr_value;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -774,9 +770,7 @@ def_instr_and_op_kind!(
         type: j,
         asm: ["j" *()],
         fn: |ctx: Context| {
-            *ctx.target = Some(ctx.calc_jump_target(ctx.opx.target));
-
-            Ok(())
+            Ok(Behavior::Jumps(ctx.calc_jump_target(ctx.opx.target)))
         },
     },
     {
@@ -787,11 +781,10 @@ def_instr_and_op_kind!(
             let target_addr = ctx.calc_jump_target(ctx.opx.target);
             let ret_addr = ctx.calc_ret_addr();
 
-            *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
             log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
-            Ok(())
+            Ok(Behavior::Calls(target_addr))
         },
     },
     {
@@ -802,11 +795,10 @@ def_instr_and_op_kind!(
             let target_addr = ctx.opx.rs.gpr_value;
             let ret_addr = ctx.calc_ret_addr();
 
-            *ctx.target = Some(target_addr);
             ctx.reg.set_gpr(31, ret_addr);
             log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
 
-            Ok(())
+            Ok(Behavior::Calls(target_addr))
         },
     },
     {
@@ -818,9 +810,7 @@ def_instr_and_op_kind!(
                 tracing::debug!("Leaving function");
             }
 
-            *ctx.target = Some(ctx.opx.rs.gpr_value);
-
-            Ok(())
+            Ok(Behavior::Jumps(ctx.opx.rs.gpr_value))
         },
     },
     {
@@ -831,7 +821,7 @@ def_instr_and_op_kind!(
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -842,7 +832,7 @@ def_instr_and_op_kind!(
             let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -853,7 +843,7 @@ def_instr_and_op_kind!(
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -864,7 +854,7 @@ def_instr_and_op_kind!(
             let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -874,7 +864,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, u32::from(ctx.opx.imm) << 16);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -885,7 +875,7 @@ def_instr_and_op_kind!(
             let value = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
             ctx.reg.set_gpr(ctx.opx.rt.index, value);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -940,7 +930,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.reg.hi());
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -950,7 +940,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.reg.lo());
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -960,7 +950,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             *ctx.reg.hi_mut() = ctx.opx.rs.gpr_value;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -970,7 +960,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             *ctx.reg.lo_mut() = ctx.opx.rs.gpr_value;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -986,7 +976,7 @@ def_instr_and_op_kind!(
             *ctx.reg.lo_mut() = value as u32;
             *ctx.reg.hi_mut() = (value >> 32) as u32;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -998,7 +988,7 @@ def_instr_and_op_kind!(
             *ctx.reg.lo_mut() = lo;
             *ctx.reg.hi_mut() = hi;
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1008,7 +998,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, !(ctx.opx.rs.gpr_value | ctx.opx.rt.gpr_value));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1018,7 +1008,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value | ctx.opx.rt.gpr_value);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1028,7 +1018,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value | u32::from(ctx.opx.imm));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1039,7 +1029,7 @@ def_instr_and_op_kind!(
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1050,7 +1040,7 @@ def_instr_and_op_kind!(
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1060,7 +1050,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value << ctx.opx.shamt);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1070,7 +1060,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value << (ctx.opx.rs.gpr_value & 0b11111));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1080,7 +1070,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rs.gpr_value as i32) < (ctx.opx.rt.gpr_value as i32)) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1090,7 +1080,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ((ctx.opx.rs.gpr_value as i32) < (sign_extend_16(ctx.opx.imm) as i32)) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1100,7 +1090,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, (ctx.opx.rs.gpr_value < sign_extend_16(ctx.opx.imm)) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1110,7 +1100,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, (ctx.opx.rs.gpr_value < ctx.opx.rt.gpr_value) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1120,7 +1110,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rt.gpr_value as i32) >> ctx.opx.shamt) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1130,7 +1120,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ((ctx.opx.rt.gpr_value as i32) >> (ctx.opx.rs.gpr_value & 0b11111)) as u32);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1140,7 +1130,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value >> ctx.opx.shamt);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1150,7 +1140,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rt.gpr_value >> (ctx.opx.rs.gpr_value & 0b11111));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1166,7 +1156,7 @@ def_instr_and_op_kind!(
             } else {
                 ctx.reg.set_gpr(ctx.opx.rd.index, result as u32);
 
-                Ok(())
+                Ok(Behavior::Normal)
             }
         },
     },
@@ -1177,7 +1167,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value.wrapping_sub(ctx.opx.rt.gpr_value));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1188,7 +1178,7 @@ def_instr_and_op_kind!(
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
             ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1251,7 +1241,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rd.index, ctx.opx.rs.gpr_value ^ ctx.opx.rt.gpr_value);
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
     {
@@ -1261,7 +1251,7 @@ def_instr_and_op_kind!(
         fn: |ctx: Context| {
             ctx.reg.set_gpr(ctx.opx.rt.index, ctx.opx.rs.gpr_value ^ u32::from(ctx.opx.imm));
 
-            Ok(())
+            Ok(Behavior::Normal)
         },
     },
 );

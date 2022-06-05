@@ -85,11 +85,6 @@ pub use mem::Memory;
 /// [`connect_bus`]: Self::connect_bus
 #[derive(Default)]
 pub struct State {
-    /// The exception queue.
-    ///
-    /// Per the MIPS I architecture, exceptions are queued in instruction-order and processed
-    /// sequentially (RM[4-1]). This is the queue that holds such exceptions.
-    pub exc: exc::Queue,
     /// The I-cache and scratchpad, collectively.
     ///
     /// When the CPU accesses a cacheable address region, it first consults the instruction cache
@@ -126,7 +121,6 @@ impl State {
     /// instruction if necessary.
     pub fn connect_bus<'s, 'b>(&'s mut self, bus: crate::Bus<'b>) -> Cpu<'s, 'b> {
         Cpu {
-            exc: &mut self.exc,
             pipeline: &mut self.pipeline,
             reg: &mut self.reg,
             mem: Memory::new(&mut self.cache, bus),
@@ -150,7 +144,6 @@ impl State {
 /// [`execute_opcode`]: Self::execute_opcode
 /// [`advance_pipeline`]: Self::advance_pipeline
 pub struct Cpu<'s, 'b> {
-    exc: &'s mut exc::Queue,
     pipeline: &'s mut instr::Pipeline,
     reg: &'s mut reg::File,
     mem: Memory<'s, 'b>,
@@ -230,14 +223,10 @@ impl<'s, 'b> Cpu<'s, 'b> {
         &mut self,
         decode_instr: impl Fn(u32) -> Instr,
     ) -> instr::Execution {
-        // Handling exceptions comes first as this method may alter the PC, which is used to fetch
-        // future instructions in [`Pipeline::advance`].
-        self.handle_exc();
-
         // Actually advance the pipeline.
-        let fetched =
+        let exec =
             self.pipeline
-                .advance(&mut self.exc, &mut self.mem, &mut self.reg, &decode_instr);
+                .advance(&mut self.mem, &mut self.reg, &decode_instr);
 
         // If the status register (SR) was modified, we need to apply the changes before returning
         // control back to the caller.
@@ -254,15 +243,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
             // TODO
         }
 
-        fetched
-    }
-
-    /// Handles the next exception in the exception queue, if one exists.
-    fn handle_exc(&mut self) {
-        // Exceptions are pushed in the back, so pop from the front.
-        if let Some(exc) = self.exc.pop_front() {
-            tracing::error!("Exception: {:?}", exc);
-
+        if let Err(exc) = exec.behavior {
             // Set the Cause and EPC registers.
             self.reg
                 .set_cpr(reg::cpr::CAUSE_IDX, reg::cpr::Cause::from(exc).0);
@@ -272,5 +253,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
             // TODO: [`exc::VECTOR`] is not always the correct vector; there are corner cases.
             *self.reg.pc_mut() = exc::VECTOR;
         }
+
+        exec
     }
 }

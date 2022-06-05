@@ -131,7 +131,7 @@ impl Debugger<'_> {
         loop {
             let exec = step(self);
             let hit_breakpoint =
-                matches!(exec.exc.map(|it| it.code), Some(noctane_cpu::exc::code::BREAKPOINT)) ||
+                matches!(exec.behavior.map_err(|it| it.code).err(), Some(noctane_cpu::exc::code::BREAKPOINT)) ||
                 self.breakpoints.get(&exec.fetched.addr).is_some();
             if hit_breakpoint {
                 println!("BREAK @ {:#010x}", exec.fetched.addr);
@@ -151,6 +151,7 @@ impl Debugger<'_> {
     fn step(&mut self) -> noctane_cpu::instr::Execution {
         let exec = self.cpu.execute_next_instr();
         self.print_fetch(&exec.fetched);
+        self.print_bios_call(&exec);
         self.print_exception(&exec);
 
         exec
@@ -158,6 +159,7 @@ impl Debugger<'_> {
 
     fn step_lightly(&mut self) -> noctane_cpu::instr::Execution {
         let exec = self.cpu.execute_next_instr();
+        self.print_bios_call(&exec);
         self.print_exception(&exec);
 
         exec
@@ -171,8 +173,37 @@ impl Debugger<'_> {
         println!("{:08x}   {}", fetched.addr, fetched.instr.asm());
     }
 
+    fn print_bios_call(&mut self, exec: &noctane_cpu::instr::Execution) {
+        if let Ok(noctane_cpu::instr::Behavior::Calls(target_addr)) | Ok(noctane_cpu::instr::Behavior::Jumps(target_addr)) = exec.behavior {
+            macro_rules! print_table_call {
+                ($table_name:ident $fn_name:ident) => {
+                    {
+                        self.step_silently();
+                        let reg = self.cpu.reg();
+                        let offset = reg.gpr(9) as u8;
+                        if let Some(call) = noctane_util::bios::func::Call::$fn_name(reg, offset) {
+                            println!("{}", call);
+                        } else {
+                            println!(concat!(stringify!($table_name), "_off_{:02x}()"), offset);
+                        }
+                    }
+                };
+            }
+
+            match target_addr {
+                0xa0 => print_table_call!(a0 in_a0_table),
+                0xb0 => print_table_call!(b0 in_b0_table),
+                0xc0 => print_table_call!(c0 in_c0_table),
+                _ => {
+                    // This is consistent with IDA symbol naming.
+                    // println!("sub_{:08X}()", target_addr);
+                }
+            }
+        }
+    }
+
     fn print_exception(&self, exec: &noctane_cpu::instr::Execution) {
-        if let Some(exc) = exec.exc {
+        if let Err(exc) = exec.behavior {
             match exc.code {
                 noctane_cpu::exc::code::BREAKPOINT => {
                     // See RM[A-21].
