@@ -8,3 +8,4 @@ license = "MPL-2.0"
 
 [dependencies]
 noctane-cpu = { path = "../cpu" }
+noctane-proc-macro = { path = "../proc-macro" }

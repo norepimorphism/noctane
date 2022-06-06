@@ -1442,6 +1442,7 @@ name = "noctane-util"
 version = "0.1.0"
 dependencies = [
  "noctane-cpu",
+ "noctane-proc-macro",
 ]
 
 [[package]]

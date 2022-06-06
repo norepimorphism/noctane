@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-#![feature(slice_as_chunks)]
+#![feature(let_else, slice_as_chunks)]
 
 use std::{collections::HashSet, io::Write as _};
 
@@ -33,6 +33,7 @@ impl<'a> Debugger<'a> {
         Self {
             cpu: core.cpu(),
             breakpoints: HashSet::new(),
+            stdout: String::new(),
         }
     }
 }
@@ -40,6 +41,7 @@ impl<'a> Debugger<'a> {
 struct Debugger<'a> {
     cpu: noctane_cpu::Cpu<'a, 'a>,
     breakpoints: HashSet<u32>,
+    stdout: String,
 }
 
 impl Debugger<'_> {
@@ -80,16 +82,22 @@ impl Debugger<'_> {
 
                 Ok(())
             }
+            "pi" => {
+                self.print_i_cache();
+
+                Ok(())
+            }
             "pr" => {
                 self.print_reg();
 
                 Ok(())
             }
-            "px" => {
-                self.print_i_cache();
+            "p!" => {
+                self.print_stdout();
 
                 Ok(())
             }
+
             "s" => {
                 self.step();
 
@@ -137,12 +145,16 @@ impl Debugger<'_> {
         }
     }
 
+    fn print_i_cache(&self) {
+        println!("{}", self.cpu.mem().cache().i);
+    }
+
     fn print_reg(&self) {
         println!("{}", self.cpu.reg());
     }
 
-    fn print_i_cache(&self) {
-        println!("{}", self.cpu.mem().cache().i);
+    fn print_stdout(&self) {
+        println!("{}", self.stdout);
     }
 
     fn step(&mut self) -> noctane_cpu::instr::Executed {
@@ -180,7 +192,7 @@ impl Debugger<'_> {
                         // See RM[A-21].
                         let code = (execed.fetched.op >> 6) & ((1 << 21) - 1);
                         if let Some(call) = noctane_util::bios::func::Call::try_from_break(
-                            self.cpu.reg(),
+                            &mut self.cpu,
                             code,
                         ) {
                             println!("{}", call);
@@ -192,7 +204,7 @@ impl Debugger<'_> {
                         let code = self.cpu.reg().gpr(4);
                         println!(
                             "{}",
-                            noctane_util::bios::func::Call::from_syscall(self.cpu.reg(), code),
+                            noctane_util::bios::func::Call::from_syscall(&self.cpu, code),
                         );
                     }
                     _ => {
@@ -204,9 +216,8 @@ impl Debugger<'_> {
                     ($table_name:ident $fn_name:ident) => {
                         {
                             self.step_silently();
-                            let reg = self.cpu.reg();
-                            let offset = reg.gpr(9) as u8;
-                            if let Some(call) = noctane_util::bios::func::Call::$fn_name(reg, offset) {
+                            let offset = self.cpu.reg().gpr(9) as u8;
+                            if let Some(call) = noctane_util::bios::func::Call::$fn_name(&mut self.cpu, offset) {
                                 println!("{}", call);
                             } else {
                                 println!(concat!(stringify!($table_name), "_off_{:02x}()"), offset);
