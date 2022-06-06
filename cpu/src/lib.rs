@@ -50,6 +50,9 @@
 //
 // [here]: https://cgi.cse.unsw.edu.au/~cs3231/doc/R3000.pdf
 
+// NOTE: The PSX CPU is little-endian. This means that, whenever you write to or read from memory or
+// the I-cache, you must guarantee that the data in question is interpreted as little-endian.
+
 #![feature(
     // [`u32::widening_mul`] is used once in [`instr`].
     bigint_helper_methods,

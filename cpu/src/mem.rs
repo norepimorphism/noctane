@@ -46,15 +46,15 @@ impl Address {
     }
 
     pub(crate) fn index_byte_in_word(&self, word: u32) -> u8 {
-        word.to_be_bytes()[self.byte_idx]
+        word.to_le_bytes()[self.byte_idx]
     }
 
     pub(crate) fn index_byte_in_halfword(&self, halfword: u16) -> u8 {
-        halfword.to_be_bytes()[self.byte_idx & 0b1]
+        halfword.to_le_bytes()[self.byte_idx & 0b1]
     }
 
     pub(crate) fn index_halfword_in_word(&self, word: u32) -> u16 {
-        u16::from_be_bytes(word.to_be_bytes().as_chunks::<2>().0[self.halfword_idx])
+        u16::from_le_bytes(word.to_le_bytes().as_chunks::<2>().0[self.halfword_idx])
     }
 }
 

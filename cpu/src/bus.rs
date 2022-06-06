@@ -160,16 +160,16 @@ impl Bus<'_> {
     }
 
     pub fn read_32(&mut self, addr: Address) -> u32 {
-        self.access(addr, |word| *word, |this, addr| this.io.read_32(addr))
+        self.access(addr, |word| word.to_le(), |this, addr| this.io.read_32(addr))
     }
 
     pub fn write_8(&mut self, addr: Address, value: u8) {
         self.access(
             addr,
             |word| {
-                let mut bytes = word.to_be_bytes();
+                let mut bytes = word.to_le_bytes();
                 bytes[addr.byte_idx] = value;
-                *word = u32::from_be_bytes(bytes);
+                *word = u32::from_le_bytes(bytes);
             },
             |this, addr| this.io.write_8(addr, value),
         )
@@ -179,9 +179,9 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                let mut bytes = word.to_be_bytes();
-                bytes.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
-                *word = u32::from_be_bytes(bytes);
+                let mut bytes = word.to_le_bytes();
+                bytes.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_le_bytes();
+                *word = u32::from_le_bytes(bytes);
             },
             |this, addr| this.io.write_16(addr, value),
         )
@@ -191,7 +191,7 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
-                *word = value;
+                *word = value.to_le();
             },
             |this, addr| this.io.write_32(addr, value),
         )

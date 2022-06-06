@@ -218,6 +218,14 @@ impl Debugger<'_> {
                             self.step_silently();
                             let offset = self.cpu.reg().gpr(9) as u8;
                             if let Some(call) = noctane_util::bios::func::Call::$fn_name(&mut self.cpu, offset) {
+                                if matches!(call.name, "std_out_putchar") {
+                                    let noctane_util::bios::func::ArgumentValue::Char(c) = call.args[0].value else {
+                                        panic!()
+                                    };
+
+                                    self.stdout.push(c);
+                                }
+
                                 println!("{}", call);
                             } else {
                                 println!(concat!(stringify!($table_name), "_off_{:02x}()"), offset);

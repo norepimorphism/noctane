@@ -112,9 +112,7 @@ macro_rules! def_read_fn {
 
 impl Cache {
     def_read_fn!(read_8() -> u8 { |word, addr: mem::Address| addr.index_byte_in_word(word) });
-
     def_read_fn!(read_16() -> u16 { |word, addr: mem::Address| addr.index_halfword_in_word(word) });
-
     def_read_fn!(read_32() -> u32 { |word, _| word });
 
     fn read<T>(
@@ -138,7 +136,7 @@ impl Cache {
 
     pub fn write_16(&mut self, addr: mem::Address, value: u16) {
         self.write_partial(addr.into(), |mut word| {
-            word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_be_bytes();
+            word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_le_bytes();
 
             word
         })
@@ -161,7 +159,7 @@ impl Cache {
             entry.invalidate();
         } else {
             entry.write_partial(addr, |word| {
-                *word = u32::from_be_bytes(map_word(word.to_be_bytes()));
+                *word = u32::from_le_bytes(map_word(word.to_le_bytes()));
             });
         }
     }

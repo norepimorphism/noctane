@@ -68,7 +68,7 @@ impl Entry {
     }
 
     pub(super) fn write(&mut self, addr: Address, value: u32) {
-        self.line[addr.word_idx] = value;
+        self.line[addr.word_idx] = value.to_le();
 
         if !self.test_hit(addr) {
             // We just attempted to write to a cache entry containing data that doesn't belong to
