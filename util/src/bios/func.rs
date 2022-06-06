@@ -47,8 +47,24 @@ pub enum ArgumentValue {
 impl fmt::Display for ArgumentValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Char(it)     => write!(f, "'{}'", it),
-            Self::String(it) => write!(f, "\"{}\"", it),
+            Self::Char(it)     => {
+                write!(f, "'")?;
+                for c in std::ascii::escape_default(*it as u8) {
+                    write!(f, "{}", c as char)?;
+                }
+
+                write!(f, "'")
+            }
+            Self::String(it) => {
+                write!(f, "\"")?;
+                for byte in it.as_bytes() {
+                    for c in std::ascii::escape_default(*byte) {
+                        write!(f, "{}", c as char)?;
+                    }
+                }
+
+                write!(f, "\"")
+            }
             Self::UInt(it)      => write!(f, "{}", format_int!(*it, *it)),
             Self::SInt(it)      => write!(f, "{}", format_int!(*it, it.abs())),
             Self::Address(it)   => write!(f, "{:#08x}", it),
@@ -59,6 +75,20 @@ impl fmt::Display for ArgumentValue {
 impl Call {
     pub fn new(name: &'static str, args: Vec<Argument>) -> Self {
         Self { name, args }
+    }
+
+    fn read_string(cpu: &mut Cpu) -> String {
+        let mut s = String::new();
+        for ptr in cpu.reg().gpr(4).. {
+            let c = cpu.mem_mut().read_8(ptr);
+            if c == b'\0' {
+                break;
+            }
+
+            s.push(c as char);
+        }
+
+        s
     }
 
     pub fn in_a0_table(cpu: &mut Cpu, offset: u8) -> Option<Self> {
@@ -115,7 +145,7 @@ impl Call {
             0x31 => Some(Self::qsort()),
             0x32 => Some(Self::strtod()),
             0x33 => Some(Self::malloc()),
-            0x34 => Some(Self::free()),
+            0x34 => Some(Self::free(cpu.reg().gpr(4))),
             0x35 => Some(Self::lsearch()),
             0x36 => Some(Self::bsearch()),
             0x37 => Some(Self::calloc()),
@@ -125,20 +155,8 @@ impl Call {
             0x3b => Some(Self::std_in_getchar()),
             0x3c => Some(Self::std_out_putchar(cpu.reg().gpr(4) as u8 as char)),
             0x3d => Some(Self::std_in_gets()),
-            0x3e => Some(Self::std_out_puts()),
-            0x3f => {
-                let mut s = String::new();
-                for ptr in cpu.reg().gpr(4).. {
-                    let c = cpu.mem_mut().read_8(ptr);
-                    if c == b'\0' {
-                        break;
-                    }
-
-                    s.push(c as char);
-                }
-
-                Some(Self::printf(s))
-            }
+            0x3e => Some(Self::std_out_puts(Self::read_string(cpu))),
+            0x3f => Some(Self::printf(Self::read_string(cpu))),
             0x40 => Some(Self::system_error_unresolved_exception()),
             0x41 => Some(Self::load_exe_header()),
             0x42 => Some(Self::load_exe_file()),
@@ -236,7 +254,7 @@ impl Call {
         }
     }
 
-    pub fn in_b0_table(cpu: &Cpu, offset: u8) -> Option<Self> {
+    pub fn in_b0_table(cpu: &mut Cpu, offset: u8) -> Option<Self> {
         match offset {
             0x00 => Some(Self::alloc_kernel_memory()),
             0x01 => Some(Self::free_kernel_memory()),
@@ -283,7 +301,7 @@ impl Call {
             0x3c => Some(Self::std_in_getchar()),
             0x3d => Some(Self::std_out_putchar(cpu.reg().gpr(4) as u8 as char)),
             0x3e => Some(Self::std_in_gets()),
-            0x3f => Some(Self::std_out_puts()),
+            0x3f => Some(Self::std_out_puts(Self::read_string(cpu))),
             0x40 => Some(Self::chdir()),
             0x41 => Some(Self::format_device()),
             0x42 => Some(Self::firstfile()),
@@ -380,8 +398,7 @@ macro_rules! get_arg_inner_ty {
     (String) => { String };
     (UInt) => { u32 };
     (SInt) => { i32 };
-    (Object) => { u32 };
-    (String) => { u32 };
+    (Address) => { u32 };
 }
 
 macro_rules! def_fns {
@@ -459,7 +476,7 @@ impl Call {
         qsort                               => qsort(),
         strtod                              => strtod(),
         malloc                              => malloc(),
-        free                                => free(),
+        free                                => free(obj: Address),
         lsearch                             => lsearch(),
         bsearch                             => bsearch(),
         calloc                              => calloc(),
@@ -469,8 +486,8 @@ impl Call {
         std_in_getchar                      => std_in_getchar(),
         std_out_putchar                     => std_out_putchar(c: Char),
         std_in_gets                         => std_in_gets(),
-        std_out_puts                        => std_out_puts(),
-        printf                              => printf(s: String),
+        std_out_puts                        => std_out_puts(s: String),
+        printf                              => printf(fmt: String),
         system_error_unresolved_exception   => SystemErrorUnresolvedException(),
         load_exe_header                     => LoadExeHeader(),
         load_exe_file                       => LoadExeFile(),
