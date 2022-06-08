@@ -38,6 +38,14 @@ pub struct Banks {
     pub bios: noctane_cpu::bus::Bios,
 }
 
+impl Core {
+    pub fn update_io(&mut self) {
+        self.update_timers();
+    }
+
+    fn update_timers(&mut self) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::Core;

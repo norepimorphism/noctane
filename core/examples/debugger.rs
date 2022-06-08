@@ -420,6 +420,9 @@ impl Debugger<'_> {
         exc: &noctane_cpu::Exception,
     ) {
         match exc.code {
+            noctane_cpu::exc::code::INTERRUPT => {
+                println!("!!! INTERRUPT !!!")
+            }
             noctane_cpu::exc::code::BREAKPOINT => {
                 // See RM[A-21].
                 let code = (execed.fetched.op >> 6) & ((1 << 21) - 1);

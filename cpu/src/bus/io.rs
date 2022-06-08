@@ -14,6 +14,7 @@ impl<'a> Io<'a> {
     pub fn new(gpu: &'a mut Gpu) -> Self {
         Self {
             gpu,
+            // TODO: All of this needs to be passed in or it will be reset on each cycle.
             mem_ctrl_1: MemoryControl1::default(),
             mem_ctrl_2: MemoryControl2::default(),
             post: Post::default(),

@@ -253,6 +253,11 @@ impl Pipeline {
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Executed {
+        let sr = reg::cpr::Status(reg.cpr(reg::cpr::STATUS_IDX));
+        if sr.ie_c() {
+            self.process_interrupts(reg);
+        }
+
         if let Some(jump_info) = self.jump_info.take() {
             let exec = self.execute_fetched(
                 jump_info.delay_slot,
@@ -271,6 +276,26 @@ impl Pipeline {
                 reg,
                 decode_instr,
             )
+        }
+    }
+
+    fn process_interrupts(&mut self, reg: &mut reg::File) {
+        for idx in 0..8 {
+            self.process_interrupt(reg, idx);
+        }
+    }
+
+    fn process_interrupt(&mut self, reg: &mut reg::File, index: usize) {
+        if reg.is_interrupt_set(index) {
+            reg.clear_interrupt(index);
+
+            let mut cause = reg::cpr::Cause(reg.cpr(reg::cpr::CAUSE_IDX));
+            cause.set_exc_code(exc::code::INTERRUPT);
+
+            // Set the Cause and EPC registers.
+            // TODO: This is duplicated; turn it into a function.
+            reg.set_cpr(reg::cpr::CAUSE_IDX, cause.0);
+            reg.set_cpr(reg::cpr::EPC_IDX, reg.pc());
         }
     }
 

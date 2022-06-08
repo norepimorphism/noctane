@@ -143,7 +143,7 @@ impl File {
     /// last called.
     ///
     /// This method is useful for updating the CPU in response to SR modifications.
-    pub fn altered_sr(&mut self) -> Option<u32> {
+    pub(crate) fn altered_sr(&mut self) -> Option<u32> {
         if self.sr_is_dirty {
             // Clear this flag so that this method returns `None` if it is called again without
             // modifying the SR.
@@ -153,6 +153,29 @@ impl File {
         } else {
             None
         }
+    }
+
+    /// Determines if the interrupt at the given index is set.
+    pub fn is_interrupt_set(&self, index: usize) -> bool {
+        let cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
+
+        ((cause.ip() >> index) & 1) == 1
+    }
+
+    /// Sets the interrupt at the given index.
+    pub fn set_interrupt(&mut self, index: usize) {
+        let mut cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
+        let ip = cause.ip() | (1 << index);
+        cause.set_ip(ip);
+        self.set_cpr(cpr::CAUSE_IDX, cause.0);
+    }
+
+    /// Clears the interrupt at the given index.
+    pub fn clear_interrupt(&mut self, index: usize) {
+        let mut cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
+        let ip = cause.ip() & !(1 << index);
+        cause.set_ip(ip);
+        self.set_cpr(cpr::CAUSE_IDX, cause.0);
     }
 }
 
