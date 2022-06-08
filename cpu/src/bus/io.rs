@@ -5,9 +5,32 @@ use noctane_proc_macro::gen_cpu_bus_io;
 
 use crate::mem::Address;
 
+pub use mem_ctrl_1::Control as MemoryControl1;
+pub use mem_ctrl_2::Control as MemoryControl2;
+pub use post::Post;
+pub use timers::{Timer, Timers};
+
+impl<'a> Io<'a> {
+    pub fn new(gpu: &'a mut Gpu) -> Self {
+        Self {
+            gpu,
+            mem_ctrl_1: MemoryControl1::default(),
+            mem_ctrl_2: MemoryControl2::default(),
+            post: Post::default(),
+            timers: Timers::default(),
+        }
+    }
+}
+
 /// External components accessible to the CPU via I/O registers.
+#[derive(Debug)]
 pub struct Io<'a> {
+    /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
+    pub mem_ctrl_1: MemoryControl1,
+    pub mem_ctrl_2: MemoryControl2,
+    pub post: Post,
+    pub timers: Timers,
 }
 
 impl Io<'_> {
@@ -104,15 +127,11 @@ macro_rules! def_write_without_addr {
 // This block defines `read_8`, `read_16`, `read_32`, `write_8`, `write_16`, and `write_32`.
 impl Io<'_> {
     def_read_with_addr!(read_8() -> u8);
-
     def_read_with_addr!(read_16() -> u16);
-
     def_read_without_addr!(read_32() -> u32);
 
     def_write_with_addr!(write_8(u8));
-
     def_write_with_addr!(write_16(u16));
-
     def_write_without_addr!(write_32(u32));
 }
 
@@ -151,50 +170,100 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: EXP_1_BASE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| {
+                    io.mem_ctrl_1.exp_1_base
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.exp_1_base = value;
+                },
             },
             Register {
                 name: EXP_2_BASE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| {
+                    io.mem_ctrl_1.exp_2_base
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.exp_2_base = value;
+                },
             },
             Register {
-                name: EXP_1_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: EXP_1_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.exp_1_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.exp_1_size = value;
+                },
             },
             Register {
-                name: EXP_3_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: EXP_3_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.exp_3_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.exp_3_size = value;
+                },
             },
             Register {
-                name: BIOS_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: BIOS_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.bios_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.bios_size = value;
+                },
             },
             Register {
-                name: SPU_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: SPU_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.spu_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.spu_size = value;
+                },
             },
             Register {
-                name: CDROM_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: CDROM_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.cdrom_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.cdrom_size = value;
+                },
             },
             Register {
-                name: EXP_2_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: EXP_2_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.exp_2_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.exp_2_size = value;
+                },
             },
             Register {
-                name: COMMON_DELAY,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: COMMON_SIZE,
+                read_32: |_, io| {
+                    io.mem_ctrl_1.common_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_1.common_size = value;
+                },
             },
         ],
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Control {
+                pub exp_1_base: u32,
+                pub exp_2_base: u32,
+                pub exp_1_size: u32,
+                pub exp_2_size: u32,
+                pub exp_3_size: u32,
+                pub bios_size: u32,
+                pub spu_size: u32,
+                pub cdrom_size: u32,
+                pub common_size: u32,
+            }
+        },
     },
     // Peripheral I/O Ports.
     Lut {
@@ -203,60 +272,61 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: JOY_DATA,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: JOY_STAT,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: JOY_MODE,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: JOY_CTRL,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: JOY_BAUD,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: SIO_DATA,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SIO_STAT,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SIO_MODE,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: SIO_CTRL,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: SIO_MISC,
-                read_16: |this, io, addr| 0,
+                read_16: |_, io, addr| 0,
                 write_16: |this, i, addr, value| {},
             },
             Register {
                 name: SIO_BAUD,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
         ],
+        module: {},
     },
     // Memory Control 2.
     Lut {
@@ -265,10 +335,20 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: RAM_SIZE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| {
+                    io.mem_ctrl_2.ram_size
+                },
+                write_32: |_, io, value| {
+                    io.mem_ctrl_2.ram_size = value;
+                },
             },
         ],
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Control {
+                pub ram_size: u32,
+            }
+        },
     },
     // Interrupt Control.
     Lut {
@@ -277,15 +357,16 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: STAT,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MASK,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
         ],
+        module: {},
     },
     // DMA.
     Lut {
@@ -294,165 +375,166 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: MDECin_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECin_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECin_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECin_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECout_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECout_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECout_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: MDECout_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: GPU_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: GPU_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: GPU_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: GPU_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CDROM_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CDROM_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CDROM_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CDROM_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SPU_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SPU_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SPU_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: SPU_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: PIO_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: PIO_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: PIO_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: PIO_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: OTC_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: OTC_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: OTC_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: OTC_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: DPCR,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: DICR,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: UNK_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: UNK_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
         ],
+        module: {},
     },
     // Timers (Root Counters).
     Lut {
@@ -460,66 +542,104 @@ gen_cpu_bus_io!(
         base_addr: 0x0100,
         regs: [
             Register {
-                name: DOTCLOCK_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: DOTCLOCK_COUNTER,
+                read_32: |_, io| {
+                    io.timers.dotclock.counter
+                },
+                write_32: |_, io, value| {
+                    io.timers.dotclock.counter = value;
+                },
             },
             Register {
-                name: DOTCLOCK_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: DOTCLOCK_MODE,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
-                name: DOTCLOCK_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: DOTCLOCK_TARGET,
+                read_32: |_, io| {
+                    io.timers.dotclock.target
+                },
+                write_32: |_, io, value| {
+                    io.timers.dotclock.target = value;
+                },
             },
             Register {
                 name: DOTCLOCK_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, _| 0,
+                write_32: |_, _, _| {},
             },
             Register {
-                name: H_RETRACE_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: H_RETRACE_COUNTER,
+                read_32: |_, io| {
+                    io.timers.h_retrace.counter
+                },
+                write_32: |_, io, value| {
+                    io.timers.h_retrace.counter = value;
+                },
             },
             Register {
-                name: H_RETRACE_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: H_RETRACE_MODE,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
-                name: H_RETRACE_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: H_RETRACE_TARGET,
+                read_32: |_, io| {
+                    io.timers.h_retrace.target
+                },
+                write_32: |_, io, value| {
+                    io.timers.h_retrace.target = value;
+                },
             },
             Register {
                 name: H_RETRACE_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, _| 0,
+                write_32: |_, _, _| {},
             },
             Register {
-                name: SYS_CLOCK_0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: SYS_CLOCK_COUNTER,
+                read_32: |_, io| {
+                    io.timers.sys_clock.counter
+                },
+                write_32: |_, io, value| {
+                    io.timers.sys_clock.counter = value;
+                },
             },
             Register {
-                name: SYS_CLOCK_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: SYS_CLOCK_MODE,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
-                name: SYS_CLOCK_2,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                name: SYS_CLOCK_TARGET,
+                read_32: |_, io| {
+                    io.timers.sys_clock.target
+                },
+                write_32: |_, io, value| {
+                    io.timers.sys_clock.target = value;
+                },
             },
             Register {
                 name: SYS_CLOCK_3,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, _| 0,
+                write_32: |_, _, _| {},
             },
         ],
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Timers {
+                pub dotclock: Timer,
+                pub h_retrace: Timer,
+                pub sys_clock: Timer,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Timer {
+                pub counter: u32,
+                pub target: u32,
+            }
+        },
     },
     // CD-ROM.
     Lut {
@@ -528,25 +648,26 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: INDEX,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: 1,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: 2,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: 3,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
         ],
+        module: {},
     },
     // GPU.
     Lut {
@@ -555,15 +676,16 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: 0,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: 1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
         ],
+        module: {},
     },
     // MDEC.
     Lut {
@@ -572,15 +694,16 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: CHAN,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CTRL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
         ],
+        module: {},
     },
     // SPU Voice.
     Lut {
@@ -589,6 +712,7 @@ gen_cpu_bus_io!(
         regs: [
             // TODO
         ],
+        module: {},
     },
     // SPU Control.
     Lut {
@@ -597,105 +721,106 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: MAIN_VOL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: REVERB_VOL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: KEY_ON,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: KEY_OFF,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CHAN_FM,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CHAN_NOISE,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CHAN_REVERB,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CHAN_STAT,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: UNK_0,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: REVERB_WRAM_BASE,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: IRQ_ADDR,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: DATA_TXFR_ADDR,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: DATA_TXFR_FIFO,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: CTRL,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: DATA_TXFR_CTRL,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: STAT,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: CD_VOL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: EXT_VOL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: CUR_MAIN_VOL,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
             Register {
                 name: UNK_1,
-                read_32: |this, io| 0,
-                write_32: |this, io, value| {},
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
             },
         ],
+        module: {},
     },
     // SPU Reverb Configuration.
     // SPU Internal.
@@ -706,30 +831,31 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: STAT,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: UNK_0,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: DATA,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: UNK_1,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: UNK_2,
-                read_16: |this, io, addr| 0,
-                write_16: |this, io, addr, value| {},
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
         ],
+        module: {},
     },
     // Dual Serial Port.
     Lut {
@@ -738,31 +864,32 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: MODE_0,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: STAT_0,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: 3,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: FIFO_0,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             Register {
                 name: 4,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {},
             },
             // TODO
         ],
+        module: {},
     },
     Lut {
         name: post,
@@ -770,21 +897,34 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: BOOT_MODE,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
-                name: 7SEG,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {
-                    tracing::info!("POST: {:x}", value);
+                name: SEVEN_SEG,
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {
+                    io.post.seven_seg.push(value as u8);
                 },
             },
             Register {
                 name: LED,
-                read_8: |this, io, addr| 0,
-                write_8: |this, io, addr, value| {},
+                read_8: |_, io, addr| 0,
+                write_8: |_, io, addr, value| {
+                    io.post.led.push(value as u8);
+                },
             },
         ],
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Post {
+                /// A 7-segment display indicating the POST status.
+                pub seven_seg: Vec<u8>,
+                /// An LED indicating the POST status.
+                pub led: Vec<u8>,
+            }
+        },
     }
 );

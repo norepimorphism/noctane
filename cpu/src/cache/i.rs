@@ -111,9 +111,19 @@ macro_rules! def_read_fn {
 }
 
 impl Cache {
-    def_read_fn!(read_8() -> u8 { |word, addr: mem::Address| addr.index_byte_in_word(word) });
-    def_read_fn!(read_16() -> u16 { |word, addr: mem::Address| addr.index_halfword_in_word(word) });
-    def_read_fn!(read_32() -> u32 { |word, _| word });
+    // In each of the following cases, as the data contained within `word` is little-endian, we
+    // should use [`u32::to_le`] to convert to native-endian first.
+    def_read_fn!(
+        read_8() -> u8 {
+            |word: u32, addr: mem::Address| addr.index_byte_in_word(word.to_le())
+        }
+    );
+    def_read_fn!(
+        read_16() -> u16 {
+            |word: u32, addr: mem::Address| addr.index_halfword_in_word(word.to_le())
+        }
+    );
+    def_read_fn!(read_32() -> u32 { |word: u32, _| word.to_le() });
 
     fn read<T>(
         &mut self,
@@ -125,6 +135,9 @@ impl Cache {
 
         extract(entry.read(addr, fetch_line))
     }
+
+    // Contrary to reading, we don't need to do any endianness conversions here as the data is
+    // already little-endian, and we can operate directly on that.
 
     pub fn write_8(&mut self, addr: mem::Address, value: u8) {
         self.write_partial(addr.into(), |mut word| {
@@ -170,6 +183,9 @@ impl Cache {
         entry.write(addr, value);
 
         if self.is_isolated {
+            // I don't know why, but apparently this is necessary for cache flushing to work. I
+            // thought only isolated partial writes could invalidate a line (?). But, Sony's
+            // cache-flushing code uses whole-word writes, so I guess this is necessary.
             entry.invalidate();
         }
     }

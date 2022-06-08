@@ -9,6 +9,17 @@
 //! [`cache`]: crate::cache
 //! [`bus`]: crate::bus
 
+// Because the PSX CPU is little-endian, as described in the module documentation, if the host CPU
+// is big-endian, then:
+//   - when we write to memory, we must swap the bytes first; and
+//   - when we read from memory, we must swap the bytes again.
+//
+// This is accomplished using Rust's [`u32::to_le`], [`u32::to_le_bytes`], and
+// [`u32::from_le_bytes`] methods.
+//
+// As this notice applies to all memory, it is located here in the [`mem`] module, but shall, by
+// extension, apply to [`cache::i`], [`bus`], and [`bus::io`].
+
 use crate::{bus::Bus, Cache};
 
 impl From<usize> for Address {
@@ -44,6 +55,9 @@ impl Address {
 
         self
     }
+
+    // The following three methods work in little-endian as, even though we are not working directly
+    // with memory here, byte and halfword indices require that data is layed out as such.
 
     pub(crate) fn index_byte_in_word(&self, word: u32) -> u8 {
         word.to_le_bytes()[self.byte_idx]

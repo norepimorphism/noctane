@@ -14,7 +14,7 @@ macro_rules! def_bank {
     ($name:ident, $size:literal @ $addr:literal) => {
         impl Default for $name {
             fn default() -> Self {
-                // Use 'screaming 0xaa's so that it's more obvious when we access uninitialized
+                // Use 'screaming `0xaa`'s so that it's more obvious when we access uninitialized
                 // memory.
                 Self(box [0xaa; Self::LEN])
             }
@@ -143,35 +143,57 @@ impl Bus<'_> {
         .unwrap_or(T::default())
     }
 
+    // In each of the three following cases for reads, as the data contained within `word` is
+    // little-endian, we should use [`u32::to_le`] to convert to native-endian first.
+
     pub fn read_8(&mut self, addr: Address) -> u8 {
         self.access(
             addr,
-            |word| addr.index_byte_in_word(*word),
-            |this, addr| this.io.read_8(addr),
+            |word| {
+                addr.index_byte_in_word(word.to_le())
+            },
+            |this, addr| {
+                this.io.read_8(addr)
+            },
         )
     }
 
     pub fn read_16(&mut self, addr: Address) -> u16 {
         self.access(
             addr,
-            |word| addr.index_halfword_in_word(*word),
-            |this, addr| this.io.read_16(addr),
+            |word| {
+                addr.index_halfword_in_word(word.to_le())
+            },
+            |this, addr| {
+                this.io.read_16(addr)
+            },
         )
     }
 
     pub fn read_32(&mut self, addr: Address) -> u32 {
-        self.access(addr, |word| word.to_le(), |this, addr| this.io.read_32(addr))
+        self.access(
+            addr,
+            |word| {
+                word.to_le()
+            },
+            |this, addr| {
+                this.io.read_32(addr)
+            },
+        )
     }
 
     pub fn write_8(&mut self, addr: Address, value: u8) {
         self.access(
             addr,
             |word| {
+                // Be sure to use little-endian here!
                 let mut bytes = word.to_le_bytes();
                 bytes[addr.byte_idx] = value;
                 *word = u32::from_le_bytes(bytes);
             },
-            |this, addr| this.io.write_8(addr, value),
+            |this, addr| {
+                this.io.write_8(addr, value)
+            },
         )
     }
 
@@ -179,11 +201,14 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
+                // Be sure to use little-endian here!
                 let mut bytes = word.to_le_bytes();
                 bytes.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_le_bytes();
                 *word = u32::from_le_bytes(bytes);
             },
-            |this, addr| this.io.write_16(addr, value),
+            |this, addr| {
+                this.io.write_16(addr, value)
+            },
         )
     }
 
@@ -191,9 +216,13 @@ impl Bus<'_> {
         self.access(
             addr,
             |word| {
+                // `word` is little-endian but `value` may not be, so must ensure they are of the
+                // same endianness.
                 *word = value.to_le();
             },
-            |this, addr| this.io.write_32(addr, value),
+            |this, addr| {
+                this.io.write_32(addr, value)
+            },
         )
     }
 

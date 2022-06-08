@@ -34,7 +34,9 @@ impl fmt::Display for Entry {
 
         write!(f, "({:05x})", self.tag)?;
         for word in self.line {
-            write!(f, " {:08x}", word)?;
+            // The words contained within this line have already been byte-swapped on big-endian
+            // hosts, so we need to swap the bytes again such that they are native-endian.
+            write!(f, " {:08x}", word.to_le())?;
         }
 
         Ok(())
@@ -56,7 +58,13 @@ impl Entry {
 
             // Uh oh! We're not up-to-date with the CPU bus. Accordingly, we will refresh ourselves
             // by calling `fetch_line`.
-            let line = fetch_line(mem::Address::from(addr.working & !0b1111));
+            // Note: For this to be correct, `fetch_line` must return native-endian words; that is,
+            // on big-endian hosts, they have not yet been byte-swapped.
+            let mut line = fetch_line(mem::Address::from(addr.working & !0b1111));
+            // Now, we byte-swap `line`.
+            for word in line.iter_mut() {
+                *word = word.to_le();
+            }
             self.line.copy_from_slice(&line);
 
             // We now contain a valid copy of the data pointed to by `addr`.

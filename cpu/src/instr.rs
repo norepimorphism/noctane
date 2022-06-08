@@ -479,11 +479,6 @@ macro_rules! def_instr_and_op_kind {
                 fn calc_branch_target(&self, value: u16) -> u32 {
                     let base = self.reg.pc();
                     let offset = sign_extend_16(value << 2);
-                    tracing::trace!(
-                        "Calc. branch target (base={:#010x}, offset={:#010x})",
-                        base,
-                        offset,
-                    );
 
                     base.wrapping_add(offset)
                 }
@@ -521,24 +516,7 @@ macro_rules! def_instr_and_op_kind {
             }
 
             fn calc_vaddr(base: u32, offset: u16) -> u32 {
-                let offset = sign_extend_16(offset);
-                tracing::trace!(
-                    "Calc. virtual address (base={:#010x}, offset={:#010x})",
-                    base,
-                    offset,
-                );
-
-                base.wrapping_add(offset)
-            }
-
-            #[inline(always)]
-            fn log_enter_function(target_addr: u32, ret_addr: u32, sp: u32) {
-                tracing::debug!(
-                    "Entering function `sub_{:08X}` (ra={:#010x}, sp={:#010x})",
-                    target_addr,
-                    ret_addr,
-                    sp,
-                );
+                base.wrapping_add(sign_extend_16(offset))
             }
         }
 
@@ -875,10 +853,7 @@ def_instr_and_op_kind!(
         asm: ["jal" *()],
         fn: |ctx: Context<j::State>| {
             let target_addr = ctx.calc_jump_target(ctx.opx.target);
-            let ret_addr = ctx.calc_ret_addr();
-
-            ctx.reg.set_gpr(31, ret_addr);
-            log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
+            ctx.reg.set_gpr(31, ctx.calc_ret_addr());
 
             PcBehavior::calls(target_addr)
         },
@@ -889,10 +864,7 @@ def_instr_and_op_kind!(
         asm: ["jalr" %(rd), %(rs)],
         fn: |ctx: Context<r::State>| {
             let target_addr = ctx.opx.rs.gpr_value;
-            let ret_addr = ctx.calc_ret_addr();
-
-            ctx.reg.set_gpr(31, ret_addr);
-            log_enter_function(target_addr, ret_addr, ctx.reg.gpr(29));
+            ctx.reg.set_gpr(31, ctx.calc_ret_addr());
 
             PcBehavior::calls(target_addr)
         },
@@ -905,8 +877,6 @@ def_instr_and_op_kind!(
             let target_addr = ctx.opx.rs.gpr_value;
 
             if ctx.opx.rs.index == 31 {
-                tracing::debug!("Leaving function");
-
                 PcBehavior::returns(target_addr)
             } else {
                 PcBehavior::jumps_without_return(target_addr)

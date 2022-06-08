@@ -17,8 +17,12 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
     let mut reg_count: usize = 0;
 
     for lut_strukt in lut_strukts.0 {
-        let lut_name = lut_strukt.name;
+        let mod_name = lut_strukt.mod_name;
         let lut_base_addr = lut_strukt.base_addr;
+        let mod_stmts = lut_strukt.mod_stmts
+            .iter()
+            .map(|it| quote! { #it })
+            .collect::<TokenStream2>();
         let mut lut_entries = TokenStream2::new();
 
         for reg_strukt in lut_strukt.regs {
@@ -62,7 +66,7 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
         }
 
         lut_mods.extend(quote! {
-            mod #lut_name {
+            pub mod #mod_name {
                 /// The base address, relative to the start of the I/O region, of the group of I/O
                 /// registers represented by [`LUT`].
                 pub(super) const BASE_ADDR: usize = #lut_base_addr;
@@ -70,6 +74,8 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
                 /// A lookup table (LUT) of [`LutEntry`]s, indexed by an address relative to the
                 /// start of the I/O region.
                 pub(super) static LUT: &[super::LutEntry] = &[#lut_entries];
+
+                #mod_stmts
             }
         });
     }
@@ -94,6 +100,7 @@ mod cpu {
                 Expr,
                 ExprStruct,
                 Member,
+                Stmt,
                 Token,
             };
 
@@ -128,6 +135,9 @@ mod cpu {
                     let regs_field = fields
                         .nth(0)
                         .ok_or_else(|| input.error("expected 'regs' field"))?;
+                    let mod_field = fields
+                        .nth(0)
+                        .ok_or_else(|| input.error("expected 'mod' field"))?;
                     if fields.next().is_some() {
                         input
                             .span()
@@ -135,7 +145,7 @@ mod cpu {
                             .warning("found extraneous fields");
                     }
 
-                    let name = name_field.expr;
+                    let mod_name = name_field.expr;
                     let base_addr = base_field.expr;
 
                     let Expr::Array(regs_array) = regs_field.expr else {
@@ -162,60 +172,66 @@ mod cpu {
                                 .ok_or_else(|| input.error("expected 'name' field"))?;
                             let name = name_field.expr;
 
-                            match ident.to_string().as_str() {
-                                "Register" => {
-                                    let read_field = fields
-                                        .nth(0)
-                                        .ok_or_else(|| input.error("expected 'read_*' field"))?;
-                                    let write_field = fields
-                                        .nth(0)
-                                        .ok_or_else(|| input.error("expected 'write_*' field"))?;
-                                    if fields.next().is_some() {
-                                        input
-                                            .span()
-                                            .unwrap()
-                                            .warning("found extraneous fields");
-                                    }
-
-                                    let read_kind = AccessKind::try_from_read(read_field.member)
-                                        .ok_or_else(|| {
-                                            input.error("failed to parse 'read' identifier")
-                                        })?;
-                                    let read_expr = read_field.expr;
-                                    let read = ReadFn {
-                                        kind: read_kind,
-                                        expr: quote!(#read_expr),
-                                    };
-
-                                    let write_kind = AccessKind::try_from_write(write_field.member)
-                                        .ok_or_else(|| {
-                                            input.error("failed to parse 'write' identifier")
-                                        })?;
-                                    let write_expr = write_field.expr;
-                                    let write = WriteFn {
-                                        kind: write_kind,
-                                        expr: quote!(#write_expr),
-                                    };
-
-                                    Ok(RegStruct { name, read, write })
-                                }
-                                _ => Err(input.error("expected 'Register' struct")),
+                            if ident != "Register" {
+                                return Err(input.error("expected 'Register' struct"));
                             }
+                            let read_field = fields
+                                .nth(0)
+                                .ok_or_else(|| input.error("expected 'read_*' field"))?;
+                            let write_field = fields
+                                .nth(0)
+                                .ok_or_else(|| input.error("expected 'write_*' field"))?;
+                            if fields.next().is_some() {
+                                input
+                                    .span()
+                                    .unwrap()
+                                    .warning("found extraneous fields");
+                            }
+
+                            let read_kind = AccessKind::try_from_read(read_field.member)
+                                .ok_or_else(|| {
+                                    input.error("failed to parse 'read' identifier")
+                                })?;
+                            let read_expr = read_field.expr;
+                            let read = ReadFn {
+                                kind: read_kind,
+                                expr: quote!(#read_expr),
+                            };
+
+                            let write_kind = AccessKind::try_from_write(write_field.member)
+                                .ok_or_else(|| {
+                                    input.error("failed to parse 'write' identifier")
+                                })?;
+                            let write_expr = write_field.expr;
+                            let write = WriteFn {
+                                kind: write_kind,
+                                expr: quote!(#write_expr),
+                            };
+
+                            Ok(RegStruct { name, read, write })
                         })
                         .collect::<syn::Result<Vec<RegStruct>>>()?;
 
+                    let Expr::Block(mod_expr) = mod_field.expr else {
+                        return Err(input.error("'module' should be a block"));
+                    };
+
+                    let mod_stmts = mod_expr.block.stmts;
+
                     Ok(Self {
-                        name,
+                        mod_name,
                         base_addr,
                         regs,
+                        mod_stmts,
                     })
                 }
             }
 
             pub struct LutStruct {
-                pub name: Expr,
+                pub mod_name: Expr,
                 pub base_addr: Expr,
                 pub regs: Vec<RegStruct>,
+                pub mod_stmts: Vec<Stmt>,
             }
 
             pub struct RegStruct {
@@ -233,9 +249,7 @@ mod cpu {
             macro_rules! def_try_access_kind_from_member {
                 ($fn_name:ident $name:ident $name_8:ident $name_16:ident $name_32:ident) => {
                     fn $fn_name(member: Member) -> Option<Self> {
-                        let Member::Named(ident) = member else {
-                                                                                        return None;
-                                                                                    };
+                        let Member::Named(ident) = member else { return None };
 
                         match ident.to_string().as_str() {
                             stringify!($name_8) => Some(Self::_8),
@@ -261,7 +275,6 @@ mod cpu {
 
             impl AccessKind {
                 def_try_access_kind_from_member!(try_from_read read read_8 read_16 read_32);
-
                 def_try_access_kind_from_member!(try_from_write write write_8 write_16 write_32);
             }
 
@@ -282,6 +295,9 @@ mod cpu {
                 }
             }
 
+            // Recall that the PSX CPU is litte-endian. The following implementations of
+            // `gen_access_fns` must respect that.
+
             pub struct ReadFn {
                 pub kind: AccessKind,
                 pub expr: TokenStream2,
@@ -295,7 +311,7 @@ mod cpu {
                                 _8: self.expr,
                                 _16: quote! {
                                     |this, io, addr| {
-                                        u16::from_be_bytes([
+                                        u16::from_le_bytes([
                                             (this.read_8)(this, io, addr),
                                             (this.read_8)(this, io, addr.map_working(|it| it + 1)),
                                         ])
@@ -303,7 +319,7 @@ mod cpu {
                                 },
                                 _32: quote! {
                                     |this, io| {
-                                        u32::from_be_bytes([
+                                        u32::from_le_bytes([
                                             (this.read_8)(this, io, Address::from(0usize)),
                                             (this.read_8)(this, io, Address::from(1usize)),
                                             (this.read_8)(this, io, Address::from(2usize)),
@@ -317,12 +333,16 @@ mod cpu {
                             AccessFns {
                                 _8: quote! {
                                     |this, io, addr| {
-                                        addr.index_byte_in_halfword((this.read_16)(this, io, addr))
+                                        addr.index_byte_in_halfword(
+                                            (this.read_16)(this, io, addr).to_le()
+                                        )
                                     }
                                 },
                                 _16: self.expr,
                                 _32: quote! {
                                     |this, io| {
+                                        // We can use big-endian in these two statements as they are
+                                        // eventually interpreted as little-endian.
                                         let [a, b] = (this.read_16)(
                                             this,
                                             io,
@@ -336,7 +356,7 @@ mod cpu {
                                         )
                                         .to_be_bytes();
 
-                                        u32::from_be_bytes([a, b, c, d])
+                                        u32::from_le_bytes([a, b, c, d])
                                     }
                                 },
                             }
@@ -345,12 +365,14 @@ mod cpu {
                             AccessFns {
                                 _8: quote! {
                                     |this, io, addr| {
-                                        addr.index_byte_in_word((this.read_32)(this, io))
+                                        addr.index_byte_in_word((this.read_32)(this, io).to_le())
                                     }
                                 },
                                 _16: quote! {
                                     |this, io, addr| {
-                                        addr.index_halfword_in_word((this.read_32)(this, io))
+                                        addr.index_halfword_in_word(
+                                            (this.read_32)(this, io).to_le()
+                                        )
                                     }
                                 },
                                 _32: self.expr,
@@ -373,14 +395,14 @@ mod cpu {
                                 _8: self.expr,
                                 _16: quote! {
                                     |this, io, addr, value| {
-                                        let [hi, lo] = value.to_be_bytes();
-                                        (this.write_8)(this, io, addr, hi);
-                                        (this.write_8)(this, io, addr.map_working(|it| it + 1), lo);
+                                        let [lo, hi] = value.to_le_bytes();
+                                        (this.write_8)(this, io, addr, lo);
+                                        (this.write_8)(this, io, addr.map_working(|it| it + 1), hi);
                                     }
                                 },
                                 _32: quote! {
                                     |this, io, value| {
-                                        let [a, b, c, d] = value.to_be_bytes();
+                                        let [a, b, c, d] = value.to_le_bytes();
                                         (this.write_8)(this, io, Address::from(0), a);
                                         (this.write_8)(this, io, Address::from(1), b);
                                         (this.write_8)(this, io, Address::from(2), c);
@@ -393,9 +415,9 @@ mod cpu {
                             AccessFns {
                                 _8: quote! {
                                     |this, io, addr, value| {
-                                        let mut bytes = (this.read_16)(this, io, addr).to_be_bytes();
+                                        let mut bytes = (this.read_16)(this, io, addr).to_le_bytes();
                                         bytes[addr.byte_idx & 0b1] = value;
-                                        (this.write_16)(this, io, addr, u16::from_be_bytes(bytes));
+                                        (this.write_16)(this, io, addr, u16::from_le_bytes(bytes));
                                     }
                                 },
                                 _16: self.expr,
@@ -410,7 +432,7 @@ mod cpu {
                                         (this.write_16)(
                                             this,
                                             io,
-                                            Address::from(1),
+                                            Address::from(2),
                                             Address::from(2).index_halfword_in_word(value),
                                         );
                                     }
@@ -421,20 +443,20 @@ mod cpu {
                             AccessFns {
                                 _8: quote! {
                                     |this, io, addr, value| {
-                                        let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                        let mut bytes = (this.read_32)(this, io).to_le_bytes();
                                         bytes[addr.byte_idx] = value;
-                                        (this.write_32)(this, io, u32::from_be_bytes(bytes));
+                                        (this.write_32)(this, io, u32::from_le_bytes(bytes));
                                     }
                                 },
                                 _16: quote! {
                                     |this, io, addr, value| {
-                                        let mut bytes = (this.read_32)(this, io).to_be_bytes();
+                                        let mut bytes = (this.read_32)(this, io).to_le_bytes();
                                         bytes
                                             .as_chunks_mut::<2>()
                                             .0
-                                            [addr.halfword_idx] = value.to_be_bytes();
+                                            [addr.halfword_idx] = value.to_le_bytes();
 
-                                        (this.write_32)(this, io, u32::from_be_bytes(bytes));
+                                        (this.write_32)(this, io, u32::from_le_bytes(bytes));
                                     }
                                 },
                                 _32: self.expr,

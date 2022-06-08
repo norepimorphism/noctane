@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use noctane_util::format_int;
+
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -29,16 +31,6 @@ pub enum Operand {
     SInt(i32),
     Text(String),
     UInt(u32),
-}
-
-macro_rules! format_int {
-    ($value:expr, $abs_value:expr) => {
-        if $abs_value < 0x10 {
-            format!("{}", $value)
-        } else {
-            format!("{:#x}", $value)
-        }
-    };
 }
 
 impl fmt::Display for Operand {
