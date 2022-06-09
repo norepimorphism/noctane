@@ -29,7 +29,7 @@ use crate::{exc, reg, Memory};
 pub mod i {
     //! Immediate-type (I-type) instructions.
 
-    use super::{opn::Gpr, reg};
+    use super::{opn::Register, reg};
 
     /// An I-type instruction, where 'I' stands for 'immediate'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,8 +46,8 @@ pub mod i {
         /// Creates a new `State`.
         pub fn read(reg: &reg::File, instr: Instr) -> Self {
             Self {
-                rs: Gpr::read(reg, instr.rs.into()),
-                rt: Gpr::read(reg, instr.rt.into()),
+                rs: Register::read(reg, instr.rs.into()),
+                rt: Register::read(reg, instr.rt.into()),
                 imm: instr.imm,
             }
         }
@@ -57,9 +57,9 @@ pub mod i {
     #[derive(Debug)]
     pub struct State {
         /// The register described by the *rs* operand.
-        pub rs: Gpr,
+        pub rs: Register,
         /// The register described by the *rt* operand.
-        pub rt: Gpr,
+        pub rt: Register,
         /// The *imm* operand.
         pub imm: u16,
     }
@@ -101,7 +101,7 @@ pub mod j {
 pub mod r {
     //! Register-type (R-type) instructions.
 
-    use super::{opn::Gpr, reg};
+    use super::{opn::Register, reg};
 
     /// An R-type instruction, where 'R' stands for 'register'.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -124,9 +124,9 @@ pub mod r {
         /// Creates a new `State`.
         pub fn read(reg: &reg::File, instr: Instr) -> Self {
             Self {
-                rs: Gpr::read(reg, instr.rs.into()),
-                rt: Gpr::read(reg, instr.rt.into()),
-                rd: Gpr::read(reg, instr.rd.into()),
+                rs: Register::read(reg, instr.rs.into()),
+                rt: Register::read(reg, instr.rt.into()),
+                rd: Register::read(reg, instr.rd.into()),
                 shamt: instr.shamt,
                 funct: instr.funct,
             }
@@ -137,13 +137,13 @@ pub mod r {
     #[derive(Debug)]
     pub struct State {
         /// The register described by the *rs* operand.
-        pub rs: Gpr,
+        pub rs: Register,
         /// The register described by the *rt* operand.
-        pub rt: Gpr,
+        pub rt: Register,
         /// The register described by the *rd* operand.
         ///
         /// This is commonly used as a destination register.
-        pub rd: Gpr,
+        pub rd: Register,
         /// The *shamt* operand, which stands for 'shift amount'.
         pub shamt: u8,
         /// The *funct* operand.
@@ -166,11 +166,11 @@ pub mod r {
 #[derive(Default)]
 pub struct Pipeline {
     /// Information pertaining to potential upcoming jumps.
-    jump_info: Option<JumpInfo>,
+    upcoming_jump: Option<PipelineJump>,
 }
 
-/// Information pertaining to a jump.
-pub struct JumpInfo {
+/// Information pertaining to a jump instruction within a [`Pipeline`].
+pub struct PipelineJump {
     /// The target address.
     pub target_addr: u32,
     /// The instruction fetch following the jump instruction.
@@ -230,15 +230,19 @@ pub enum JumpKind {
 }
 
 impl PcBehavior {
-    pub fn jumps_without_return(target_addr: u32) -> Self {
+    /// Creates a new [`PcBehavior`] that jumps without return to the given target address.
+    fn jumps_without_return(target_addr: u32) -> Self {
         Self::Jumps { kind: JumpKind::WithoutReturn, target_addr }
     }
 
-    pub fn calls(target_addr: u32) -> Self {
+    /// Creates a new [`PcBehavior`] that jumps to the given target address with the intention of
+    /// returning.
+    fn calls(target_addr: u32) -> Self {
         Self::Jumps { kind: JumpKind::Call, target_addr }
     }
 
-    pub fn returns(target_addr: u32) -> Self {
+    /// Creates a new [`PcBehavior`] that returns from a function.
+    fn returns(target_addr: u32) -> Self {
         Self::Jumps { kind: JumpKind::Return, target_addr }
     }
 }
@@ -253,19 +257,28 @@ impl Pipeline {
         reg: &mut reg::File,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Executed {
-        let sr = reg::cpr::Status(reg.cpr(reg::cpr::STATUS_IDX));
-        if sr.ie_c() {
+        // As it turns out, we don't actually have to implement a traditional pipeline here. The
+        // magic lies in the fact that the only programmer-visible effect of pipelining is the delay
+        // slot, which we can handle specially.
+
+        // We begin by processing interrupts if the SR permits us to do so. This may trigger an
+        // interrupt; if it does, it will update the PC, which will be used throughout the rest of
+        // this function.
+        if reg.status().ie_c() {
             self.process_interrupts(reg);
         }
 
-        if let Some(jump_info) = self.jump_info.take() {
+        if let Some(jump) = self.upcoming_jump.take() {
+            // The last instruction was a jump instruction. We will proceed by executing the
+            // instruction in the delay slot before setting the PC to the target address.
+
             let exec = self.execute_fetched(
-                jump_info.delay_slot,
+                jump.delay_slot,
                 mem,
                 reg,
                 decode_instr,
             );
-            *reg.pc_mut() = jump_info.target_addr;
+            *reg.pc_mut() = jump.target_addr;
 
             exec
         } else {
@@ -279,20 +292,25 @@ impl Pipeline {
         }
     }
 
+    /// Processes through all interrupts, generating exceptions as necessary.
     fn process_interrupts(&mut self, reg: &mut reg::File) {
         for idx in 0..8 {
             self.process_interrupt(reg, idx);
         }
     }
 
+    /// Processes the interrupt at the given index, generating an exception if necessary.
     fn process_interrupt(&mut self, reg: &mut reg::File, index: usize) {
         let mut cause = reg.cause();
         if cause.is_interrupt_set(index) {
-            cause.clear_interrupt(index);
+            // Raise an interrupt exception.
             reg.raise_exception(exc::code::INTERRUPT);
+            // Indicate that this interrupt has been processed.
+            cause.clear_interrupt(index);
         }
     }
 
+    /// Fetches and decodes the instruction pointed to by the program counter (PC).
     fn fetch_next_instr(
         &mut self,
         mem: &mut Memory,
@@ -303,8 +321,11 @@ impl Pipeline {
         // Increment the PC.
         *reg.pc_mut() = pc.wrapping_add(4);
 
+        // I'm not sure if this is really necessary, but we will continuously attempt to fetch the
+        // next instruction, generating exceptions on every erroneous access.
         let op = loop {
             if let Ok(op) = mem.read_32(pc) {
+                // Success! Here's the operation.
                 break op;
             }
 
@@ -316,6 +337,7 @@ impl Pipeline {
         Fetched { addr: pc, op, instr: decode_instr(op) }
     }
 
+    /// Executes the given fetched instruction.
     fn execute_fetched(
         &mut self,
         fetched: Fetched,
@@ -327,11 +349,13 @@ impl Pipeline {
         let pc_behavior = state.execute(reg, mem);
         match &pc_behavior {
             PcBehavior::Increments => {
-                // The PC was already incremented.
+                // The PC was already incremented in [`Self::fetch_next_instr`], so we don't need to
+                // do it here.
             }
             PcBehavior::Jumps { kind: JumpKind::Exception, target_addr } => {
                 // To my knowledge, unlike other types of jumps, raising an exception does not
-                // execute the instruction in the delay slot.
+                // execute the instruction in the delay slot. We simply jump to the target address,
+                // which should be the exception vector.
                 *reg.pc_mut() = *target_addr;
             }
             PcBehavior::Jumps { target_addr, .. } => {
@@ -340,7 +364,9 @@ impl Pipeline {
                 // delay slot, or the instruction following the jump instruction, *must* be executed
                 // before the branch is taken (if it is taken) (RM[1-7]).
                 let delay_slot = self.fetch_next_instr(mem, reg, decode_instr);
-                self.jump_info = Some(JumpInfo { target_addr: *target_addr, delay_slot });
+                // We can't perform this jump now, so we will indicate that it should be performed
+                // later.
+                self.upcoming_jump = Some(PipelineJump { target_addr: *target_addr, delay_slot });
             }
         }
 
@@ -354,13 +380,14 @@ impl Pipeline {
                 // configured to function as a D-cache, so it is basically already 'swapped'.
             }
 
-            // TODO
+            // TODO: Process other SR fields.
         }
 
         Executed { fetched, pc_behavior }
     }
 }
 
+/// Defines [`Instr`], [`opx`], and [`opn`].
 macro_rules! def_instr_and_op_kind {
     (
         $(
@@ -377,14 +404,20 @@ macro_rules! def_instr_and_op_kind {
             } $(,)?
         ),*
     ) => {
+        /// A CPU instruction.
         #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         pub enum Instr {
             $(
+                #[doc = concat!("A `", stringify!($variant_name), "` instruction.")]
                 $variant_name($ty::Instr),
             )*
         }
 
         impl Instr {
+            /// Decodes a CPU instrucion from its encoded form.
+            ///
+            /// This function may fail and return `None` if the code does not correspond to a valid
+            /// instruction.
             pub fn decode(code: u32) -> Option<Self> {
                 match Self::try_decode_op_kind(code)? {
                     $(
@@ -395,6 +428,7 @@ macro_rules! def_instr_and_op_kind {
                 }
             }
 
+            /// Generates assembly information for this instruction.
             pub fn asm(&self) -> Asm {
                 match *self {
                     $(
@@ -414,6 +448,7 @@ macro_rules! def_instr_and_op_kind {
             }
         }
 
+        /// Generates an assembly operand.
         macro_rules! parse_operand {
             ($src:expr, %($field:tt)) => {
                 asm::Operand::Reg($src.$field)
@@ -441,14 +476,19 @@ macro_rules! def_instr_and_op_kind {
 
             use super::{Instr, JumpKind, Memory, PcBehavior, exc::self, i, j, r, reg};
 
+            /// The kind of an operation.
+            ///
+            /// Unlike [`Instr`], this type does not store any operand information.
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
             pub enum Kind {
                 $(
+                    #[doc = concat!("A `", stringify!($variant_name), "` operation.")]
                     $variant_name,
                 )*
             }
 
             impl State {
+                /// Creates a [`State`].
                 pub fn read(instr: Instr, reg: &reg::File) -> Self {
                     match instr {
                         $(
@@ -460,8 +500,10 @@ macro_rules! def_instr_and_op_kind {
                 }
             }
 
+            /// The state of an operation.
             pub enum State {
                 $(
+                    #[doc = concat!("The state of a `", stringify!($variant_name), "` operation.")]
                     $variant_name(super::$ty::State),
                 )*
             }
@@ -479,6 +521,7 @@ macro_rules! def_instr_and_op_kind {
             }
 
             impl State {
+                /// Executes the operation represented by this state.
                 pub fn execute(
                     &mut self,
                     reg: &mut reg::File,
@@ -495,13 +538,21 @@ macro_rules! def_instr_and_op_kind {
                 }
             }
 
+            /// Necessary context for operation execution.
             struct Context<'a, 'c, 'b, S> {
+                /// The state of the operation.
                 opx: &'a mut S,
+                /// The register file.
                 reg: &'a mut reg::File,
+                /// CPU memory.
                 mem: &'a mut Memory<'c, 'b>,
             }
 
             impl<S> Context<'_, '_, '_, S> {
+                /// Calculates the target of a branch.
+                ///
+                /// `value` is usually an immediate operand that may be shifted an sign-extended to
+                /// form an offset from the program counter.
                 fn calc_branch_target(&self, value: u16) -> u32 {
                     let base = self.reg.pc();
                     let offset = sign_extend_16(value << 2);
@@ -509,33 +560,46 @@ macro_rules! def_instr_and_op_kind {
                     base.wrapping_add(offset)
                 }
 
+                /// Calculates the target of a jump.
+                ///
+                /// `value` is usually an immediate operand.
                 #[inline(always)]
                 fn calc_jump_target(&self, value: u32) -> u32 {
                     (self.reg.pc() & !((1 << 28) - 1)) | (value << 2)
                 }
 
+                /// Calculates the return address of a function to be executed.
                 #[inline(always)]
                 fn calc_ret_addr(&self) -> u32 {
                     self.reg.pc().wrapping_add(4)
                 }
 
+                /// Raises an exception with the given code.
                 fn raise_exc(&mut self, code: u32) -> PcBehavior {
                     self.reg.raise_exception(code);
 
-                    PcBehavior::Jumps { kind: JumpKind::Exception, target_addr: exc::VECTOR }
+                    PcBehavior::Jumps {
+                        kind: JumpKind::Exception,
+                        // At this point, the program counter has already been updated to the
+                        // correct exception vector.
+                        target_addr: self.reg.pc(),
+                    }
                 }
             }
 
+            /// Sign-extends a 16-bit value.
             #[inline(always)]
             fn sign_extend_16(value: u16) -> u32 {
                 ((value as i16) as i32) as u32
             }
 
+            /// Sign-extends an 8-bit value.
             #[inline(always)]
             fn sign_extend_8(value: u8) -> u32 {
                 ((value as i8) as i32) as u32
             }
 
+            /// Calculates a virtual, or 'program', address.
             fn calc_vaddr(base: u32, offset: u16) -> u32 {
                 base.wrapping_add(sign_extend_16(offset))
             }
@@ -546,7 +610,8 @@ macro_rules! def_instr_and_op_kind {
 
             use super::reg;
 
-            impl Gpr {
+            impl Register {
+                /// Creates a [`Register`].
                 pub fn read(reg: &reg::File, index: usize) -> Self {
                     Self {
                         index: index,
@@ -556,14 +621,15 @@ macro_rules! def_instr_and_op_kind {
                 }
             }
 
-            /// A general-purpose register (GPR) operand.
+            /// A register operand.
             #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-            pub struct Gpr {
-                /// The zero-based index of this GPR.
-                ///
-                /// An index of 0 represents `r1` while an index of 30 represents `r31`.
+            pub struct Register {
+                /// The zero-based index of this register.
                 pub index: usize,
+                /// The value of this register if it is interpreted as a general-purpose register
+                /// (GPR).
                 pub gpr_value: u32,
+                /// The value of this register if it is interpreted as a control register.
                 pub cpr_value: u32,
             }
         }
