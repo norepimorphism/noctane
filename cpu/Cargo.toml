@@ -10,6 +10,7 @@ license = "MPL-2.0"
 bit = "0.1"
 bitfield = "0.13"
 const_queue = "0.1"
+indoc = "1.0"
 noctane-gpu = { path = "../gpu" }
 noctane-proc-macro = { path = "../proc-macro" }
 noctane-util = { path = "../util" }

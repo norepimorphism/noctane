@@ -1,5 +1,11 @@
 # Progress Log
 
+# 6/9/2022
+
+Noctane is now at 6,700 lines of code. (There are approximatly 8,600 including blank and comment lines.)
+
+The CPU module-level documentation is more complete than before, but documentation otherwise is still lacking.
+
 ## 6/2/2022
 
 Noctane just hit 5,500 lines of code! (There are approximately 7,000 including blank and comment lines.)

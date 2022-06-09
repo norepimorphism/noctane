@@ -1390,6 +1390,7 @@ dependencies = [
  "bit",
  "bitfield",
  "const_queue",
+ "indoc",
  "noctane-gpu",
  "noctane-proc-macro",
  "noctane-util",
