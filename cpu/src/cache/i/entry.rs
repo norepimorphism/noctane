@@ -47,8 +47,8 @@ impl Entry {
     pub(super) fn read(
         &mut self,
         addr: Address,
-        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
-    ) -> u32 {
+        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], ()>,
+    ) -> Result<u32, ()> {
         if self.is_valid && self.test_hit(addr) {
             // We are a valid copy of the data at `addr`.
             tracing::trace!("Cache hit! (addr={})", addr);
@@ -60,7 +60,7 @@ impl Entry {
             // by calling `fetch_line`.
             // Note: For this to be correct, `fetch_line` must return native-endian words; that is,
             // on big-endian hosts, they have not yet been byte-swapped.
-            let mut line = fetch_line(mem::Address::from(addr.working & !0b1111));
+            let mut line = fetch_line(mem::Address::from(addr.working & !0b1111))?;
             // Now, we byte-swap `line`.
             for word in line.iter_mut() {
                 *word = word.to_le();
@@ -72,7 +72,7 @@ impl Entry {
             self.tag = addr.tag;
         }
 
-        self.line[addr.word_idx]
+        Ok(self.line[addr.word_idx])
     }
 
     pub(super) fn write(&mut self, addr: Address, value: u32) {

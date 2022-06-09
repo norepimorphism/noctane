@@ -11,7 +11,7 @@ pub use io::Io;
 use crate::mem::Address;
 
 macro_rules! def_bank {
-    ($name:ident, $size:literal @ $addr:literal) => {
+    ($name:ident, $size:literal $(@ $addr:literal)? $(,)?) => {
         impl Default for $name {
             fn default() -> Self {
                 // Use 'screaming `0xaa`'s so that it's more obvious when we access uninitialized
@@ -21,8 +21,12 @@ macro_rules! def_bank {
         }
 
         impl $name {
-            /// The base address, relative to the start of each memory segment, of this memory bank.
-            pub const BASE_ADDR: usize = $addr;
+            $(
+                /// The base address, relative to the start of each memory segment, of this memory
+                /// bank.
+                pub const BASE_ADDR: usize = $addr;
+            )?
+
             const LEN: usize = make_index($size);
         }
 
@@ -55,7 +59,7 @@ const fn make_index(addr: usize) -> usize {
 // Define the memory banks (except for the I/O region, which is not a simple buffer like the rest
 // are).
 def_bank!(MainRam,  0x20_0000 @ 0x0000_0000);
-def_bank!(Exp1,     0x80_0000 @ 0x1f00_0000);
+def_bank!(Exp1,     0x80_0000);
 def_bank!(Exp3,     0x20_0000 @ 0x1fa0_0000);
 def_bank!(Bios,     0x08_0000 @ 0x1fc0_0000);
 
@@ -109,44 +113,71 @@ impl Bus<'_> {
     /// expected to simply delegate to the appropriate I/O read/write function.
     fn access<T: Default>(
         &mut self,
-        mut addr: Address,
+        addr: Address,
         access_word: impl FnOnce(&mut u32) -> T,
         access_io: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
-    ) -> T {
-        macro_rules! get_bank {
-            ($field_name:ident, $struct_name:ident $(,)?) => {{
-                addr.working -= $struct_name::BASE_ADDR;
-                tracing::trace!(
-                    "Accessing `cpu_bus.{}[{:#010x}]`",
-                    stringify!($field_name),
-                    addr.working,
-                );
-
-                self.$field_name
-                    .get_mut(make_index(addr.working))
-                    .map(|it| access_word(it))
-                    .ok_or(())
-            }};
+    ) -> Result<T, ()> {
+        macro_rules! try_access {
+            ($start:expr, $size:expr, $f:expr $(,)?) => {
+                if (addr.working >= ($start as usize)) {
+                    let rebased_addr = addr.working - ($start as usize);
+                    if rebased_addr < ($size as usize) {
+                        return $f(rebased_addr);
+                    }
+                }
+            };
         }
 
-        // To avoid explicitly defining a range for each memory bank, we can simply use an
-        // unbounded range in the positive direction and work backwards; `match`es work in a
-        // well-defined order from the first to last pattern.
-        match addr.working {
-            Bios::BASE_ADDR.. => get_bank!(bios, Bios),
-            Exp3::BASE_ADDR.. => get_bank!(exp_3, Exp3),
-            Self::IO_BASE_ADDR.. => access_io(self, addr.map_working(|it| it - Self::IO_BASE_ADDR)),
-            Exp1::BASE_ADDR.. => get_bank!(exp_1, Exp1),
-            MainRam::BASE_ADDR.. => get_bank!(main_ram, MainRam),
-            _ => Err(()),
+        macro_rules! try_access_bank {
+            ($field_name:ident, $start:expr, $size:expr $(,)?) => {
+                try_access!(
+                    $start,
+                    $size,
+                    |rebased_addr: usize| {
+                        tracing::trace!(
+                            "Accessing `cpu_bus.{}[{:#010x}]`",
+                            stringify!($field_name),
+                            rebased_addr,
+                        );
+
+                        self.$field_name
+                            .get_mut(make_index(rebased_addr))
+                            .map(|it| access_word(it))
+                            .ok_or(())
+                    }
+                )
+            };
         }
-        .unwrap_or(T::default())
+
+        // TODO: Don't hardcode RAM size.
+        try_access_bank!(main_ram,  MainRam::BASE_ADDR,             0x20_0000);
+        try_access_bank!(bios,      Bios::BASE_ADDR,                self.io.mem_ctrl_1.bios_size);
+        try_access_bank!(exp_1,     self.io.mem_ctrl_1.exp_1_base,  self.io.mem_ctrl_1.exp_1_size);
+        try_access_bank!(exp_3,     Exp3::BASE_ADDR,                self.io.mem_ctrl_1.exp_3_size);
+
+        try_access!(
+            Self::IO_BASE_ADDR,
+            0x1000,
+            |rebased_addr: usize| {
+                access_io(self, addr.map_working(|_| rebased_addr))
+            },
+        );
+        try_access!(
+            self.io.mem_ctrl_1.exp_2_base,
+            self.io.mem_ctrl_1.exp_2_size,
+            |rebased_addr: usize| {
+                tracing::info!("rebased_addr: {:#010x}", rebased_addr + 0x1000);
+                access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
+            },
+        );
+
+        Err(())
     }
 
     // In each of the three following cases for reads, as the data contained within `word` is
     // little-endian, we should use [`u32::to_le`] to convert to native-endian first.
 
-    pub fn read_8(&mut self, addr: Address) -> u8 {
+    pub fn read_8(&mut self, addr: Address) -> Result<u8, ()> {
         self.access(
             addr,
             |word| {
@@ -158,7 +189,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn read_16(&mut self, addr: Address) -> u16 {
+    pub fn read_16(&mut self, addr: Address) -> Result<u16, ()> {
         self.access(
             addr,
             |word| {
@@ -170,7 +201,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn read_32(&mut self, addr: Address) -> u32 {
+    pub fn read_32(&mut self, addr: Address) -> Result<u32, ()> {
         self.access(
             addr,
             |word| {
@@ -182,7 +213,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_8(&mut self, addr: Address, value: u8) {
+    pub fn write_8(&mut self, addr: Address, value: u8) -> Result<(), ()> {
         self.access(
             addr,
             |word| {
@@ -197,7 +228,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_16(&mut self, addr: Address, value: u16) {
+    pub fn write_16(&mut self, addr: Address, value: u16) -> Result<(), ()> {
         self.access(
             addr,
             |word| {
@@ -212,7 +243,7 @@ impl Bus<'_> {
         )
     }
 
-    pub fn write_32(&mut self, addr: Address, value: u32) {
+    pub fn write_32(&mut self, addr: Address, value: u32) -> Result<(), ()> {
         self.access(
             addr,
             |word| {
@@ -226,19 +257,12 @@ impl Bus<'_> {
         )
     }
 
-    pub fn fetch_cache_line(&mut self, addr: Address) -> [u32; 4] {
-        tracing::trace!("Fetching cache line (addr={:#010x})", addr.working);
-
-        let a = self.read_32(addr.map_working(|it| it.wrapping_add(0)));
-        let b = self.read_32(addr.map_working(|it| it.wrapping_add(4)));
-        let c = self.read_32(addr.map_working(|it| it.wrapping_add(8)));
-        let d = self.read_32(addr.map_working(|it| it.wrapping_add(12)));
-
-        tracing::trace!("line[0] <- {:#010x}", a);
-        tracing::trace!("line[1] <- {:#010x}", b);
-        tracing::trace!("line[2] <- {:#010x}", c);
-        tracing::trace!("line[3] <- {:#010x}", d);
-
-        [a, b, c, d]
+    pub fn fetch_cache_line(&mut self, addr: Address) -> Result<[u32; 4], ()> {
+        Ok([
+            self.read_32(addr.map_working(|it| it.wrapping_add(0)))?,
+            self.read_32(addr.map_working(|it| it.wrapping_add(4)))?,
+            self.read_32(addr.map_working(|it| it.wrapping_add(8)))?,
+            self.read_32(addr.map_working(|it| it.wrapping_add(12)))?,
+        ])
     }
 }

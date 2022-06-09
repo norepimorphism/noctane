@@ -286,16 +286,10 @@ impl Pipeline {
     }
 
     fn process_interrupt(&mut self, reg: &mut reg::File, index: usize) {
-        if reg.is_interrupt_set(index) {
-            reg.clear_interrupt(index);
-
-            let mut cause = reg::cpr::Cause(reg.cpr(reg::cpr::CAUSE_IDX));
-            cause.set_exc_code(exc::code::INTERRUPT);
-
-            // Set the Cause and EPC registers.
-            // TODO: This is duplicated; turn it into a function.
-            reg.set_cpr(reg::cpr::CAUSE_IDX, cause.0);
-            reg.set_cpr(reg::cpr::EPC_IDX, reg.pc());
+        let mut cause = reg.cause();
+        if cause.is_interrupt_set(index) {
+            cause.clear_interrupt(index);
+            reg.raise_exception(exc::code::INTERRUPT);
         }
     }
 
@@ -306,9 +300,18 @@ impl Pipeline {
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Fetched {
         let pc = reg.pc();
-        let op = mem.read_32(pc);
         // Increment the PC.
         *reg.pc_mut() = pc.wrapping_add(4);
+
+        let op = loop {
+            if let Ok(op) = mem.read_32(pc) {
+                break op;
+            }
+
+            // TODO: We can be more efficient here by only raising an exception after a successful
+            // read from the exception handler.
+            reg.raise_exception(exc::code::ADDRESS_LOAD);
+        };
 
         Fetched { addr: pc, op, instr: decode_instr(op) }
     }
@@ -344,8 +347,6 @@ impl Pipeline {
         // If the status register (SR) was modified, we need to apply the changes before returning
         // control back to the caller.
         if let Some(sr) = reg.altered_sr() {
-            let sr = reg::cpr::Status(sr);
-
             mem.cache_mut().i.set_isolated(sr.is_c());
 
             if sr.sw_c() {
@@ -519,12 +520,7 @@ macro_rules! def_instr_and_op_kind {
                 }
 
                 fn raise_exc(&mut self, code: u32) -> PcBehavior {
-                    let mut cause = reg::cpr::Cause(0);
-                    cause.set_exc_code(code);
-
-                    // Set the Cause and EPC registers.
-                    self.reg.set_cpr(reg::cpr::CAUSE_IDX, cause.0);
-                    self.reg.set_cpr(reg::cpr::EPC_IDX, self.reg.pc());
+                    self.reg.raise_exception(code);
 
                     PcBehavior::Jumps { kind: JumpKind::Exception, target_addr: exc::VECTOR }
                 }
@@ -912,44 +908,56 @@ def_instr_and_op_kind!(
         name: Lb,
         type: i,
         asm: ["lb" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
-            let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
-            ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
+        fn: |mut ctx: Context<i::State>| {
+            if let Ok(value) = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm)) {
+                ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_8(value));
 
-            PcBehavior::Increments
+                PcBehavior::Increments
+            } else {
+                ctx.raise_exc(exc::code::ADDRESS_LOAD)
+            }
         },
     },
     {
         name: Lbu,
         type: i,
         asm: ["lbu" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
-            let value = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
-            ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
+        fn: |mut ctx: Context<i::State>| {
+            if let Ok(value) = ctx.mem.read_8(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm)) {
+                ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            PcBehavior::Increments
+                PcBehavior::Increments
+            } else {
+                ctx.raise_exc(exc::code::ADDRESS_LOAD)
+            }
         },
     },
     {
         name: Lh,
         type: i,
         asm: ["lh" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
-            let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
-            ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
+        fn: |mut ctx: Context<i::State>| {
+            if let Ok(value) = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm)) {
+                ctx.reg.set_gpr(ctx.opx.rt.index, sign_extend_16(value));
 
-            PcBehavior::Increments
+                PcBehavior::Increments
+            } else {
+                ctx.raise_exc(exc::code::ADDRESS_LOAD)
+            }
         },
     },
     {
         name: Lhu,
         type: i,
         asm: ["lhu" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
-            let value = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
-            ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
+        fn: |mut ctx: Context<i::State>| {
+            if let Ok(value) = ctx.mem.read_16(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm)) {
+                ctx.reg.set_gpr(ctx.opx.rt.index, value.into());
 
-            PcBehavior::Increments
+                PcBehavior::Increments
+            } else {
+                ctx.raise_exc(exc::code::ADDRESS_LOAD)
+            }
         },
     },
     {
@@ -966,11 +974,14 @@ def_instr_and_op_kind!(
         name: Lw,
         type: i,
         asm: ["lw" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
-            let value = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm));
-            ctx.reg.set_gpr(ctx.opx.rt.index, value);
+        fn: |mut ctx: Context<i::State>| {
+            if let Ok(value) = ctx.mem.read_32(calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm)) {
+                ctx.reg.set_gpr(ctx.opx.rt.index, value);
 
-            PcBehavior::Increments
+                PcBehavior::Increments
+            } else {
+                ctx.raise_exc(exc::code::ADDRESS_LOAD)
+            }
         },
     },
     {
@@ -1120,22 +1131,28 @@ def_instr_and_op_kind!(
         name: Sb,
         type: i,
         asm: ["sb" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
+        fn: |mut ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8);
 
-            PcBehavior::Increments
+            if ctx.mem.write_8(vaddr, ctx.opx.rt.gpr_value as u8).is_err() {
+                ctx.raise_exc(exc::code::ADDRESS_STORE)
+            } else {
+                PcBehavior::Increments
+            }
         },
     },
     {
         name: Sh,
         type: i,
         asm: ["sh" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
+        fn: |mut ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16);
 
-            PcBehavior::Increments
+            if ctx.mem.write_16(vaddr, ctx.opx.rt.gpr_value as u16).is_err() {
+                ctx.raise_exc(exc::code::ADDRESS_STORE)
+            } else {
+                PcBehavior::Increments
+            }
         },
     },
     {
@@ -1269,11 +1286,14 @@ def_instr_and_op_kind!(
         name: Sw,
         type: i,
         asm: ["sw" %(rt), #(s), %(rs)],
-        fn: |ctx: Context<i::State>| {
+        fn: |mut ctx: Context<i::State>| {
             let vaddr = calc_vaddr(ctx.opx.rs.gpr_value, ctx.opx.imm);
-            ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value);
 
-            PcBehavior::Increments
+            if ctx.mem.write_32(vaddr, ctx.opx.rt.gpr_value).is_err() {
+                ctx.raise_exc(exc::code::ADDRESS_STORE)
+            } else {
+                PcBehavior::Increments
+            }
         },
     },
     {

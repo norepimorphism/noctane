@@ -5,9 +5,13 @@ pub use noctane_gpu::Gpu;
 
 #[derive(Default)]
 pub struct Core {
-    cpu_state: noctane_cpu::State,
-    gpu: Gpu,
-    banks: Banks,
+    pub cpu_state: noctane_cpu::State,
+    pub gpu: Gpu,
+    pub banks: Banks,
+    pub mem_ctrl_1: noctane_cpu::bus::io::MemoryControl1,
+    pub mem_ctrl_2: noctane_cpu::bus::io::MemoryControl2,
+    pub post: noctane_cpu::bus::io::Post,
+    pub timers: noctane_cpu::bus::io::Timers,
 }
 
 impl Core {
@@ -15,18 +19,16 @@ impl Core {
         self.cpu_state.connect_bus(noctane_cpu::Bus::new(
             &mut self.banks.main_ram,
             &mut self.banks.exp_1,
-            noctane_cpu::bus::Io::new(&mut self.gpu),
+            noctane_cpu::bus::Io::new(
+                &mut self.gpu,
+                &mut self.mem_ctrl_1,
+                &mut self.mem_ctrl_2,
+                &mut self.post,
+                &mut self.timers,
+            ),
             &mut self.banks.exp_3,
             &mut self.banks.bios,
         ))
-    }
-
-    pub fn banks(&self) -> &Banks {
-        &self.banks
-    }
-
-    pub fn banks_mut(&mut self) -> &mut Banks {
-        &mut self.banks
     }
 }
 
@@ -36,14 +38,6 @@ pub struct Banks {
     pub exp_1: noctane_cpu::bus::Exp1,
     pub exp_3: noctane_cpu::bus::Exp3,
     pub bios: noctane_cpu::bus::Bios,
-}
-
-impl Core {
-    pub fn update_io(&mut self) {
-        self.update_timers();
-    }
-
-    fn update_timers(&mut self) {}
 }
 
 #[cfg(test)]
@@ -65,7 +59,7 @@ mod tests {
             fn assert_success(mem: &mut $ty, addr: u32, bit_width: &str) {
                 assert_eq!(
                     mem.$read_32_name($map_addr(addr), $($read_32_arg),*),
-                    VALUE,
+                    Ok(VALUE),
                     "failed to write {}-bit value",
                     bit_width,
                 );

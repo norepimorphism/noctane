@@ -64,31 +64,37 @@ impl fmt::Display for File {
 
 impl File {
     /// The program counter (PC).
+    #[inline(always)]
     pub fn pc(&self) -> u32 {
         self.pc
     }
 
     /// A mutable reference to the program counter (PC).
+    #[inline(always)]
     pub fn pc_mut(&mut self) -> &mut u32 {
         &mut self.pc
     }
 
     /// The HI register.
+    #[inline(always)]
     pub fn hi(&self) -> u32 {
         self.hi
     }
 
     /// A mutable reference to the HI register.
+    #[inline(always)]
     pub fn hi_mut(&mut self) -> &mut u32 {
         &mut self.hi
     }
 
     /// The LO register.
+    #[inline(always)]
     pub fn lo(&self) -> u32 {
         self.lo
     }
 
     /// A mutable reference to the LO register.
+    #[inline(always)]
     pub fn lo_mut(&mut self) -> &mut u32 {
         &mut self.lo
     }
@@ -104,79 +110,6 @@ impl File {
     pub fn set_gpr(&mut self, index: usize, value: u32) {
         self.gprs[index] = value;
     }
-
-    /// Returns the value of the control register identified by the given zero-based index.
-    pub fn cpr(&self, index: usize) -> u32 {
-        if index == cpr::PRID_IDX {
-            // Unlike the other control registers, the PRId is read-only (RM[3-4]). As such, its
-            // value is hardcoded here.
-
-            let mut prid = cpr::Prid(0);
-
-            // R3000As supposedly have the 'Imp' value set to 3 (RM[3-4]).
-            prid.set_imp(3);
-            // I have no idea what Sony set this to. If you know, please file an issue to the
-            // Noctane GitHub!
-            prid.set_rev(0xaa);
-
-            prid.0
-        } else {
-            self.cprs[index]
-        }
-    }
-
-    /// Sets the value of the control register identified by the given zero-based index.
-    pub fn set_cpr(&mut self, index: usize, value: u32) {
-        if (index == cpr::STATUS_IDX) && (value != self.cprs[cpr::STATUS_IDX]) {
-            // When the status register (SR) is modified, we set the following flag to indicate to
-            // the CPU that it should update itself accordingly. When the CPU calls the
-            // [`Self::altered_sr`] method, this flag is cleared.
-            self.sr_is_dirty = true;
-        }
-
-        // It is possible to overwrite the PRId register using this, but that's OK as its value is
-        // hardcoded, as shown above in [`Self::cpr`].
-        self.cprs[index] = value;
-    }
-
-    /// Returns the new value of the status register (SR) if it was modified since this method was
-    /// last called.
-    ///
-    /// This method is useful for updating the CPU in response to SR modifications.
-    pub(crate) fn altered_sr(&mut self) -> Option<u32> {
-        if self.sr_is_dirty {
-            // Clear this flag so that this method returns `None` if it is called again without
-            // modifying the SR.
-            self.sr_is_dirty = false;
-
-            Some(self.cprs[cpr::STATUS_IDX])
-        } else {
-            None
-        }
-    }
-
-    /// Determines if the interrupt at the given index is set.
-    pub fn is_interrupt_set(&self, index: usize) -> bool {
-        let cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
-
-        ((cause.ip() >> index) & 1) == 1
-    }
-
-    /// Sets the interrupt at the given index.
-    pub fn set_interrupt(&mut self, index: usize) {
-        let mut cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
-        let ip = cause.ip() | (1 << index);
-        cause.set_ip(ip);
-        self.set_cpr(cpr::CAUSE_IDX, cause.0);
-    }
-
-    /// Clears the interrupt at the given index.
-    pub fn clear_interrupt(&mut self, index: usize) {
-        let mut cause = cpr::Cause(self.cpr(cpr::CAUSE_IDX));
-        let ip = cause.ip() & !(1 << index);
-        cause.set_ip(ip);
-        self.set_cpr(cpr::CAUSE_IDX, cause.0);
-    }
 }
 
 pub mod cpr {
@@ -185,6 +118,121 @@ pub mod cpr {
     use bitfield::bitfield;
 
     use crate::exc::Exception;
+
+    impl super::File {
+        pub fn bad_vaddr(&self) -> u32 {
+            self.cprs[BAD_VADDR_IDX]
+        }
+
+        pub fn set_bad_vaddr(&mut self, value: u32) {
+            self.cprs[BAD_VADDR_IDX] = value;
+        }
+
+        pub fn status(&self) -> Status {
+            Status(self.cprs[STATUS_IDX])
+        }
+
+        pub fn set_status(&mut self, value: Status) {
+            if value.0 != self.cprs[STATUS_IDX] {
+                // When the status register (SR) is modified, we set the following flag to indicate to
+                // the CPU that it should update itself accordingly. When the CPU calls the
+                // [`Self::altered_sr`] method, this flag is cleared.
+                self.sr_is_dirty = true;
+            }
+
+            self.cprs[STATUS_IDX] = value.0;
+        }
+
+        /// Returns the new value of the status register (SR) if it was modified since this method was
+        /// last called.
+        ///
+        /// This method is useful for updating the CPU in response to SR modifications.
+        pub(crate) fn altered_sr(&mut self) -> Option<Status> {
+            if self.sr_is_dirty {
+                // Clear this flag so that this method returns `None` if it is called again without
+                // modifying the SR.
+                self.sr_is_dirty = false;
+
+                Some(self.status())
+            } else {
+                None
+            }
+        }
+
+        pub fn cause(&self) -> Cause {
+            Cause(self.cprs[CAUSE_IDX])
+        }
+
+        pub fn set_cause(&mut self, value: Cause) {
+            self.cprs[CAUSE_IDX] = value.0;
+        }
+
+        pub fn epc(&self) -> u32 {
+            self.cprs[EPC_IDX]
+        }
+
+        pub fn set_epc(&mut self, value: u32) {
+            self.cprs[EPC_IDX] = value;
+        }
+
+        pub fn prid(&self) -> Prid {
+            // Unlike the other control registers, the PRId is read-only (RM[3-4]). As such, its
+            // value is hardcoded here, and there is no setter method.
+
+            let mut this = Prid(0);
+
+            // R3000As supposedly have the 'Imp' value set to 3 (RM[3-4]).
+            this.set_imp(3);
+            // I have no idea what Sony set this to. If you know, please file an issue to the
+            // Noctane GitHub!
+            this.set_rev(0xaa);
+
+            this
+        }
+
+        /// Returns the value of the control register identified by the given zero-based index.
+        pub(crate) fn cpr(&self, index: usize) -> u32 {
+            if index == PRID_IDX {
+                self.prid().0
+            } else {
+                self.cprs[index]
+            }
+        }
+
+        /// Sets the value of the control register identified by the given zero-based index.
+        pub(crate) fn set_cpr(&mut self, index: usize, value: u32) {
+            if index == STATUS_IDX {
+                self.set_status(Status(value));
+            } else {
+            // It is possible to overwrite the PRId register using this, but that's OK as its value is
+            // hardcoded, as shown above in [`Self::prid`].
+            self.cprs[index] = value;
+            }
+        }
+
+        pub(crate) fn raise_exception(&mut self, code: u32) {
+            let mut cause = self.cause();
+            cause.set_exc_code(code);
+
+            // Set the Cause and EPC registers.
+            self.set_cause(cause);
+            self.set_epc(self.pc);
+            // Update the program counter.
+            *self.pc_mut() = crate::exc::VECTOR;
+        }
+
+        /// The last exception produced by an instruction execution.
+        ///
+        /// This always returns an exception&mdash;even if no exception actually occurred. This is
+        /// because it generates one from the Cause and EPC CPU registers, which have no concept of
+        /// optionality.
+        pub fn last_exception(&self) -> Exception {
+            let cause = self.cause();
+            let epc = self.epc();
+
+            Exception { code: cause.exc_code(), epc }
+        }
+    }
 
     /// The index of the BadVaddr register.
     pub const BAD_VADDR_IDX: usize = 8;
@@ -239,6 +287,25 @@ pub mod cpr {
         pub ip, set_ip: 15, 8;
         pub ce, set_ce: 29, 28;
         pub bd, set_bd: 31;
+    }
+
+    impl Cause {
+        /// Determines if the interrupt at the given index is set.
+        pub fn is_interrupt_set(&self, index: usize) -> bool {
+            ((self.ip() >> index) & 1) == 1
+        }
+
+        /// Sets the interrupt at the given index.
+        pub fn set_interrupt(&mut self, index: usize) {
+            let ip = self.ip() | (1 << index);
+            self.set_ip(ip);
+        }
+
+        /// Clears the interrupt at the given index.
+        pub fn clear_interrupt(&mut self, index: usize) {
+            let ip = self.ip() & !(1 << index);
+            self.set_ip(ip);
+        }
     }
 
     bitfield! {

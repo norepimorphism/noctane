@@ -57,7 +57,7 @@ impl Address {
     }
 
     // The following three methods work in little-endian as, even though we are not working directly
-    // with memory here, byte and halfword indices require that data is layed out as such.
+    // with memory here, byte and halfword indices require that data is laid out as such.
 
     pub(crate) fn index_byte_in_word(&self, word: u32) -> u8 {
         word.to_le_bytes()[self.byte_idx]
@@ -106,10 +106,10 @@ macro_rules! def_access {
         fn $fn_name<T>(
             &mut self,
             addr: u32,
-            access_kseg0: impl FnOnce(&mut Self, Address) -> T,
-            access_kseg1: impl FnOnce(&mut Self, Address) -> T,
-            access_kseg2: impl FnOnce(&mut Self, Address) -> T,
-        ) -> T {
+            access_kseg0: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
+            access_kseg1: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
+            access_kseg2: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
+        ) -> Result<T, ()> {
             #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
             compile_error!("The pointer width of the target system is too small. At least a 32-bit pointer width is necessary to index certain arrays.");
 
@@ -173,7 +173,7 @@ macro_rules! def_access {
 
 macro_rules! def_read_fn {
     ($fn_name:ident $access_name:ident $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: u32) -> $ty {
+        pub fn $fn_name(&mut self, addr: u32) -> Result<$ty, ()> {
             let value = self.$access_name(
                 addr,
                 |this, addr| {
@@ -181,13 +181,17 @@ macro_rules! def_read_fn {
                         .i
                         .$fn_name(addr, |addr| this.bus.fetch_cache_line(addr))
                 },
-                |this, addr| this.bus.$fn_name(addr),
+                |this, addr| {
+                    this.bus.$fn_name(addr)
+                },
                 |_, _| {
                     // TODO
-                    0
+                    Ok(0)
                 },
             );
-            tracing::trace!("#[{:#010x}] -> {:#08x}", addr, value);
+            if let Ok(value) = value {
+                tracing::trace!("#[{:#010x}] -> {:#08x}", addr, value);
+            }
 
             value
         }
@@ -196,7 +200,7 @@ macro_rules! def_read_fn {
 
 macro_rules! def_write_fn {
     ($fn_name:ident $access_name:ident $ty:ty) => {
-        pub fn $fn_name(&mut self, addr: u32, value: $ty) {
+        pub fn $fn_name(&mut self, addr: u32, value: $ty) -> Result<(), ()> {
             tracing::trace!("#[{:#010x}] <- {:#010x}", addr, value);
 
             self.$access_name(
@@ -205,12 +209,17 @@ macro_rules! def_write_fn {
                     this.cache.i.$fn_name(addr, value);
                     if !this.cache.i.is_isolated() {
                         // When not isolated, write-through to the CPU bus.
-                        this.bus.$fn_name(addr, value);
+                        this.bus.$fn_name(addr, value)?;
                     }
+
+                    Ok(())
                 },
-                |this, addr| this.bus.$fn_name(addr, value),
+                |this, addr| {
+                    this.bus.$fn_name(addr, value)
+                },
                 |_, _| {
                     // TODO
+                    Ok(())
                 },
             )
         }

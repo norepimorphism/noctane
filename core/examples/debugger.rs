@@ -19,10 +19,10 @@ fn main() {
     for (idx, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
         // The PSX CPU is little-endian, so we must make sure that if the host platform is
         // big-endian, the bytes are swapped before being written.
-        core.banks_mut().bios[idx] = u32::from_le_bytes(*instr);
+        core.banks.bios[idx] = u32::from_le_bytes(*instr);
     }
 
-    Debugger::new(&mut core).run();
+    Debugger::new(core).run();
 }
 
 fn setup_tracing() {
@@ -40,10 +40,10 @@ fn setup_tracing() {
         .init();
 }
 
-impl<'a> Debugger<'a> {
-    fn new(core: &'a mut noctane::Core) -> Self {
+impl Debugger {
+    fn new(core: noctane::Core) -> Self {
         Self {
-            cpu: core.cpu(),
+            core,
             addr_breakpoints: HashSet::new(),
             sym_breakpoints: HashSet::new(),
             stdout: String::new(),
@@ -51,14 +51,14 @@ impl<'a> Debugger<'a> {
     }
 }
 
-struct Debugger<'a> {
-    cpu: noctane_cpu::Cpu<'a, 'a>,
+struct Debugger {
+    core: noctane::Core,
     addr_breakpoints: HashSet<u32>,
     sym_breakpoints: HashSet<String>,
     stdout: String,
 }
 
-impl Debugger<'_> {
+impl Debugger {
     fn run(mut self) {
         loop {
             print!("> ");
@@ -229,19 +229,19 @@ impl Debugger<'_> {
     }
 
     fn do_print_i_cache(&self) -> Result<(), &'static str> {
-        println!("{}", self.cpu.mem().cache().i);
+        println!("{}", self.core.cpu_state.cache.i);
 
         Ok(())
     }
 
-    fn do_print_io(&self) -> Result<(), &'static str> {
-        println!("{:#?}", self.cpu.mem().bus().io);
+    fn do_print_io(&mut self) -> Result<(), &'static str> {
+        println!("{:#?}", self.core.cpu().mem().bus().io);
 
         Ok(())
     }
 
     fn do_print_reg(&self) -> Result<(), &'static str> {
-        println!("{}", self.cpu.reg());
+        println!("{}", self.core.cpu_state.reg);
 
         Ok(())
     }
@@ -287,9 +287,9 @@ enum Jump {
     }
 }
 
-impl Debugger<'_> {
+impl Debugger {
     fn step(&mut self) -> Step {
-        let execed = self.cpu.execute_next_instr();
+        let execed = self.core.cpu().execute_next_instr();
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
             kind,
@@ -298,7 +298,7 @@ impl Debugger<'_> {
             if matches!(kind, noctane_cpu::instr::JumpKind::Exception) {
                 Step {
                     execed,
-                    jump: Some(Jump::Exception(self.cpu.last_exception())),
+                    jump: Some(Jump::Exception(self.core.cpu_state.reg.last_exception())),
                     should_break: true,
                 }
             } else {
@@ -321,7 +321,7 @@ struct NormalJump {
     should_break: bool,
 }
 
-impl Debugger<'_> {
+impl Debugger {
     fn handle_normal_jump(
         &mut self,
         kind: noctane_cpu::instr::JumpKind,
@@ -343,7 +343,7 @@ impl Debugger<'_> {
                     // TODO: This will always be silent.
                     self.step();
                     // Sony stores the offset of the table function pointer in the *r9* register.
-                    let offset = self.cpu.reg().gpr(9) as u8;
+                    let offset = self.core.cpu_state.reg.gpr(9) as u8;
 
                     if let Some(call) = func::Call::$fn_name(self, offset) {
                         if self.sym_breakpoints.get(call.name).is_some() {
@@ -438,7 +438,7 @@ impl Debugger<'_> {
             noctane_cpu::exc::code::SYSCALL => {
                 // Sony stores a code identifying the function of the syscall in the *r4*
                 // register.
-                let code = self.cpu.reg().gpr(4);
+                let code = self.core.cpu_state.reg.gpr(4);
                 println!(
                     "{}",
                     noctane_util::bios::func::Call::from_syscall(self, code),
@@ -446,33 +446,35 @@ impl Debugger<'_> {
             }
             _ => {
                 println!("!!! EXCEPTION !!!");
+                println!("Code: {:#}", exc.code)
             }
         }
     }
 }
 
-impl noctane_util::bios::func::CallSource for Debugger<'_> {
+impl noctane_util::bios::func::CallSource for Debugger {
     fn read_raw_arg(&mut self, index: usize) -> u32 {
-        let reg = self.cpu.reg();
+        let reg = &self.core.cpu_state.reg;
 
         if index < 6 {
             reg.gpr(4 + index)
         } else {
             let sp = reg.gpr(29);
 
-            self.cpu.mem_mut().read_32(sp + ((index * 4) as u32))
+            // TODO: We should probably handle the error somehow.
+            self.core.cpu().mem_mut().read_32(sp + ((index * 4) as u32)).unwrap_or(0)
         }
     }
 
     fn read_8(&mut self, addr: u32) -> u8 {
-        self.cpu.mem_mut().read_8(addr)
+        self.core.cpu().mem_mut().read_8(addr).unwrap_or(0)
     }
 
     fn read_16(&mut self, addr: u32) -> u16 {
-        self.cpu.mem_mut().read_16(addr)
+        self.core.cpu().mem_mut().read_16(addr).unwrap_or(0)
     }
 
     fn read_32(&mut self, addr: u32) -> u32 {
-        self.cpu.mem_mut().read_32(addr)
+        self.core.cpu().mem_mut().read_32(addr).unwrap_or(0)
     }
 }

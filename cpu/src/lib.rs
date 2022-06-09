@@ -229,16 +229,4 @@ impl<'s, 'b> Cpu<'s, 'b> {
     ) -> instr::Executed {
         self.pipeline.advance(&mut self.mem, &mut self.reg, &decode_instr)
     }
-
-    /// The last exception produced by an instruction execution.
-    ///
-    /// This always returns an exception&mdash;even if no exception actually occurred. This is
-    /// because it generates one from the Cause and EPC CPU registers, which have no concept of
-    /// optionality.
-    pub fn last_exception(&self) -> Exception {
-        let cause = reg::cpr::Cause(self.reg.cpr(reg::cpr::CAUSE_IDX));
-        let epc = self.reg.cpr(reg::cpr::EPC_IDX);
-
-        Exception { code: cause.exc_code(), epc }
-    }
 }

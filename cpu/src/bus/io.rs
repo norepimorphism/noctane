@@ -11,14 +11,19 @@ pub use post::Post;
 pub use timers::{Timer, Timers};
 
 impl<'a> Io<'a> {
-    pub fn new(gpu: &'a mut Gpu) -> Self {
+    pub fn new(
+        gpu: &'a mut Gpu,
+        mem_ctrl_1: &'a mut MemoryControl1,
+        mem_ctrl_2: &'a mut MemoryControl2,
+        post: &'a mut Post,
+        timers: &'a mut Timers,
+    ) -> Self {
         Self {
             gpu,
-            // TODO: All of this needs to be passed in or it will be reset on each cycle.
-            mem_ctrl_1: MemoryControl1::default(),
-            mem_ctrl_2: MemoryControl2::default(),
-            post: Post::default(),
-            timers: Timers::default(),
+            mem_ctrl_1,
+            mem_ctrl_2,
+            post,
+            timers,
         }
     }
 }
@@ -28,10 +33,10 @@ impl<'a> Io<'a> {
 pub struct Io<'a> {
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
-    pub mem_ctrl_1: MemoryControl1,
-    pub mem_ctrl_2: MemoryControl2,
-    pub post: Post,
-    pub timers: Timers,
+    pub mem_ctrl_1: &'a mut MemoryControl1,
+    pub mem_ctrl_2: &'a mut MemoryControl2,
+    pub post: &'a mut Post,
+    pub timers: &'a mut Timers,
 }
 
 impl Io<'_> {
@@ -75,13 +80,25 @@ impl Io<'_> {
             _ => (Err(()), ""),
         };
 
-        let lut_entry = lut_entry?;
+        let Ok(lut_entry) = lut_entry else {
+            tracing::debug!(
+                "Accessing `cpu_bus.io[{:#06x}]`",
+                addr.working,
+            );
+
+            return Err(());
+        };
 
         // [`Option::get`] is unnecessary here as LUT entry indices are guaranteed by
         // [`gen_cpu_bus_io`] to point to valid register entries.
         let reg = &REGISTERS[lut_entry.reg_idx];
 
-        tracing::debug!("Accessing `cpu_bus.io.{}.{}`", group_name, reg.name);
+        tracing::debug!(
+            "Accessing `cpu_bus.io.{}.{}[{}]`",
+            group_name,
+            reg.name,
+            lut_entry.byte_idx,
+        );
 
         Ok(f(self, reg, Address::from(lut_entry.byte_idx)))
     }
@@ -252,7 +269,24 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
-            #[derive(Debug, Default)]
+            impl Default for Control {
+                fn default() -> Self {
+                    Self {
+                        exp_1_base: 0,
+                        exp_2_base: 0,
+                        exp_1_size: 0,
+                        exp_2_size: 0,
+                        exp_3_size: 0,
+                        // This needs to be a decent size.
+                        bios_size: 0x2_0000,
+                        spu_size: 0,
+                        cdrom_size: 0,
+                        common_size: 0,
+                    }
+                }
+            }
+
+            #[derive(Debug)]
             pub struct Control {
                 pub exp_1_base: u32,
                 pub exp_2_base: u32,
@@ -363,6 +397,16 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: MASK,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
+            },
+            Register {
+                name: 2,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
+            },
+            Register {
+                name: 3,
                 read_32: |_, io| 0,
                 write_32: |_, io, value| {},
             },
@@ -525,12 +569,12 @@ gen_cpu_bus_io!(
                 write_32: |_, io, value| {},
             },
             Register {
-                name: UNK_0,
+                name: 30,
                 read_32: |_, io| 0,
                 write_32: |_, io, value| {},
             },
             Register {
-                name: UNK_1,
+                name: 31,
                 read_32: |_, io| 0,
                 write_32: |_, io, value| {},
             },
@@ -761,7 +805,7 @@ gen_cpu_bus_io!(
                 write_32: |_, io, value| {},
             },
             Register {
-                name: UNK_0,
+                name: 8,
                 read_16: |_, io, addr| 0,
                 write_16: |_, io, addr, value| {},
             },
@@ -816,7 +860,7 @@ gen_cpu_bus_io!(
                 write_32: |_, io, value| {},
             },
             Register {
-                name: UNK_1,
+                name: 19,
                 read_32: |_, io| 0,
                 write_32: |_, io, value| {},
             },
@@ -836,7 +880,7 @@ gen_cpu_bus_io!(
                 write_8: |_, io, addr, value| {},
             },
             Register {
-                name: UNK_0,
+                name: 1,
                 read_8: |_, io, addr| 0,
                 write_8: |_, io, addr, value| {},
             },
@@ -846,12 +890,12 @@ gen_cpu_bus_io!(
                 write_8: |_, io, addr, value| {},
             },
             Register {
-                name: UNK_1,
+                name: 3,
                 read_8: |_, io, addr| 0,
                 write_8: |_, io, addr, value| {},
             },
             Register {
-                name: UNK_2,
+                name: 4,
                 read_16: |_, io, addr| 0,
                 write_16: |_, io, addr, value| {},
             },

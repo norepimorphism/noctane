@@ -103,8 +103,8 @@ macro_rules! def_read_fn {
         pub fn $fn_name(
             &mut self,
             addr: mem::Address,
-            fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
-        ) -> $ty {
+            fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], ()>,
+        ) -> Result<$ty, ()> {
             self.read(addr.into(), fetch_line, |word| $extract(word, addr))
         }
     };
@@ -128,12 +128,12 @@ impl Cache {
     fn read<T>(
         &mut self,
         addr: Address,
-        fetch_line: impl FnOnce(mem::Address) -> [u32; 4],
+        fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], ()>,
         extract: impl FnOnce(u32) -> T,
-    ) -> T {
+    ) -> Result<T, ()> {
         let entry = &mut self.entries[addr.entry_idx];
 
-        extract(entry.read(addr, fetch_line))
+        entry.read(addr, fetch_line).map(|word| extract(word))
     }
 
     // Contrary to reading, we don't need to do any endianness conversions here as the data is
@@ -226,10 +226,10 @@ mod tests {
                     // one word was written, the cache doesn't yet know what the other words should
                     // be, so it simply marked the entry as invalid. We should expect that a cache
                     // read will request to fetch the full line from memory.
-                    let read = cache.$read_name(addr, |_| [written; 4]);
+                    let read = cache.$read_name(addr, |_| Ok([written; 4]));
 
                     assert_eq!(
-                        written as $ty,
+                        Ok(written as $ty),
                         read,
                         "failed to read from {:#010x} ({})",
                         addr.init,
@@ -257,7 +257,7 @@ mod tests {
                     cache.$write_name(addr, written as $ty);
                     // Then, we read. The cache line is fetched from memory, and the cache entry is
                     // marked as valid.
-                    cache.$read_name(addr, |_| [written; 4]);
+                    cache.$read_name(addr, |_| Ok([written; 4]));
                     // Then, we write again, but to the next word in the cache line. We will use a
                     // different value for `written` so that we don't get a false positive as the
                     // entire cache line was filled with `written`. In this case, inverting
@@ -275,7 +275,7 @@ mod tests {
 
                     assert_eq!(
                         // Remember: the second word is an inverted `written`.
-                        !written as $ty,
+                        Ok(!written as $ty),
                         read,
                         "failed to read from {:#010x} ({})",
                         addr.init,

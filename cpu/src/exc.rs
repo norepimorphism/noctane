@@ -2,7 +2,7 @@
 
 //! CPU exceptions.
 
-/// The physical address to which execution is (usually) routed after an exception occurs.
+/// The program address to which execution is (usually) routed after an exception occurs.
 pub const VECTOR: u32 = 0x8000_0080;
 
 pub mod code {
