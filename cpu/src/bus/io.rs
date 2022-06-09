@@ -8,25 +8,9 @@ use crate::mem::Address;
 pub use mem_ctrl_1::Control as MemoryControl1;
 pub use mem_ctrl_2::Control as MemoryControl2;
 pub use post::Post;
+pub use spu_ctrl::Control as SpuControl;
+pub use spu_voice::Voice as SpuVoice;
 pub use timers::{Timer, Timers};
-
-impl<'a> Io<'a> {
-    pub fn new(
-        gpu: &'a mut Gpu,
-        mem_ctrl_1: &'a mut MemoryControl1,
-        mem_ctrl_2: &'a mut MemoryControl2,
-        post: &'a mut Post,
-        timers: &'a mut Timers,
-    ) -> Self {
-        Self {
-            gpu,
-            mem_ctrl_1,
-            mem_ctrl_2,
-            post,
-            timers,
-        }
-    }
-}
 
 /// External components accessible to the CPU via I/O registers.
 #[derive(Debug)]
@@ -36,6 +20,8 @@ pub struct Io<'a> {
     pub mem_ctrl_1: &'a mut MemoryControl1,
     pub mem_ctrl_2: &'a mut MemoryControl2,
     pub post: &'a mut Post,
+    pub spu_ctrl: &'a mut SpuControl,
+    pub spu_voices: &'a mut [SpuVoice; 24],
     pub timers: &'a mut Timers,
 }
 
@@ -755,9 +741,121 @@ gen_cpu_bus_io!(
         name: spu_voice,
         base_addr: 0x0c00,
         regs: [
-            // TODO
+            Register {
+                name: L_VOL_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].l_vol
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].l_vol = value;
+                },
+            },
+            Register {
+                name: R_VOL_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].r_vol
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].r_vol = value;
+                },
+            },
+            Register {
+                name: ADPCM_SAMPLE_RATE_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].adpcm_sample_rate
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].adpcm_sample_rate = value;
+                },
+            },
+            Register {
+                name: ADPCM_BASE_ADDR_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].adpcm_base_addr
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].adpcm_base_addr = value;
+                },
+            },
+            Register {
+                name: ADSR_CONFIG_0,
+                read_32: |_, io| 0,
+                write_32: |_, io, value| {},
+            },
+            Register {
+                name: ADSR_CURRENT_VOL_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].current_vol
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].current_vol = value;
+                },
+            },
+            Register {
+                name: ADSR_REP_ADDR_0,
+                read_16: |_, io, _| {
+                    io.spu_voices[0].rep_addr
+                },
+                write_16: |_, io, _, value| {
+                    io.spu_voices[0].rep_addr = value;
+                },
+            },
         ],
-        module: {},
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Voice {
+                pub l_vol: u16,
+                pub r_vol: u16,
+                pub adpcm_sample_rate: u16,
+                pub adpcm_base_addr: u16,
+                pub attack: Attack,
+                pub decay: Decay,
+                pub sustain: Sustain,
+                pub release: Release,
+                pub current_vol: u16,
+                pub rep_addr: u16,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Attack {
+                pub mode: Mode,
+                pub shift: u32,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Decay {
+                pub shift: u32,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Sustain {
+                pub level: u32,
+                pub mode: Mode,
+                pub dir: Direction,
+                pub shift: u32,
+                pub step: u32,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Release {
+                pub mode: Mode,
+                pub shift: u32,
+            }
+
+            #[derive(Debug, Default)]
+            pub enum Direction {
+                #[default]
+                Increase,
+                Decrease,
+            }
+
+            #[derive(Debug, Default)]
+            pub enum Mode {
+                #[default]
+                Linear,
+                Exponential,
+            }
+        },
     },
     // SPU Control.
     Lut {
@@ -765,9 +863,18 @@ gen_cpu_bus_io!(
         base_addr: 0x0d80,
         regs: [
             Register {
-                name: MAIN_VOL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: L_MAIN_VOL,
+                read_16: |_, io, addr| {
+                    io.spu_ctrl.l_main_vol
+                },
+                write_16: |_, io, addr, value| {
+                    io.spu_ctrl.l_main_vol = value;
+                },
+            },
+            Register {
+                name: R_MAIN_VOL,
+                read_16: |_, io, addr| 0,
+                write_16: |_, io, addr, value| {},
             },
             Register {
                 name: REVERB_VOL,
@@ -865,7 +972,13 @@ gen_cpu_bus_io!(
                 write_32: |_, io, value| {},
             },
         ],
-        module: {},
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Control {
+                pub l_main_vol: u16,
+                pub r_main_vol: u16,
+            }
+        },
     },
     // SPU Reverb Configuration.
     // SPU Internal.

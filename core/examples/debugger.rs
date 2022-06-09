@@ -133,10 +133,10 @@ impl Debugger {
         self.edit_breakpoints(
             args,
             |this, arg| {
-                this.add_addr_breakpoint(arg)
+                this.do_add_addr_breakpoint(arg)
             },
             |this, arg| {
-                this.add_sym_breakpoint(arg)
+                this.do_add_sym_breakpoint(arg)
             },
         )
     }
@@ -148,10 +148,10 @@ impl Debugger {
         self.edit_breakpoints(
             args,
             |this, arg| {
-                this.remove_addr_breakpoint(arg)
+                this.do_remove_addr_breakpoint(arg)
             },
             |this, arg| {
-                this.remove_sym_breakpoint(arg)
+                this.do_remove_sym_breakpoint(arg)
             },
         )
     }
@@ -172,14 +172,14 @@ impl Debugger {
         }
     }
 
-    fn add_addr_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
+    fn do_add_addr_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
         let addr = Self::get_breakpoint_addr(arg)?;
         self.addr_breakpoints.insert(addr);
 
         Ok(())
     }
 
-    fn remove_addr_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
+    fn do_remove_addr_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
         let addr = Self::get_breakpoint_addr(arg)?;
         self.addr_breakpoints.remove(&addr);
 
@@ -194,13 +194,13 @@ impl Debugger {
         u32::from_str_radix(arg, 16).ok()
     }
 
-    fn add_sym_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
+    fn do_add_sym_breakpoint(&mut self, arg: &str) -> Result<(), &'static str> {
         self.sym_breakpoints.insert(arg.to_string());
 
         Ok(())
     }
 
-    fn remove_sym_breakpoint<'a>(&mut self, arg: &str) -> Result<(), &'static str> {
+    fn do_remove_sym_breakpoint<'a>(&mut self, arg: &str) -> Result<(), &'static str> {
         self.sym_breakpoints.remove(arg);
 
         Ok(())

@@ -11,6 +11,8 @@ pub struct Core {
     pub mem_ctrl_1: noctane_cpu::bus::io::MemoryControl1,
     pub mem_ctrl_2: noctane_cpu::bus::io::MemoryControl2,
     pub post: noctane_cpu::bus::io::Post,
+    pub spu_ctrl: noctane_cpu::bus::io::SpuControl,
+    pub spu_voices: [noctane_cpu::bus::io::SpuVoice; 24],
     pub timers: noctane_cpu::bus::io::Timers,
 }
 
@@ -19,13 +21,15 @@ impl Core {
         self.cpu_state.connect_bus(noctane_cpu::Bus::new(
             &mut self.banks.main_ram,
             &mut self.banks.exp_1,
-            noctane_cpu::bus::Io::new(
-                &mut self.gpu,
-                &mut self.mem_ctrl_1,
-                &mut self.mem_ctrl_2,
-                &mut self.post,
-                &mut self.timers,
-            ),
+            noctane_cpu::bus::Io {
+                gpu: &mut self.gpu,
+                mem_ctrl_1: &mut self.mem_ctrl_1,
+                mem_ctrl_2: &mut self.mem_ctrl_2,
+                post: &mut self.post,
+                spu_ctrl: &mut self.spu_ctrl,
+                spu_voices: &mut self.spu_voices,
+                timers: &mut self.timers,
+            },
             &mut self.banks.exp_3,
             &mut self.banks.bios,
         ))
