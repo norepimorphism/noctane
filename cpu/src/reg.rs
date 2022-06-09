@@ -8,8 +8,6 @@ impl Default for File {
     fn default() -> Self {
         Self {
             // This is the reset vector.
-            // TODO: We should do something more proper in the future, like having a method called
-            // `reset` that sets the PC to this.
             pc: 0xbfc0_0000,
             hi: 0,
             lo: 0,
@@ -20,7 +18,15 @@ impl Default for File {
     }
 }
 
+// TODO: Define the control registers in the below documentation.
+
 /// The register file.
+///
+/// The program counter (PC) register points to the next instruction to be executed. HI and LO are
+/// used collectively to represent 64-bit values. The general-purpose registers (GPRs) are, as the
+/// name applies, for general use, and are not to be interpreted in any particular way. However,
+/// the same cannot be said for the COP0 control registers, each of which has a clearly-defined
+/// function.
 ///
 /// Why is it called a 'file', anyway?
 #[derive(Debug)]
@@ -52,11 +58,11 @@ impl fmt::Display for File {
         writeln!(f, "r14:{:08x} r30:{:08x}", self.gprs[14], self.gprs[30])?;
         writeln!(f, "r15:{:08x} r31:{:08x}", self.gprs[15], self.gprs[31])?;
         writeln!(f, "hi: {:08x} lo: {:08x}", self.hi, self.lo)?;
-        writeln!(f, "BadVaddr: {:08x}", self.cpr(cpr::BAD_VADDR_IDX))?;
-        writeln!(f, "SR:       {:08x}", self.cpr(cpr::STATUS_IDX))?;
-        writeln!(f, "Cause:    {:08x}", self.cpr(cpr::CAUSE_IDX))?;
-        writeln!(f, "EPC:      {:08x}", self.cpr(cpr::EPC_IDX))?;
-        writeln!(f, "PRId:     {:08x}", self.cpr(cpr::PRID_IDX))?;
+        writeln!(f, "BadVaddr: {:08x}", self.bad_vaddr())?;
+        writeln!(f, "SR:       {:08x}", self.status().0)?;
+        writeln!(f, "Cause:    {:08x}", self.cause().0)?;
+        writeln!(f, "EPC:      {:08x}", self.epc())?;
+        writeln!(f, "PRId:     {:08x}", self.prid().0)?;
 
         Ok(())
     }
@@ -101,12 +107,20 @@ impl File {
 
     /// Returns the value of the general-purpose register (GPR) identified by the given zero-based
     /// index.
+    ///
+    /// # Panics
+    ///
+    /// Indices above 31 will cause an out-of-bounds panic.
     pub fn gpr(&self, index: usize) -> u32 {
         if index == 0 { 0 } else { self.gprs[index] }
     }
 
     /// Sets the value of the general purpose register (GPR) identified by the given zero-based
     /// index.
+    ///
+    /// # Panics
+    ///
+    /// Indices above 31 will cause an out-of-bounds panic.
     pub fn set_gpr(&mut self, index: usize, value: u32) {
         self.gprs[index] = value;
     }
@@ -120,22 +134,26 @@ pub mod cpr {
     use crate::exc::Exception;
 
     impl super::File {
+        /// The BadVaddr register.
         pub fn bad_vaddr(&self) -> u32 {
             self.cprs[BAD_VADDR_IDX]
         }
 
+        /// Sets the BadVaddr register.
         pub fn set_bad_vaddr(&mut self, value: u32) {
             self.cprs[BAD_VADDR_IDX] = value;
         }
 
+        /// The status register (SR).
         pub fn status(&self) -> Status {
             Status(self.cprs[STATUS_IDX])
         }
 
+        /// Sets the status register (SR).
         pub fn set_status(&mut self, value: Status) {
             if value.0 != self.cprs[STATUS_IDX] {
-                // When the status register (SR) is modified, we set the following flag to indicate to
-                // the CPU that it should update itself accordingly. When the CPU calls the
+                // When the status register (SR) is modified, we set the following flag to indicate
+                // to the CPU that it should update itself accordingly. When the CPU calls the
                 // [`Self::altered_sr`] method, this flag is cleared.
                 self.sr_is_dirty = true;
             }
@@ -143,8 +161,8 @@ pub mod cpr {
             self.cprs[STATUS_IDX] = value.0;
         }
 
-        /// Returns the new value of the status register (SR) if it was modified since this method was
-        /// last called.
+        /// Returns the new value of the status register (SR) if it was modified since this method
+        /// was last called.
         ///
         /// This method is useful for updating the CPU in response to SR modifications.
         pub(crate) fn altered_sr(&mut self) -> Option<Status> {
@@ -159,22 +177,27 @@ pub mod cpr {
             }
         }
 
+        /// The Cause register.
         pub fn cause(&self) -> Cause {
             Cause(self.cprs[CAUSE_IDX])
         }
 
+        /// Sets the Cause register.
         pub fn set_cause(&mut self, value: Cause) {
             self.cprs[CAUSE_IDX] = value.0;
         }
 
+        /// The EPC register.
         pub fn epc(&self) -> u32 {
             self.cprs[EPC_IDX]
         }
 
+        /// Sets the EPC register.
         pub fn set_epc(&mut self, value: u32) {
             self.cprs[EPC_IDX] = value;
         }
 
+        /// The PRId register.
         pub fn prid(&self) -> Prid {
             // Unlike the other control registers, the PRId is read-only (RM[3-4]). As such, its
             // value is hardcoded here, and there is no setter method.
@@ -202,14 +225,16 @@ pub mod cpr {
         /// Sets the value of the control register identified by the given zero-based index.
         pub(crate) fn set_cpr(&mut self, index: usize, value: u32) {
             if index == STATUS_IDX {
+                // The SR has a special setter that sets a 'dirty' flag.
                 self.set_status(Status(value));
             } else {
-            // It is possible to overwrite the PRId register using this, but that's OK as its value is
-            // hardcoded, as shown above in [`Self::prid`].
-            self.cprs[index] = value;
+                // It is possible to overwrite the PRId register using this, but that's OK as its
+                // value is hardcoded, as shown above in [`Self::prid`].
+                self.cprs[index] = value;
             }
         }
 
+        /// Raises an exception with the given code.
         pub(crate) fn raise_exception(&mut self, code: u32) {
             let mut cause = self.cause();
             cause.set_exc_code(code);
@@ -224,26 +249,26 @@ pub mod cpr {
         /// The last exception produced by an instruction execution.
         ///
         /// This always returns an exception&mdash;even if no exception actually occurred. This is
-        /// because it generates one from the Cause and EPC CPU registers, which have no concept of
-        /// optionality.
+        /// because it generates one from the Cause and EPC control registers, which have no concept
+        /// of optionality.
         pub fn last_exception(&self) -> Exception {
-            let cause = self.cause();
-            let epc = self.epc();
-
-            Exception { code: cause.exc_code(), epc }
+            Exception {
+                code: self.cause().exc_code(),
+                epc: self.epc(),
+            }
         }
     }
 
     /// The index of the BadVaddr register.
-    pub const BAD_VADDR_IDX: usize = 8;
+    pub(crate) const BAD_VADDR_IDX: usize = 8;
     /// The index of the status register (SR).
-    pub const STATUS_IDX: usize = 12;
+    pub(crate) const STATUS_IDX: usize = 12;
     /// The index of the Cause register.
-    pub const CAUSE_IDX: usize = 13;
+    pub(crate) const CAUSE_IDX: usize = 13;
     /// The index of the EPC register.
-    pub const EPC_IDX: usize = 14;
+    pub(crate) const EPC_IDX: usize = 14;
     /// The index of the PRId register.
-    pub const PRID_IDX: usize = 15;
+    pub(crate) const PRID_IDX: usize = 15;
 
     bitfield! {
         /// The status register (SR).
