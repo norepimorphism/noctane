@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! An I-cache entry.
+
 use std::fmt;
 
 use super::Address;
@@ -12,15 +14,20 @@ impl Default for Entry {
             // are, by default, invalid.
             is_valid: false,
             tag: 0,
-            line: [0; 4],
+            line: [0xaa; 4],
         }
     }
 }
 
+/// An I-cache entry.
 #[derive(Clone, Copy)]
 pub struct Entry {
+    /// Whether or not the line contained within this entry is a valid copy of the data pointed to
+    /// by the tag and this entry's location in cache.
     is_valid: bool,
+    /// The topmost bits of the address that this entry represents.
     tag: usize,
+    /// The data contained within this entry.
     line: [u32; 4],
 }
 
@@ -44,6 +51,11 @@ impl fmt::Display for Entry {
 }
 
 impl Entry {
+    /// Reads a word from this entry.
+    ///
+    /// As this entry contains four words, the precise word returned is selected by the `addr`
+    /// argument. If a miss occurs, the `fetch_line` function is invoked, and this entry is updated
+    /// accordingly.
     pub(super) fn read(
         &mut self,
         addr: Address,
@@ -56,11 +68,11 @@ impl Entry {
             // Sadge.
             tracing::trace!("Cache miss. (addr={})", addr);
 
-            // Uh oh! We're not up-to-date with the CPU bus. Accordingly, we will refresh ourselves
-            // by calling `fetch_line`.
+            // We're not up-to-date with the CPU bus. Accordingly, we will refresh ourselves by
+            // calling `fetch_line`.
             // Note: For this to be correct, `fetch_line` must return native-endian words; that is,
             // on big-endian hosts, they have not yet been byte-swapped.
-            let mut line = fetch_line(mem::Address::from(addr.working & !0b1111))?;
+            let mut line = fetch_line(mem::Address::from(addr.init & !0b1111))?;
             // Now, we byte-swap `line`.
             for word in line.iter_mut() {
                 *word = word.to_le();
@@ -75,6 +87,10 @@ impl Entry {
         Ok(self.line[addr.word_idx])
     }
 
+    /// Writes to a word in this entry.
+    ///
+    /// As this entry contains four words, the precise word returned is selected by the `addr`
+    /// argument.
     pub(super) fn write(&mut self, addr: Address, value: u32) {
         self.line[addr.word_idx] = value.to_le();
 
@@ -86,13 +102,16 @@ impl Entry {
             // discarding data from a previously cached location)" (p. 5-2). Therefore, we will go
             // ahead and invalidate this entry anyway.
             self.is_valid = false;
-
             // Now, to indicate that the data here is specifically an outdated version of the given
             // address, we update the tag.
             self.tag = addr.tag;
         }
     }
 
+    /// Modifies a word in this entry.
+    ///
+    /// As this entry contains four words, the precise word returned is selected by the `addr`
+    /// argument. The word is then modified with the `modify_word` function.
     pub(super) fn write_partial(&mut self, addr: Address, modify_word: impl FnOnce(&mut u32)) {
         if self.is_valid && self.test_hit(addr) {
             let word = &mut self.line[addr.word_idx];
@@ -110,7 +129,8 @@ impl Entry {
         self.is_valid = false;
     }
 
-    /// Determines if this entry is a copy of the data contained at the given address.
+    /// Determines if this entry is a copy (valid or not) of the data contained at the given
+    /// address.
     fn test_hit(&self, addr: Address) -> bool {
         self.tag == addr.tag
     }

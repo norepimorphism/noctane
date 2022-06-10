@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! An instruction cache (I-cache).
+
 mod entry;
 
 use std::fmt;
@@ -11,7 +13,9 @@ use crate::mem;
 impl From<mem::Address> for Address {
     /// Decomposes a physical address into an instruction cache address.
     fn from(it: mem::Address) -> Self {
-        let mut addr = it.init;
+        // The I-cache operates on physical addresses, so we must use the `working` field, which is
+        // assumed, at this point, to contain a physical address.
+        let mut addr = it.working;
 
         // We are only addressing words, so we can silently ignore the byte index.
         addr >>= 2;
@@ -30,7 +34,10 @@ impl From<mem::Address> for Address {
         let tag = addr;
 
         Self {
-            working: it.working,
+            // As mentioned in [`Address::init`], the purpose of this field is to address the CPU
+            // bus for line fetches. As such, we need the working address, which is a physical
+            // address.
+            init: it.working,
             tag,
             entry_idx,
             word_idx,
@@ -38,11 +45,28 @@ impl From<mem::Address> for Address {
     }
 }
 
+/// Indexes a [`Cache`].
 #[derive(Clone, Copy)]
 struct Address {
-    working: usize,
+    /// The original physical address.
+    ///
+    /// This field has only one purpose, which is to address the CPU bus in the event that a cache
+    /// miss occurs and a line must be fetched.
+    init: usize,
+    /// The topmost bits of [`init`].
+    ///
+    /// [`init`]: Self::init
     tag: usize,
+    /// The index of the entry within a [`Cache`] to be accessed.
+    ///
+    /// This value may between 0 and 255, inclusive.
     entry_idx: usize,
+    /// The index of the word within the cache line of the entry represented by [`entry_idx`] to be
+    /// accessed.
+    ///
+    /// This value may be 0, 1, 2, or 3.
+    ///
+    /// [`entry_idx`]: Self::entry_idx
     word_idx: usize,
 }
 
@@ -65,6 +89,20 @@ impl Default for Cache {
     }
 }
 
+/// An instruction cache (I-cache).
+///
+/// This cache contains 256 entries of four 32-bit words each.
+///
+/// # Isolation
+///
+/// When the I-cache is isolated, a special mechanism is enabled in which all writes&mdash;partial
+/// writes as well as full 32-bit stores&mdash;do not cause data to be written, but rather
+/// invalidate the cache line of the entry that they access. This feature is useful, for example,
+/// when copying instructions into an uncached address region. Because the writes are not observed
+/// by the I-cache, if the cache contains any entries that point to the memory locations of the
+/// instructions that were just written, those entries have become invalid. The cache, of course,
+/// doesn't know this yet, so it is the programmer's responsibility to manually invalidate those
+/// cache entries.
 pub struct Cache {
     entries: [Entry; 256],
     is_isolated: bool,
@@ -81,10 +119,16 @@ impl fmt::Display for Cache {
 }
 
 impl Cache {
+    /// Determines if this cache is isolated.
+    ///
+    /// See the [`Cache`] documentation for the effects of isolation.
     pub fn is_isolated(&self) -> bool {
         self.is_isolated
     }
 
+    /// Sets whether or not the cache is isolated.
+    ///
+    /// See the [`Cache`] documentation for the effects of isolation.
     pub fn set_isolated(&mut self, value: bool) {
         if self.is_isolated != value {
             if value {
@@ -257,7 +301,7 @@ mod tests {
                     cache.$write_name(addr, written as $ty);
                     // Then, we read. The cache line is fetched from memory, and the cache entry is
                     // marked as valid.
-                    cache.$read_name(addr, |_| Ok([written; 4]));
+                    cache.$read_name(addr, |_| Ok([written; 4])).unwrap();
                     // Then, we write again, but to the next word in the cache line. We will use a
                     // different value for `written` so that we don't get a false positive as the
                     // entire cache line was filled with `written`. In this case, inverting
