@@ -29,8 +29,8 @@ impl From<usize> for Address {
 }
 
 impl Address {
-    /// Creates a new `Address`.
-    pub(crate) const fn new(init: usize, working: usize) -> Self {
+    /// Creates a new [`Address`].
+    pub const fn new(init: usize, working: usize) -> Self {
         Self {
             init,
             working,
@@ -44,31 +44,31 @@ impl Address {
 #[derive(Clone, Copy)]
 pub struct Address {
     /// The original program address.
-    pub(crate) init: usize,
+    pub init: usize,
     /// The current 'working' address.
     ///
     /// This may be a program address or a physical address. It represents the current state of this
     /// structure. This field is rebased as it is passed through different memory stores.
-    pub(crate) working: usize,
+    pub working: usize,
     /// The index of the halfword within the word represented by [`working`] to be accessed.
     ///
     /// This value may be 0 or 1.
     ///
     /// [`working`]: Self::working
-    pub(crate) halfword_idx: usize,
+    pub halfword_idx: usize,
     /// The index of the byte within the word represented by [`working`] to be accessed.
     ///
     /// This value may be 0, 1, 2, or 3.
     ///
     /// [`working`]: Self::working
-    pub(crate) byte_idx: usize,
+    pub byte_idx: usize,
 }
 
 impl Address {
     /// Modifies the [`working`] field with a given map function.
     ///
     /// This is merely a convenience function for the following:
-    /// ```
+    /// ```ignore
     /// self.working = f(self.working);
     /// ```
     ///
@@ -117,12 +117,12 @@ pub struct Memory<'c, 'b> {
 }
 
 impl<'b> Memory<'_, 'b> {
-    /// A shared reference to the CPU's cache.
+    /// A shared reference to the CPU cache.
     pub fn cache(&self) -> &Cache {
         self.cache
     }
 
-    /// An exclusive reference to the CPU's cache.
+    /// An exclusive reference to the CPU cache.
     pub fn cache_mut(&mut self) -> &mut Cache {
         self.cache
     }
@@ -188,8 +188,8 @@ macro_rules! def_access {
                 };
             }
 
-            // To ensure that word boundaries cannot be crossed, we will strip the bottom bits from
-            // the address as necessary.
+            // To ensure that (half)word boundaries cannot be crossed, we will strip the bottom bits
+            // from the address as necessary.
             let addr = strip_addr!($width addr);
 
             macro_rules! call_access_fn {

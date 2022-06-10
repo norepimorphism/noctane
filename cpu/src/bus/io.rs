@@ -5,9 +5,9 @@ use noctane_proc_macro::gen_cpu_bus_io;
 
 use crate::mem::Address;
 
-pub use mem_ctrl_1::Control as MemoryControl1;
-pub use mem_ctrl_2::Control as MemoryControl2;
+pub use bus_ctrl::Control as BusControl;
 pub use post::Post;
+pub use ram_ctrl::Control as RamControl;
 pub use spu_ctrl::Control as SpuControl;
 pub use spu_voice::Voice as SpuVoice;
 pub use timers::{Timer, Timers};
@@ -17,9 +17,9 @@ pub use timers::{Timer, Timers};
 pub struct Io<'a> {
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
-    pub mem_ctrl_1: &'a mut MemoryControl1,
-    pub mem_ctrl_2: &'a mut MemoryControl2,
+    pub bus_ctrl: &'a mut BusControl,
     pub post: &'a mut Post,
+    pub ram_ctrl: &'a mut RamControl,
     pub spu_ctrl: &'a mut SpuControl,
     pub spu_voices: &'a mut [SpuVoice; 24],
     pub timers: &'a mut Timers,
@@ -60,9 +60,9 @@ impl Io<'_> {
             timers::BASE_ADDR.. => get_lut_entry!(timers),
             dma::BASE_ADDR.. => get_lut_entry!(dma),
             int_ctrl::BASE_ADDR.. => get_lut_entry!(int_ctrl),
-            mem_ctrl_2::BASE_ADDR.. => get_lut_entry!(mem_ctrl_2),
+            ram_ctrl::BASE_ADDR.. => get_lut_entry!(ram_ctrl),
             perif::BASE_ADDR.. => get_lut_entry!(perif),
-            mem_ctrl_1::BASE_ADDR.. => get_lut_entry!(mem_ctrl_1),
+            bus_ctrl::BASE_ADDR.. => get_lut_entry!(bus_ctrl),
             _ => (Err(()), ""),
         };
 
@@ -167,90 +167,90 @@ struct LutEntry {
 
 // Define the I/O registers. This is going to be quite long...
 gen_cpu_bus_io!(
-    // Memory Control 1.
+    // Bus Control.
     Lut {
-        name: mem_ctrl_1,
+        name: bus_ctrl,
         base_addr: 0x0000,
         regs: [
             Register {
                 name: EXP_1_BASE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.exp_1_base
+                    io.bus_ctrl.exp_1_base
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.exp_1_base = value;
+                    io.bus_ctrl.exp_1_base = value;
                 },
             },
             Register {
                 name: EXP_2_BASE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.exp_2_base
+                    io.bus_ctrl.exp_2_base
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.exp_2_base = value;
+                    io.bus_ctrl.exp_2_base = value;
                 },
             },
             Register {
                 name: EXP_1_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.exp_1_size
+                    io.bus_ctrl.exp_1_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.exp_1_size = value;
+                    io.bus_ctrl.exp_1_size = value;
                 },
             },
             Register {
                 name: EXP_3_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.exp_3_size
+                    io.bus_ctrl.exp_3_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.exp_3_size = value;
+                    io.bus_ctrl.exp_3_size = value;
                 },
             },
             Register {
                 name: BIOS_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.bios_size
+                    io.bus_ctrl.bios_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.bios_size = value;
+                    io.bus_ctrl.bios_size = value;
                 },
             },
             Register {
                 name: SPU_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.spu_size
+                    io.bus_ctrl.spu_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.spu_size = value;
+                    io.bus_ctrl.spu_size = value;
                 },
             },
             Register {
                 name: CDROM_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.cdrom_size
+                    io.bus_ctrl.cdrom_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.cdrom_size = value;
+                    io.bus_ctrl.cdrom_size = value;
                 },
             },
             Register {
                 name: EXP_2_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.exp_2_size
+                    io.bus_ctrl.exp_2_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.exp_2_size = value;
+                    io.bus_ctrl.exp_2_size = value;
                 },
             },
             Register {
                 name: COMMON_SIZE,
                 read_32: |_, io| {
-                    io.mem_ctrl_1.common_size
+                    io.bus_ctrl.common_size
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_1.common_size = value;
+                    io.bus_ctrl.common_size = value;
                 },
             },
         ],
@@ -349,25 +349,89 @@ gen_cpu_bus_io!(
         ],
         module: {},
     },
-    // Memory Control 2.
+    // Bus Control 2.
     Lut {
-        name: mem_ctrl_2,
+        name: ram_ctrl,
         base_addr: 0x0060,
         regs: [
             Register {
-                name: RAM_SIZE,
+                name: RAM_CTRL,
                 read_32: |_, io| {
-                    io.mem_ctrl_2.ram_size
+                    io.ram_ctrl.0
                 },
                 write_32: |_, io, value| {
-                    io.mem_ctrl_2.ram_size = value;
+                    *io.ram_ctrl = ram_ctrl::Control(value);
                 },
             },
         ],
         module: {
-            #[derive(Debug, Default)]
-            pub struct Control {
-                pub ram_size: u32,
+            impl Default for Control {
+                fn default() -> Self {
+                    Self(0)
+                }
+            }
+
+            // TODO
+            bitfield::bitfield! {
+                pub struct Control(u32);
+                impl Debug;
+                pub into LayoutKind, layout, set_layout: 11, 9;
+            }
+
+            impl From<u32> for LayoutKind {
+                fn from(value: u32) -> Self {
+                    match value & 0b111 {
+                        0 => Self::_1M,
+                        1 => Self::_4M,
+                        2 => Self::_1MPlus1MHighZ,
+                        3 => Self::_4MPlus4MHighZ,
+                        4 => Self::_2M,
+                        5 | 7 => Self::_8M,
+                        6 => Self::_2MPlus2MHighZ,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+
+            #[derive(Debug)]
+            pub enum LayoutKind {
+                _1M,
+                _4M,
+                _1MPlus1MHighZ,
+                _4MPlus4MHighZ,
+                _2M,
+                _8M,
+                _2MPlus2MHighZ,
+            }
+
+            impl From<LayoutKind> for Layout {
+                fn from(kind: LayoutKind) -> Self {
+                    match kind {
+                        LayoutKind::_1M             => Self::new(1, 0),
+                        LayoutKind::_1MPlus1MHighZ  => Self::new(1, 1),
+                        LayoutKind::_2M             => Self::new(2, 0),
+                        LayoutKind::_2MPlus2MHighZ  => Self::new(2, 2),
+                        LayoutKind::_4M             => Self::new(4, 0),
+                        LayoutKind::_4MPlus4MHighZ  => Self::new(4, 4),
+                        LayoutKind::_8M             => Self::new(8, 0),
+
+                    }
+                }
+            }
+
+            impl Layout {
+                pub const fn new(data_mb: u32, high_z_mb: u32) -> Self {
+                    Self {
+                        data_mb,
+                        high_z_mb,
+                    }
+                }
+            }
+
+            #[derive(Debug)]
+            pub struct Layout {
+                pub data_mb: u32,
+                pub high_z_mb: u32,
             }
         },
     },

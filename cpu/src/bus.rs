@@ -22,11 +22,21 @@ macro_rules! def_bank {
 
         impl $name {
             $(
-                /// The base address, relative to the start of each memory segment, of this memory
-                /// bank.
-                pub const BASE_ADDR: usize = $addr;
+                /// The physical address of the start of this memory bank.
+                pub const BASE_ADDR: u32 = $addr;
             )?
 
+            /// The maximum size, in bytes, of this memory bank.
+            pub const MAX_SIZE: usize = $size;
+            /// The length, in words, of this memory bank.
+            ///
+            /// This length determines the highest word within this bank that may be accessed by
+            /// hardware. However, [certain I/O registers] may further restrict the range accessible
+            /// to software. While it is possible to configure such registers in a manner that they
+            /// permit access beyond the length of this bank, an exception will be raised on any
+            /// attempt to access higher words.
+            ///
+            /// [certain I/O registers]: io::MemoryControl1
             const LEN: usize = make_index($size);
         }
 
@@ -58,37 +68,21 @@ const fn make_index(addr: usize) -> usize {
 
 // Define the memory banks (except for the I/O region, which is not a simple buffer like the rest
 // are).
-def_bank!(MainRam,  0x20_0000 @ 0x0000_0000);
-def_bank!(Exp1,     0x80_0000);
-def_bank!(Exp3,     0x20_0000 @ 0x1fa0_0000);
-def_bank!(Bios,     0x08_0000 @ 0x1fc0_0000);
-
-impl<'a> Bus<'a> {
-    /// Creates a new [`Bus`].
-    pub fn new(
-        main_ram: &'a mut MainRam,
-        exp_1: &'a mut Exp1,
-        io: Io<'a>,
-        exp_3: &'a mut Exp3,
-        bios: &'a mut Bios,
-    ) -> Self {
-        Self {
-            main_ram,
-            exp_1,
-            io,
-            exp_3,
-            bios,
-        }
-    }
-}
+def_bank!(Ram,  0x20_0000 @ 0x0000_0000);
+def_bank!(Exp1, 0x80_0000);
+// `Exp2` is missing here as it is located within the I/O region.
+def_bank!(Exp3, 0x20_0000 @ 0x1fa0_0000);
+def_bank!(Bios, 0x08_0000 @ 0x1fc0_0000);
 
 /// The CPU memory bus.
 pub struct Bus<'a> {
-    /// [`MainRam`].
-    pub main_ram: &'a mut MainRam,
+    /// [`Ram`].
+    pub ram: &'a mut Ram,
     /// [`Exp1`].
     pub exp_1: &'a mut Exp1,
     /// Input and output (I/O).
+    ///
+    /// This field also contains Expansion Region 2.
     pub io: Io<'a>,
     /// [`Exp3`].
     pub exp_3: &'a mut Exp3,
@@ -97,11 +91,11 @@ pub struct Bus<'a> {
 }
 
 impl Bus<'_> {
-    /// The base address, relative to the start of each memory segment, of the I/O region.
-    const IO_BASE_ADDR: usize = 0x1f80_1000;
+    /// The physical address of the start of the I/O region.
+    const IO_BASE_ADDR: u32 = 0x1f80_1000;
 
-    /// Selects the appropriate memory bank for a given segment-relative address and passes it to
-    /// one of two functions depending on how the data should be accessed.
+    /// Selects the appropriate memory bank for a given physical address and passes it to one of two
+    /// functions depending on how the data should be accessed.
     ///
     /// `access_word` is called when a normal, buffer-backed memory bank is accessed, such as the
     /// BIOS ROM. A slice into the entire buffer, offset by a value determined from the address, is
@@ -111,7 +105,7 @@ impl Bus<'_> {
     /// `access_io` is called when the given address points into the I/O region. An address relative
     /// to the start of the I/O region is passed to `access_io`. Implementations of `access_io` are
     /// expected to simply delegate to the appropriate I/O read/write function.
-    fn access<T: Default>(
+    fn access<T: Default + HighZ>(
         &mut self,
         addr: Address,
         access_word: impl FnOnce(&mut u32) -> T,
@@ -141,6 +135,8 @@ impl Bus<'_> {
                         );
 
                         self.$field_name
+                            // Be sure not to use normal `[]` indexing here! Accesses may be
+                            // out-of-bounds.
                             .get_mut(make_index(rebased_addr))
                             .map(|it| access_word(it))
                             .ok_or(())
@@ -149,12 +145,43 @@ impl Bus<'_> {
             };
         }
 
-        // TODO: Don't hardcode RAM size.
-        try_access_bank!(main_ram,  MainRam::BASE_ADDR,             0x20_0000);
-        try_access_bank!(bios,      Bios::BASE_ADDR,                self.io.mem_ctrl_1.bios_size);
-        try_access_bank!(exp_1,     self.io.mem_ctrl_1.exp_1_base,  self.io.mem_ctrl_1.exp_1_size);
-        try_access_bank!(exp_3,     Exp3::BASE_ADDR,                self.io.mem_ctrl_1.exp_3_size);
+        const MB: u32 = 1024 * 1024;
 
+        let ram_layout = io::ram_ctrl::Layout::from(self.io.ram_ctrl.layout());
+        let ram_data_size = MB * ram_layout.data_mb;
+        let ram_high_z_size = MB * ram_layout.high_z_mb;
+
+        // TODO: Don't hardcode RAM size.
+        try_access_bank!(
+            ram,
+            Ram::BASE_ADDR,
+            ram_data_size,
+        );
+        try_access!(
+            Ram::BASE_ADDR.wrapping_add(ram_data_size),
+            ram_high_z_size,
+            |_| {
+                Ok(<T as HighZ>::HIGH_Z)
+            },
+        );
+        try_access_bank!(
+            bios,
+            Bios::BASE_ADDR,
+            // TODO: This is incorrect.
+            self.io.bus_ctrl.bios_size,
+        );
+        try_access_bank!(
+            exp_1,
+            self.io.bus_ctrl.exp_1_base,
+            // TODO: This is incorrect.
+            self.io.bus_ctrl.exp_1_size,
+        );
+        try_access_bank!(
+            exp_3,
+            Exp3::BASE_ADDR,
+            // TODO: This is incorrect.
+            self.io.bus_ctrl.exp_3_size,
+        );
         try_access!(
             Self::IO_BASE_ADDR,
             0x1000,
@@ -163,17 +190,38 @@ impl Bus<'_> {
             },
         );
         try_access!(
-            self.io.mem_ctrl_1.exp_2_base,
-            self.io.mem_ctrl_1.exp_2_size,
+            self.io.bus_ctrl.exp_2_base,
+            self.io.bus_ctrl.exp_2_size,
             |rebased_addr: usize| {
-                tracing::info!("rebased_addr: {:#010x}", rebased_addr + 0x1000);
                 access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
             },
         );
 
         Err(())
     }
+}
 
+trait HighZ {
+    const HIGH_Z: Self;
+}
+
+macro_rules! impl_high_z_for_num {
+    ($ty:ty) => {
+        impl HighZ for $ty {
+            const HIGH_Z: Self = !0;
+        }
+    };
+}
+
+impl_high_z_for_num!(u8);
+impl_high_z_for_num!(u16);
+impl_high_z_for_num!(u32);
+
+impl HighZ for () {
+    const HIGH_Z: Self = ();
+}
+
+impl Bus<'_> {
     // In each of the three following cases for reads, as the data contained within `word` is
     // little-endian, we should use [`u32::to_le`] to convert to native-endian first.
 

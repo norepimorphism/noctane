@@ -8,9 +8,9 @@ pub struct Core {
     pub cpu_state: noctane_cpu::State,
     pub gpu: Gpu,
     pub banks: Banks,
-    pub mem_ctrl_1: noctane_cpu::bus::io::MemoryControl1,
-    pub mem_ctrl_2: noctane_cpu::bus::io::MemoryControl2,
+    pub bus_ctrl: noctane_cpu::bus::io::BusControl,
     pub post: noctane_cpu::bus::io::Post,
+    pub ram_ctrl: noctane_cpu::bus::io::RamControl,
     pub spu_ctrl: noctane_cpu::bus::io::SpuControl,
     pub spu_voices: [noctane_cpu::bus::io::SpuVoice; 24],
     pub timers: noctane_cpu::bus::io::Timers,
@@ -18,30 +18,30 @@ pub struct Core {
 
 impl Core {
     pub fn cpu(&mut self) -> Cpu {
-        self.cpu_state.connect_bus(noctane_cpu::Bus::new(
-            &mut self.banks.main_ram,
-            &mut self.banks.exp_1,
-            noctane_cpu::bus::Io {
+        self.cpu_state.connect_bus(noctane_cpu::Bus {
+            ram: &mut self.banks.ram,
+            exp_1: &mut self.banks.exp_1,
+            io: noctane_cpu::bus::Io {
                 gpu: &mut self.gpu,
-                mem_ctrl_1: &mut self.mem_ctrl_1,
-                mem_ctrl_2: &mut self.mem_ctrl_2,
+                bus_ctrl: &mut self.bus_ctrl,
                 post: &mut self.post,
+                ram_ctrl: &mut self.ram_ctrl,
                 spu_ctrl: &mut self.spu_ctrl,
                 spu_voices: &mut self.spu_voices,
                 timers: &mut self.timers,
             },
-            &mut self.banks.exp_3,
-            &mut self.banks.bios,
-        ))
+            exp_3: &mut self.banks.exp_3,
+            bios: &mut self.banks.bios,
+        })
     }
 }
 
 #[derive(Default)]
 pub struct Banks {
-    pub main_ram: noctane_cpu::bus::MainRam,
     pub exp_1: noctane_cpu::bus::Exp1,
     pub exp_3: noctane_cpu::bus::Exp3,
     pub bios: noctane_cpu::bus::Bios,
+    pub ram: noctane_cpu::bus::Ram,
 }
 
 #[cfg(test)]

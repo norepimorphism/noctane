@@ -91,7 +91,8 @@ impl Default for Cache {
 
 /// An instruction cache (I-cache).
 ///
-/// This cache contains 256 entries of four 32-bit words each.
+/// This cache contains 256 entries of four 32-bit words each. [Addresses] passed to this cache
+/// are at the physical level; that is, the [`working`] field represents a physical address.
 ///
 /// # Isolation
 ///
@@ -103,6 +104,9 @@ impl Default for Cache {
 /// instructions that were just written, those entries have become invalid. The cache, of course,
 /// doesn't know this yet, so it is the programmer's responsibility to manually invalidate those
 /// cache entries.
+///
+/// [Addresses]: mem::Address
+/// [`working`]: mem::Address::working
 pub struct Cache {
     entries: [Entry; 256],
     is_isolated: bool,
@@ -143,7 +147,15 @@ impl Cache {
 }
 
 macro_rules! def_read_fn {
-    ($fn_name:ident() -> $ty:ty { $extract:expr }) => {
+    (
+        docs: $docs:literal,
+        $fn_name:ident() -> $ty:ty { $extract:expr } $(,)?
+    ) => {
+        #[doc = $docs]
+        ///
+        /// If a cache miss occurs, a cache line is read from the `fetch_line` argument, which is
+        /// expected to return either an array of four native-endian words, or an error, in which
+        /// case this method returns that error.
         pub fn $fn_name(
             &mut self,
             addr: mem::Address,
@@ -155,20 +167,27 @@ macro_rules! def_read_fn {
 }
 
 impl Cache {
-    // In each of the following cases, as the data contained within `word` is little-endian, we
-    // should use [`u32::to_le`] to convert to native-endian first.
     def_read_fn!(
+        docs: "Reads an 8-bit value from the given address within this cache.",
         read_8() -> u8 {
-            |word: u32, addr: mem::Address| addr.index_byte_in_word(word.to_le())
+            |word: u32, addr: mem::Address| addr.index_byte_in_word(word)
         }
     );
     def_read_fn!(
+        docs: "Reads a 16-bit value from the given address within this cache.",
         read_16() -> u16 {
-            |word: u32, addr: mem::Address| addr.index_halfword_in_word(word.to_le())
+            |word: u32, addr: mem::Address| addr.index_halfword_in_word(word)
         }
     );
-    def_read_fn!(read_32() -> u32 { |word: u32, _| word.to_le() });
+    def_read_fn!(
+        docs: "Reads a 32-bit value from the given address within this cache.",
+        read_32() -> u32 { |word: u32, _| word }
+    );
 
+    /// Reads from the given address within this cache.
+    ///
+    /// `extract` accepts a native-endian word and returns the portion of that word that should
+    /// be output by this method.
     fn read<T>(
         &mut self,
         addr: Address,
@@ -177,12 +196,19 @@ impl Cache {
     ) -> Result<T, ()> {
         let entry = &mut self.entries[addr.entry_idx];
 
-        entry.read(addr, fetch_line).map(|word| extract(word))
+        entry
+            .read(addr, fetch_line)
+            .map(|word| {
+                // As the data contained within `word` is little-endian, we should use
+                // [`u32::to_le`] to convert to native-endian first.
+                extract(word.to_le())
+            })
     }
 
     // Contrary to reading, we don't need to do any endianness conversions here as the data is
     // already little-endian, and we can operate directly on that.
 
+    /// Writes an 8-bit value to the given address within this cache.
     pub fn write_8(&mut self, addr: mem::Address, value: u8) {
         self.write_partial(addr.into(), |mut word| {
             word[addr.byte_idx] = value;
@@ -191,6 +217,7 @@ impl Cache {
         })
     }
 
+    /// Writes a 16-bit value to the given address within this cache.
     pub fn write_16(&mut self, addr: mem::Address, value: u16) {
         self.write_partial(addr.into(), |mut word| {
             word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_le_bytes();
@@ -199,6 +226,7 @@ impl Cache {
         })
     }
 
+    /// Writes a partial word to the given address within this cache.
     fn write_partial(&mut self, addr: Address, map_word: impl FnOnce([u8; 4]) -> [u8; 4]) {
         let entry = &mut self.entries[addr.entry_idx];
         if self.is_isolated {
@@ -221,6 +249,7 @@ impl Cache {
         }
     }
 
+    /// Writes a 32-bit value to the given address within this cache.
     pub fn write_32(&mut self, addr: mem::Address, value: u32) {
         let addr = Address::from(addr);
         let entry = &mut self.entries[addr.entry_idx];
@@ -239,6 +268,7 @@ impl Cache {
 mod tests {
     use super::*;
 
+    /// Generates a sequence of test addresses.
     fn gen_test_addrs() -> impl Iterator<Item = mem::Address> {
         (0x0000_00000..=0xffff_ffff)
             .step_by(0x800)

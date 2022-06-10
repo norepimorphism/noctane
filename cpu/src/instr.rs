@@ -636,6 +636,7 @@ macro_rules! def_instr_and_op_kind {
     };
 }
 
+// TODO: Write documentation for each instruction.
 def_instr_and_op_kind!(
     {
         name: Add,
