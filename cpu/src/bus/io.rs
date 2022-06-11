@@ -806,62 +806,62 @@ gen_cpu_bus_io!(
         base_addr: 0x0c00,
         regs: [
             Register {
-                name: L_VOL_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].l_vol
+                name: L_VOL,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].l_vol
                 },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].l_vol = value;
-                },
-            },
-            Register {
-                name: R_VOL_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].r_vol
-                },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].r_vol = value;
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].l_vol = value;
                 },
             },
             Register {
-                name: ADPCM_SAMPLE_RATE_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].adpcm_sample_rate
+                name: R_VOL,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].r_vol
                 },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].adpcm_sample_rate = value;
-                },
-            },
-            Register {
-                name: ADPCM_BASE_ADDR_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].adpcm_base_addr
-                },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].adpcm_base_addr = value;
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].r_vol = value;
                 },
             },
             Register {
-                name: ADSR_CONFIG_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
-            },
-            Register {
-                name: ADSR_CURRENT_VOL_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].current_vol
+                name: ADPCM_SAMPLE_RATE,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].adpcm_sample_rate
                 },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].current_vol = value;
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].adpcm_sample_rate = value;
                 },
             },
             Register {
-                name: ADSR_REP_ADDR_0,
-                read_16: |_, io, _| {
-                    io.spu_voices[0].rep_addr
+                name: ADPCM_BASE_ADDR,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].adpcm_base_addr
                 },
-                write_16: |_, io, _, value| {
-                    io.spu_voices[0].rep_addr = value;
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].adpcm_base_addr = value;
+                },
+            },
+            Register {
+                name: ADSR_CONFIG,
+                read_32: |i: usize, _, io: &Io| 0,
+                write_32: |i: usize, _, io: &mut Io, value| {},
+            },
+            Register {
+                name: ADSR_CURRENT_VOL,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].current_vol
+                },
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].current_vol = value;
+                },
+            },
+            Register {
+                name: ADSR_REP_ADDR,
+                read_16: |i: usize, _, io: &Io, _| {
+                    io.spu_voices[i].rep_addr
+                },
+                write_16: |i: usize, _, io: &mut Io, _, value| {
+                    io.spu_voices[i].rep_addr = value;
                 },
             },
         ],
@@ -920,6 +920,9 @@ gen_cpu_bus_io!(
                 Exponential,
             }
         },
+        // There are 24 SPU voices, so we can simply define the register set once and automatically
+        // instantiate it 24 times with the following line.
+        regs_count: 24,
     },
     // SPU Control.
     Lut {

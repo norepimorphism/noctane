@@ -16,6 +16,14 @@ pub struct Core {
     pub timers: noctane_cpu::bus::io::Timers,
 }
 
+#[derive(Default)]
+pub struct Banks {
+    pub exp_1: noctane_cpu::bus::Exp1,
+    pub exp_3: noctane_cpu::bus::Exp3,
+    pub bios: noctane_cpu::bus::Bios,
+    pub ram: noctane_cpu::bus::Ram,
+}
+
 impl Core {
     pub fn cpu(&mut self) -> Cpu {
         self.cpu_state.connect_bus(noctane_cpu::Bus {
@@ -34,14 +42,12 @@ impl Core {
             bios: &mut self.banks.bios,
         })
     }
-}
 
-#[derive(Default)]
-pub struct Banks {
-    pub exp_1: noctane_cpu::bus::Exp1,
-    pub exp_3: noctane_cpu::bus::Exp3,
-    pub bios: noctane_cpu::bus::Bios,
-    pub ram: noctane_cpu::bus::Ram,
+    pub fn update_io(&mut self) {
+        // TODO
+        self.timers.dotclock.counter = self.timers.dotclock.counter.wrapping_add(1);
+        self.timers.sys_clock.counter = self.timers.sys_clock.counter.wrapping_add(1);
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! Procedural macros for Noctane.
+
 #![feature(entry_insert, let_else, proc_macro_diagnostic)]
 
 use proc_macro::TokenStream;
@@ -25,44 +27,60 @@ pub fn gen_cpu_bus_io(input: TokenStream) -> TokenStream {
             .collect::<TokenStream2>();
         let mut lut_entries = TokenStream2::new();
 
-        for reg_strukt in lut_strukt.regs {
-            // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
-            // TODO: Don't make that assumption; assert that it is true.
-            let reg_len = reg_strukt.read.kind.len();
+        for reg_set_idx in 0..=lut_strukt.count {
+            let reg_set_idx = match lut_strukt.count {
+                1 => None,
+                _ => Some(reg_set_idx),
+            };
 
-            for byte_idx in 0..reg_len {
-                lut_entries.extend(quote! {
-                    // Remember: we're inside the LUT module, so we must use `super`.
-                    super::LutEntry { reg_idx: #reg_count, byte_idx: #byte_idx },
+            for reg_strukt in lut_strukt.regs.iter().cloned() {
+                // We assume that `read.kind.len()` and `write.kind.len()` are equivalent.
+                // TODO: Don't make that assumption; assert that it is true.
+                let reg_len = reg_strukt.read.kind.len();
+
+                for byte_idx in 0..reg_len {
+                    lut_entries.extend(quote! {
+                        // Remember: we're inside the LUT module, so we must use `super`.
+                        super::LutEntry { reg_idx: #reg_count, byte_idx: #byte_idx },
+                    });
+                }
+
+                let name = reg_strukt.name;
+                let name = match reg_set_idx {
+                    Some(idx) => {
+                        let suffix = quote::format_ident!("_{}", idx);
+                        quote! { concat!(stringify!(#name), stringify!(#suffix)) }
+                    }
+                    None => {
+                        quote! { stringify!(#name) }
+                    }
+                };
+
+                let cpu::bus::io::AccessFns {
+                    _8: read_8,
+                    _16: read_16,
+                    _32: read_32,
+                } = reg_strukt.read.gen_access_fns(reg_set_idx);
+                let cpu::bus::io::AccessFns {
+                    _8: write_8,
+                    _16: write_16,
+                    _32: write_32,
+                } = reg_strukt.write.gen_access_fns(reg_set_idx);
+
+                reg_entries.extend(quote! {
+                    Register {
+                        name: #name,
+                        read_8: #read_8,
+                        read_16: #read_16,
+                        read_32: #read_32,
+                        write_8: #write_8,
+                        write_16: #write_16,
+                        write_32: #write_32,
+                    },
                 });
+
+                reg_count += 1;
             }
-
-            let name = reg_strukt.name;
-
-            let cpu::bus::io::AccessFns {
-                _8: read_8,
-                _16: read_16,
-                _32: read_32,
-            } = reg_strukt.read.gen_access_fns();
-            let cpu::bus::io::AccessFns {
-                _8: write_8,
-                _16: write_16,
-                _32: write_32,
-            } = reg_strukt.write.gen_access_fns();
-
-            reg_entries.extend(quote! {
-                Register {
-                    name: stringify!(#name),
-                    read_8: #read_8,
-                    read_16: #read_16,
-                    read_32: #read_32,
-                    write_8: #write_8,
-                    write_16: #write_16,
-                    write_32: #write_32,
-                },
-            });
-
-            reg_count += 1;
         }
 
         lut_mods.extend(quote! {
@@ -99,6 +117,7 @@ mod cpu {
                 punctuated::Punctuated,
                 Expr,
                 ExprStruct,
+                Lit,
                 Member,
                 Stmt,
                 Token,
@@ -137,7 +156,8 @@ mod cpu {
                         .ok_or_else(|| input.error("expected 'regs' field"))?;
                     let mod_field = fields
                         .nth(0)
-                        .ok_or_else(|| input.error("expected 'mod' field"))?;
+                        .ok_or_else(|| input.error("expected 'module' field"))?;
+                    let count_field = fields.nth(0);
                     if fields.next().is_some() {
                         input
                             .span()
@@ -164,17 +184,15 @@ mod cpu {
                                     input.error("struct path should be a single identifier")
                                 );
                             };
+                            if ident != "Register" {
+                                return Err(input.error("expected 'Register' struct"));
+                            }
 
                             let mut fields = strukt.fields.into_iter();
 
                             let name_field = fields
                                 .nth(0)
                                 .ok_or_else(|| input.error("expected 'name' field"))?;
-                            let name = name_field.expr;
-
-                            if ident != "Register" {
-                                return Err(input.error("expected 'Register' struct"));
-                            }
                             let read_field = fields
                                 .nth(0)
                                 .ok_or_else(|| input.error("expected 'read_*' field"))?;
@@ -187,6 +205,8 @@ mod cpu {
                                     .unwrap()
                                     .warning("found extraneous fields");
                             }
+
+                            let name = name_field.expr;
 
                             let read_kind = AccessKind::try_from_read(read_field.member)
                                 .ok_or_else(|| {
@@ -215,14 +235,31 @@ mod cpu {
                     let Expr::Block(mod_expr) = mod_field.expr else {
                         return Err(input.error("'module' should be a block"));
                     };
-
                     let mod_stmts = mod_expr.block.stmts;
+
+                    let count = count_field.map_or(
+                        Ok(1),
+                        |field| {
+                            let Expr::Lit(expr) = field.expr else {
+                                return Err(input.error("'repeat_count' should be a literal"));
+                            };
+                            let Lit::Int(lit) = expr.lit else {
+                                return Err(input.error("'repeat_count' should be an integer"));
+                            };
+                            let Ok(count) = lit.base10_parse::<usize>() else {
+                                return Err(input.error("failed to parse 'repeat_count'"));
+                            };
+
+                            Ok(count)
+                        },
+                    )?;
 
                     Ok(Self {
                         mod_name,
                         base_addr,
                         regs,
                         mod_stmts,
+                        count,
                     })
                 }
             }
@@ -232,8 +269,10 @@ mod cpu {
                 pub base_addr: Expr,
                 pub regs: Vec<RegStruct>,
                 pub mod_stmts: Vec<Stmt>,
+                pub count: usize,
             }
 
+            #[derive(Clone)]
             pub struct RegStruct {
                 pub name: Expr,
                 pub read: ReadFn,
@@ -295,20 +334,78 @@ mod cpu {
                 }
             }
 
+            macro_rules! def_access_2_fn {
+                ($set_idx:expr, $expr:expr $(,)?) => {
+                    {
+                        let expr = $expr;
+
+                        match $set_idx {
+                            Some(set_idx) => {
+                                quote! {
+                                    |a, b| {
+                                        (#expr)(#set_idx, a, b)
+                                    }
+                                }
+                            }
+                            None => expr,
+                        }
+                    }
+                };
+            }
+
+            macro_rules! def_access_3_fn {
+                ($set_idx:expr, $expr:expr $(,)?) => {
+                    {
+                        let expr = $expr;
+
+                        match $set_idx {
+                            Some(set_idx) => {
+                                quote! {
+                                    |a, b, c| {
+                                        (#expr)(#set_idx, a, b, c)
+                                    }
+                                }
+                            }
+                            None => expr,
+                        }
+                    }
+                };
+            }
+
+            macro_rules! def_access_4_fn {
+                ($set_idx:expr, $expr:expr $(,)?) => {
+                    {
+                        let expr = $expr;
+
+                        match $set_idx {
+                            Some(set_idx) => {
+                                quote! {
+                                    |a, b, c, d| {
+                                        (#expr)(#set_idx, a, b, c, d)
+                                    }
+                                }
+                            }
+                            None => expr,
+                        }
+                    }
+                };
+            }
+
             // Recall that the PSX CPU is litte-endian. The following implementations of
             // `gen_access_fns` must respect that.
 
+            #[derive(Clone)]
             pub struct ReadFn {
                 pub kind: AccessKind,
                 pub expr: TokenStream2,
             }
 
             impl ReadFn {
-                pub fn gen_access_fns(self) -> AccessFns {
+                pub fn gen_access_fns(self, set_idx: Option<usize>) -> AccessFns {
                     match self.kind {
                         AccessKind::_8 => {
                             AccessFns {
-                                _8: self.expr,
+                                _8: def_access_3_fn!(set_idx, self.expr),
                                 _16: quote! {
                                     |this, io, addr| {
                                         u16::from_le_bytes([
@@ -338,7 +435,7 @@ mod cpu {
                                         )
                                     }
                                 },
-                                _16: self.expr,
+                                _16: def_access_3_fn!(set_idx, self.expr),
                                 _32: quote! {
                                     |this, io| {
                                         // We can use big-endian in these two statements as they are
@@ -375,24 +472,25 @@ mod cpu {
                                         )
                                     }
                                 },
-                                _32: self.expr,
+                                _32: def_access_2_fn!(set_idx, self.expr),
                             }
                         }
                     }
                 }
             }
 
+            #[derive(Clone)]
             pub struct WriteFn {
                 pub kind: AccessKind,
                 pub expr: TokenStream2,
             }
 
             impl WriteFn {
-                pub fn gen_access_fns(self) -> AccessFns {
+                pub fn gen_access_fns(self, set_idx: Option<usize>) -> AccessFns {
                     match self.kind {
                         AccessKind::_8 => {
                             AccessFns {
-                                _8: self.expr,
+                                _8: def_access_4_fn!(set_idx, self.expr),
                                 _16: quote! {
                                     |this, io, addr, value| {
                                         let [lo, hi] = value.to_le_bytes();
@@ -420,7 +518,7 @@ mod cpu {
                                         (this.write_16)(this, io, addr, u16::from_le_bytes(bytes));
                                     }
                                 },
-                                _16: self.expr,
+                                _16: def_access_4_fn!(set_idx, self.expr),
                                 _32: quote! {
                                     |this, io, value| {
                                         (this.write_16)(
@@ -459,7 +557,7 @@ mod cpu {
                                         (this.write_32)(this, io, u32::from_le_bytes(bytes));
                                     }
                                 },
-                                _32: self.expr,
+                                _32: def_access_3_fn!(set_idx, self.expr),
                             }
                         }
                     }

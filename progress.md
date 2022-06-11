@@ -1,5 +1,17 @@
 # Progress Log
 
+# 6/11/2022
+
+Documentation for the `noctane-cpu` crate is now mostly complete. I am very happy with how it looks.
+
+The following items should be completed in the next few days:
+- rework memory addresses
+    - At the very least, the universal `Address` type should be renamed `AddressState`, because that's currently what it represents. However, the bigger problem is that passing around `AddressState`s is not a very intuitive design. It would make more sense for each module to define a type named `Address`. For example, `mem::Address` would represent a program address, `cache::i::Address` and `bus::Address` would represent a physical address, and `bus::io::Address` would represent a physical address rebased to the start of the I/O region.
+- implement timers
+- implement SPU voice registers
+
+GPU development is on hold for the moment until Noctane is capable of reaching GPU-related code in the BIOS.
+
 # 6/9/2022
 
 Noctane is now at 6,700 lines of code. (There are approximatly 8,600 including blank and comment lines.)

@@ -3,6 +3,11 @@
 //! The CPU memory bus.
 //!
 //! This is the stage at which memory accesses are delegated to the appropriate memory bank.
+//! Possible banks include:
+//! - [main RAM](Ram)
+//! - [I/O region](Io)
+//! - Expansion Regions [1](Exp1)&ndash;[3](Exp3) (2 is located within the I/O region)
+//! - [BIOS](Bios)
 
 pub mod io;
 
@@ -26,24 +31,24 @@ macro_rules! def_bank {
                 pub const BASE_ADDR: u32 = $addr;
             )?
 
-            /// The maximum size, in bytes, of this memory bank.
-            pub const MAX_SIZE: usize = $size;
+            /// The size, in bytes, of this memory bank.
+            pub const SIZE: usize = $size;
             /// The length, in words, of this memory bank.
             ///
             /// This length determines the highest word within this bank that may be accessed by
             /// hardware. However, [certain I/O registers] may further restrict the range accessible
-            /// to software. While it is possible to configure such registers in a manner that they
+            /// to software. While it is possible to configure these registers in a manner that they
             /// permit access beyond the length of this bank, an exception will be raised on any
-            /// attempt to access higher words.
+            /// such accesses.
             ///
-            /// [certain I/O registers]: io::MemoryControl1
+            /// [certain I/O registers]: io::BusControl
             const LEN: usize = make_index($size);
         }
 
         /// A bank of memory.
         ///
         /// Internally, the data contained within this type is boxed so as to avoid otherwise
-        /// certain stack buffer overflows from occuring as a result of large allocations.
+        /// certain stack overflows from occuring as a result of large allocations.
         pub struct $name(Box<[u32; Self::LEN]>);
 
         impl std::ops::Deref for $name {
