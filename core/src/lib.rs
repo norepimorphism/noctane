@@ -5,10 +5,11 @@ pub use noctane_gpu::Gpu;
 
 #[derive(Default)]
 pub struct Core {
-    pub cpu_state: noctane_cpu::State,
-    pub gpu: Gpu,
     pub banks: Banks,
     pub bus_ctrl: noctane_cpu::bus::io::BusControl,
+    pub cpu_state: noctane_cpu::State,
+    pub dma_ctrl: noctane_cpu::bus::io::DmaControl,
+    pub gpu: Gpu,
     pub post: noctane_cpu::bus::io::Post,
     pub ram_ctrl: noctane_cpu::bus::io::RamControl,
     pub spu_ctrl: noctane_cpu::bus::io::SpuControl,
@@ -30,8 +31,9 @@ impl Core {
             ram: &mut self.banks.ram,
             exp_1: &mut self.banks.exp_1,
             io: noctane_cpu::bus::Io {
-                gpu: &mut self.gpu,
                 bus_ctrl: &mut self.bus_ctrl,
+                dma_ctrl: &mut self.dma_ctrl,
+                gpu: &mut self.gpu,
                 post: &mut self.post,
                 ram_ctrl: &mut self.ram_ctrl,
                 spu_ctrl: &mut self.spu_ctrl,
@@ -46,6 +48,7 @@ impl Core {
     pub fn update_io(&mut self) {
         // TODO
         self.timers.dotclock.counter = self.timers.dotclock.counter.wrapping_add(1);
+        self.timers.h_retrace.counter = self.timers.h_retrace.counter.wrapping_add(1);
         self.timers.sys_clock.counter = self.timers.sys_clock.counter.wrapping_add(1);
     }
 }

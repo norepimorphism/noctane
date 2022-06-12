@@ -8,6 +8,7 @@ use noctane_proc_macro::gen_cpu_bus_io;
 use crate::mem::Address;
 
 pub use bus_ctrl::Control as BusControl;
+pub use dma_ctrl::Control as DmaControl;
 pub use post::Post;
 pub use ram_ctrl::Control as RamControl;
 pub use spu_ctrl::Control as SpuControl;
@@ -20,9 +21,10 @@ pub use timers::{Timer, Timers};
 /// I/O region.
 #[derive(Debug)]
 pub struct Io<'a> {
+    pub bus_ctrl: &'a mut BusControl,
+    pub dma_ctrl: &'a mut DmaControl,
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
-    pub bus_ctrl: &'a mut BusControl,
     pub post: &'a mut Post,
     pub ram_ctrl: &'a mut RamControl,
     pub spu_ctrl: &'a mut SpuControl,
@@ -53,21 +55,20 @@ impl Io<'_> {
         // unbounded range in the positive direction and work backwards; `match`es work in a
         // well-defined order from the first to last pattern.
         let (lut_entry, group_name) = match addr.working {
-            // TODO
-            post::BASE_ADDR.. => get_lut_entry!(post),
-            duart::BASE_ADDR.. => get_lut_entry!(duart),
-            atcons::BASE_ADDR.. => get_lut_entry!(atcons),
-            spu_ctrl::BASE_ADDR.. => get_lut_entry!(spu_ctrl),
-            spu_voice::BASE_ADDR.. => get_lut_entry!(spu_voice),
-            mdec::BASE_ADDR.. => get_lut_entry!(mdec),
-            gpu::BASE_ADDR.. => get_lut_entry!(gpu),
-            cdrom::BASE_ADDR.. => get_lut_entry!(cdrom),
-            timers::BASE_ADDR.. => get_lut_entry!(timers),
-            dma::BASE_ADDR.. => get_lut_entry!(dma),
-            int_ctrl::BASE_ADDR.. => get_lut_entry!(int_ctrl),
-            ram_ctrl::BASE_ADDR.. => get_lut_entry!(ram_ctrl),
-            perif::BASE_ADDR.. => get_lut_entry!(perif),
-            bus_ctrl::BASE_ADDR.. => get_lut_entry!(bus_ctrl),
+            post::BASE_ADDR..       => get_lut_entry!(post),
+            duart::BASE_ADDR..      => get_lut_entry!(duart),
+            atcons::BASE_ADDR..     => get_lut_entry!(atcons),
+            spu_ctrl::BASE_ADDR..   => get_lut_entry!(spu_ctrl),
+            spu_voice::BASE_ADDR..  => get_lut_entry!(spu_voice),
+            mdec::BASE_ADDR..       => get_lut_entry!(mdec),
+            gpu::BASE_ADDR..        => get_lut_entry!(gpu),
+            cdrom::BASE_ADDR..      => get_lut_entry!(cdrom),
+            timers::BASE_ADDR..     => get_lut_entry!(timers),
+            dma_ctrl::BASE_ADDR..   => get_lut_entry!(dma_ctrl),
+            int_ctrl::BASE_ADDR..   => get_lut_entry!(int_ctrl),
+            ram_ctrl::BASE_ADDR..   => get_lut_entry!(ram_ctrl),
+            perif::BASE_ADDR..      => get_lut_entry!(perif),
+            bus_ctrl::BASE_ADDR..   => get_lut_entry!(bus_ctrl),
             _ => (Err(()), ""),
         };
 
@@ -476,150 +477,262 @@ gen_cpu_bus_io!(
         ],
         module: {},
     },
-    // DMA.
+    // DMA Control.
     Lut {
-        name: dma,
+        name: dma_ctrl,
         base_addr: 0x0080,
         regs: [
             Register {
-                name: MDECin_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECin_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: MDECin_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECin_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: MDECin_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECin_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: MDECin_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECin_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: MDECout_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECout_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: MDECout_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECout_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: MDECout_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECout_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: MDECout_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: MDECout_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: GPU_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: GPU_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: GPU_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: GPU_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: GPU_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: GPU_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: GPU_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: GPU_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: CDROM_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: CDROM_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: CDROM_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: CDROM_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: CDROM_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: CDROM_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: CDROM_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: CDROM_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: SPU_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: SPU_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: SPU_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: SPU_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: SPU_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: SPU_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: SPU_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: SPU_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: PIO_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: PIO_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: PIO_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: PIO_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: PIO_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: PIO_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: PIO_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: PIO_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: OTC_0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: OTC_MADR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.base_addr
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                },
             },
             Register {
-                name: OTC_1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: OTC_BCR,
+                read_32: |_, io| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                },
+                write_32: |_, io, value| {
+                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                },
             },
             Register {
-                name: OTC_2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: OTC_CHCR,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
-                name: OTC_3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: OTC_4,
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: DPCR,
@@ -642,7 +755,85 @@ gen_cpu_bus_io!(
                 write_32: |_, io, value| {},
             },
         ],
-        module: {},
+        module: {
+            #[derive(Debug, Default)]
+            pub struct Control {
+                pub chan: Channels,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Channels {
+                pub mdec_in: Channel,
+                pub mdec_out: Channel,
+                pub gpu: Channel,
+                pub cdrom: Channel,
+                pub spu: Channel,
+                pub pio: Channel,
+                pub otc: Channel,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Channel {
+                pub base_addr: u32,
+                pub block_ctrl: u32,
+            }
+
+            macro_rules! impl_deref_for_chan {
+                ($ty:ty) => {
+                    impl std::ops::Deref for $ty {
+                        type Target = super::Channel;
+
+                        fn deref(&self) -> &Self::Target {
+                            &self.inner
+                        }
+                    }
+
+                    impl std::ops::DerefMut for $ty {
+                        fn deref_mut(&mut self) -> &mut Self::Target {
+                            &mut self.inner
+                        }
+                    }
+                };
+            }
+
+            use impl_deref_for_chan;
+
+            pub mod sm0 {
+                //! Sync mode 0.
+
+                #[derive(Debug)]
+                pub struct Channel {
+                    inner: super::Channel,
+                    pub word_count: u16,
+                }
+
+                super::impl_deref_for_chan!(Channel);
+            }
+
+            pub mod sm1 {
+                //! Sync mode 1.
+
+                #[derive(Debug)]
+                pub struct Channel {
+                    inner: super::Channel,
+                    pub block_size: u16,
+                    pub block_count: u16,
+                }
+
+                super::impl_deref_for_chan!(Channel);
+            }
+
+            pub mod sm2 {
+                //! Sync mode 2.
+
+                #[derive(Debug)]
+                pub struct Channel {
+                    inner: super::Channel,
+                }
+
+                super::impl_deref_for_chan!(Channel);
+            }
+        },
     },
     // Timers (Root Counters).
     Lut {
