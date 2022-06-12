@@ -44,9 +44,11 @@ use proc_macro::TokenStream;
 ///     ```
 ///     let reg = &REGISTERS[reg_index];
 ///     // If a 32-bit read was requested...
+///     // Note: As 32-bit reads must not cross word boundaries, they are assumed to have a byte
+///     // offset of 0.
 ///     let read = (reg.read_32)(io);
 ///     // If a 16-bit write was requested...
-///     (reg.write_16)(io, value);
+///     (reg.write_16)(io, byte_offset, value);
 ///     ```
 ///
 /// The previous examples are a simplification of the real process, but they illustrate the flow

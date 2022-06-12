@@ -156,7 +156,6 @@ impl Bus<'_> {
         let ram_data_size = MB * ram_layout.data_mb;
         let ram_high_z_size = MB * ram_layout.high_z_mb;
 
-        // TODO: Don't hardcode RAM size.
         try_access_bank!(
             ram,
             Ram::BASE_ADDR,

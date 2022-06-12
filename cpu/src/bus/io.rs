@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+/// External components accessible to the CPU via I/O registers.
+
 use noctane_gpu::Gpu;
 use noctane_proc_macro::gen_cpu_bus_io;
 
@@ -13,6 +15,9 @@ pub use spu_voice::Voice as SpuVoice;
 pub use timers::{Timer, Timers};
 
 /// External components accessible to the CPU via I/O registers.
+///
+/// Addresses above or equal to `0x1000` access Expansion Region 2, which is contained within the
+/// I/O region.
 #[derive(Debug)]
 pub struct Io<'a> {
     /// The graphics processing unit (GPU).
@@ -258,13 +263,15 @@ gen_cpu_bus_io!(
             impl Default for Control {
                 fn default() -> Self {
                     Self {
+                        // Most of these fields can be 0 because the BIOS confgures them.
                         exp_1_base: 0,
                         exp_2_base: 0,
                         exp_1_size: 0,
                         exp_2_size: 0,
                         exp_3_size: 0,
-                        // This needs to be a decent size.
-                        bios_size: 0x2_0000,
+                        // However, the BIOS size must be large enough on boot to at least fit the
+                        // code to configure the other bank bases/sizes. We'll give it `0x200`.
+                        bios_size: 0x200,
                         spu_size: 0,
                         cdrom_size: 0,
                         common_size: 0,
@@ -272,12 +279,18 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// Determines the base addresses and sizes of banks accessible to the CPU bus.
             #[derive(Debug)]
             pub struct Control {
+                /// The base address of Expansion Region 1.
                 pub exp_1_base: u32,
+                /// The base address of Expansion Region 2.
                 pub exp_2_base: u32,
+                /// The size, in bytes, of Expansion Region 1.
                 pub exp_1_size: u32,
+                /// The size, in bytes, of Expansion Region 2.
                 pub exp_2_size: u32,
+                /// The size, in bytes, of Expansion Region 3.
                 pub exp_3_size: u32,
                 pub bios_size: u32,
                 pub spu_size: u32,

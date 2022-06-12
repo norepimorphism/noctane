@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! An instruction cache (I-cache).
+//! The instruction cache (I-cache).
 
 mod entry;
 
