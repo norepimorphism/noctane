@@ -1403,6 +1403,7 @@ name = "noctane-gpu"
 version = "0.1.0"
 dependencies = [
  "bit",
+ "tracing",
 ]
 
 [[package]]
@@ -1430,6 +1431,7 @@ dependencies = [
  "noctane",
  "noctane-cdrom",
  "noctane-cpu",
+ "noctane-util",
  "open",
  "rust-embed",
  "tracing",
@@ -1442,6 +1444,12 @@ dependencies = [
 [[package]]
 name = "noctane-util"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "minifb",
+ "wgpu",
+]
 
 [[package]]
 name = "nom"

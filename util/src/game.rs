@@ -6,9 +6,11 @@ use std::ops::{Deref, DerefMut};
 
 impl Window {
     pub fn new(width: usize, height: usize) -> Self {
-        let window =
+        let mut window =
             minifb::Window::new("Game", width, height, minifb::WindowOptions::default()).unwrap();
-        let gfx = gfx::Renderer::new(&window, wgpu::Backends::all(), (640, 480)).unwrap();
+        window.limit_update_rate(None);
+
+        let gfx = gfx::Renderer::new(&window, wgpu::Backends::all()).unwrap();
 
         Self { inner: window, gfx }
     }
@@ -20,6 +22,10 @@ pub struct Window {
 }
 
 impl Window {
+    pub fn gfx(&self) -> &gfx::Renderer {
+        &self.gfx
+    }
+
     pub fn gfx_mut(&mut self) -> &mut gfx::Renderer {
         &mut self.gfx
     }

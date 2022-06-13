@@ -196,7 +196,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`execute_opcode`]: Self::execute_opcode
     pub fn execute_next_instr(&mut self) -> instr::Executed {
         // TODO: Don't unwrap!
-        self.advance_pipeline(|op| Instr::decode(op).unwrap())
+        self.advance_pipeline(|mach| Instr::decode(mach).unwrap())
     }
 
     /// Executes the given instruction.
@@ -209,9 +209,9 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// Executes the instruction decodeable from the given opcode.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_opcode(&mut self, op: u32) -> instr::Executed {
+    pub fn execute_machine_instr(&mut self, mach: u32) -> instr::Executed {
         // TODO: Don't unwrap!
-        self.advance_pipeline(|_| Instr::decode(op).unwrap())
+        self.advance_pipeline(|_| Instr::decode(mach).unwrap())
     }
 
     /// Processes the current stage, and then advances to the next stage, of each instruction

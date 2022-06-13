@@ -19,6 +19,7 @@ native-dialog = "0.6"
 noctane = { path = "../core" }
 noctane-cdrom = { path = "../cdrom" }
 noctane-cpu = { path = "../cpu" }
+noctane-util = { path = "../util" }
 open = "2.1"
 rust-embed = "6.4"
 tracing = "0.1"

@@ -12,4 +12,5 @@ macro_rules! format_int {
 }
 
 pub mod bios;
+pub mod game;
 pub mod hex;

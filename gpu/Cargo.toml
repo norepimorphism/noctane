@@ -8,3 +8,4 @@ license = "MPL-2.0"
 
 [dependencies]
 bit = "0.1"
+tracing = "0.1"

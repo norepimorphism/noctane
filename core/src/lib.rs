@@ -10,6 +10,7 @@ pub struct Core {
     pub cpu_state: noctane_cpu::State,
     pub dma_ctrl: noctane_cpu::bus::io::DmaControl,
     pub gpu: Gpu,
+    pub last_gpu_result: u32,
     pub post: noctane_cpu::bus::io::Post,
     pub ram_ctrl: noctane_cpu::bus::io::RamControl,
     pub spu_ctrl: noctane_cpu::bus::io::SpuControl,
@@ -34,6 +35,7 @@ impl Core {
                 bus_ctrl: &mut self.bus_ctrl,
                 dma_ctrl: &mut self.dma_ctrl,
                 gpu: &mut self.gpu,
+                last_gpu_result: &mut self.last_gpu_result,
                 post: &mut self.post,
                 ram_ctrl: &mut self.ram_ctrl,
                 spu_ctrl: &mut self.spu_ctrl,
@@ -46,10 +48,10 @@ impl Core {
     }
 
     pub fn update_io(&mut self) {
-        // TODO
-        self.timers.dotclock.counter = self.timers.dotclock.counter.wrapping_add(1);
-        self.timers.h_retrace.counter = self.timers.h_retrace.counter.wrapping_add(1);
-        self.timers.sys_clock.counter = self.timers.sys_clock.counter.wrapping_add(1);
+        self.timers.update();
+        if self.timers.take_irq().is_some() {
+            self.cpu_state.reg.raise_interrupt();
+        }
     }
 }
 

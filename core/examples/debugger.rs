@@ -45,6 +45,7 @@ impl Debugger {
         Self {
             core,
             addr_breakpoints: HashSet::new(),
+            game_window: noctane_util::game::Window::new(640, 480),
             sym_breakpoints: HashSet::new(),
             stdout: String::new(),
         }
@@ -54,6 +55,7 @@ impl Debugger {
 struct Debugger {
     core: noctane::Core,
     addr_breakpoints: HashSet<u32>,
+    game_window: noctane_util::game::Window,
     sym_breakpoints: HashSet<String>,
     stdout: String,
 }
@@ -289,8 +291,10 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
-        self.core.update_io();
         let execed = self.core.cpu().execute_next_instr();
+        self.core.update_io();
+        //self.game_window.gfx_mut().render();
+        // self.game_window.update();
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
             kind,

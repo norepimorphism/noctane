@@ -234,6 +234,10 @@ pub mod cpr {
             }
         }
 
+        pub fn raise_interrupt(&mut self) {
+            self.raise_exception(crate::exc::code::INTERRUPT);
+        }
+
         /// Raises an exception with the given code.
         pub(crate) fn raise_exception(&mut self, code: u32) {
             let mut cause = self.cause();

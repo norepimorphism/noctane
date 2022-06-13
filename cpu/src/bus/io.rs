@@ -25,6 +25,8 @@ pub struct Io<'a> {
     pub dma_ctrl: &'a mut DmaControl,
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
+    /// The last result of a GPU command (GP0 or GP1).
+    pub last_gpu_result: &'a mut u32,
     pub post: &'a mut Post,
     pub ram_ctrl: &'a mut RamControl,
     pub spu_ctrl: &'a mut SpuControl,
@@ -190,7 +192,10 @@ gen_cpu_bus_io!(
             Register {
                 name: EXP_2_BASE,
                 read_32: |_, io| {
-                    io.bus_ctrl.exp_2_base
+                    // The bottom 24 bits show the base address, but the top byte is hardcoded to
+                    // `0x1f`.
+                    // TODO: This isn't synced with the bank selection code in [`bus`].
+                    (io.bus_ctrl.exp_2_base & ((1 << 25) - 1)) | (0x1f << 24)
                 },
                 write_32: |_, io, value| {
                     io.bus_ctrl.exp_2_base = value;
@@ -271,8 +276,8 @@ gen_cpu_bus_io!(
                         exp_2_size: 0,
                         exp_3_size: 0,
                         // However, the BIOS size must be large enough on boot to at least fit the
-                        // code to configure the other bank bases/sizes. We'll give it `0x200`.
-                        bios_size: 0x200,
+                        // code to configure the other bank bases/sizes. We'll give it `0x800`.
+                        bios_size: 0x800,
                         spu_size: 0,
                         cdrom_size: 0,
                         common_size: 0,
@@ -843,100 +848,268 @@ gen_cpu_bus_io!(
             Register {
                 name: DOTCLOCK_COUNTER,
                 read_32: |_, io| {
-                    io.timers.dotclock.counter
+                    timers::read_field!(io, dotclock.counter)
                 },
                 write_32: |_, io, value| {
-                    io.timers.dotclock.counter = value;
+                    timers::write_field!(io, dotclock.counter = value);
                 },
             },
             Register {
                 name: DOTCLOCK_MODE,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    timers::read_field!(io, dotclock.mode)
+                },
+                write_32: |_, io, value| {
+                    timers::write_field!(io, dotclock.mode = value);
+                },
             },
             Register {
                 name: DOTCLOCK_TARGET,
                 read_32: |_, io| {
-                    io.timers.dotclock.target
+                    timers::read_field!(io, dotclock.target)
                 },
                 write_32: |_, io, value| {
-                    io.timers.dotclock.target = value;
+                    timers::write_field!(io, dotclock.target = value);
                 },
             },
             Register {
                 name: DOTCLOCK_3,
-                read_32: |_, _| 0,
-                write_32: |_, _, _| {},
+                read_32: |_, _| {
+                    todo!()
+                },
+                write_32: |_, _, _| {
+                    todo!()
+                },
             },
             Register {
-                name: H_RETRACE_COUNTER,
+                name: HBLANK_COUNTER,
                 read_32: |_, io| {
-                    io.timers.h_retrace.counter
+                    timers::read_field!(io, hblank.counter)
                 },
                 write_32: |_, io, value| {
-                    io.timers.h_retrace.counter = value;
+                    timers::write_field!(io, hblank.counter = value);
                 },
             },
             Register {
-                name: H_RETRACE_MODE,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
-            },
-            Register {
-                name: H_RETRACE_TARGET,
+                name: HBLANK_MODE,
                 read_32: |_, io| {
-                    io.timers.h_retrace.target
+                    timers::read_field!(io, hblank.mode)
                 },
                 write_32: |_, io, value| {
-                    io.timers.h_retrace.target = value;
+                    timers::write_field!(io, hblank.mode = value);
                 },
             },
             Register {
-                name: H_RETRACE_3,
-                read_32: |_, _| 0,
-                write_32: |_, _, _| {},
-            },
-            Register {
-                name: SYS_CLOCK_COUNTER,
+                name: HBLANK_TARGET,
                 read_32: |_, io| {
-                    io.timers.sys_clock.counter
+                    timers::read_field!(io, hblank.target)
                 },
                 write_32: |_, io, value| {
-                    io.timers.sys_clock.counter = value;
+                    timers::write_field!(io, hblank.target = value);
                 },
             },
             Register {
-                name: SYS_CLOCK_MODE,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: HBLANK_3,
+                read_32: |_, _| {
+                    todo!()
+                },
+                write_32: |_, _, _| {
+                    todo!()
+                },
             },
             Register {
-                name: SYS_CLOCK_TARGET,
+                name: SYSCLOCK_COUNTER,
                 read_32: |_, io| {
-                    io.timers.sys_clock.target
+                    timers::read_field!(io, sysclock.counter)
                 },
                 write_32: |_, io, value| {
-                    io.timers.sys_clock.target = value;
+                    timers::write_field!(io, sysclock.counter = value);
                 },
             },
             Register {
-                name: SYS_CLOCK_3,
-                read_32: |_, _| 0,
-                write_32: |_, _, _| {},
+                name: SYSCLOCK_MODE,
+                read_32: |_, io| {
+                    timers::read_field!(io, sysclock.mode)
+                },
+                write_32: |_, io, value| {
+                    timers::write_field!(io, sysclock.mode = value);
+                },
+            },
+            Register {
+                name: SYSCLOCK_TARGET,
+                read_32: |_, io| {
+                    timers::read_field!(io, sysclock.target)
+                },
+                write_32: |_, io, value| {
+                    timers::write_field!(io, sysclock.target = value);
+                },
+            },
+            Register {
+                name: SYSCLOCK_3,
+                read_32: |_, _| {
+                    todo!()
+                },
+                write_32: |_, _, _| {
+                    todo!()
+                },
             },
         ],
         module: {
+            macro_rules! read_field {
+                ($io:expr, $timer:ident . mode) => {
+                    $io.timers.$timer.mode.0 as u32
+                };
+                ($io:expr, $timer:ident . $field:ident) => {
+                    $io.timers.$timer.$field as u32
+                };
+            }
+
+            macro_rules! write_field {
+                ($io:expr, $timer:ident . mode = $value:expr) => {
+                    $io.timers.$timer.mode = timers::Mode($value as u16);
+                };
+                ($io:expr, $timer:ident . $field:ident = $value:expr) => {
+                    $io.timers.$timer.$field = $value as u16;
+                };
+            }
+
+            pub(crate) use read_field;
+            pub(crate) use write_field;
+
             #[derive(Debug, Default)]
             pub struct Timers {
                 pub dotclock: Timer,
-                pub h_retrace: Timer,
-                pub sys_clock: Timer,
+                pub hblank: Timer,
+                pub sysclock: Timer,
+            }
+
+            impl Timers {
+                pub fn take_irq(&mut self) -> Option<()> {
+                    self.dotclock.take_irq()?;
+                    self.hblank.take_irq()?;
+                    self.sysclock.take_irq()?;
+
+                    None
+                }
+
+                pub fn update(&mut self) {
+                    self.dotclock.update(|clock_src| {
+                        match clock_src.0 & 0b11 {
+                            0 | 2 => Self::get_sysclock_increment(),
+                            1 | 3 => Self::get_dotclock_increment(),
+                            _ => unreachable!(),
+                        }
+                    });
+                    self.hblank.update(|clock_src| {
+                        match clock_src.0 & 0b11 {
+                            0 | 2 => Self::get_sysclock_increment(),
+                            1 | 3 => Self::get_hblank_increment(),
+                            _ => unreachable!(),
+                        }
+                    });
+                    self.sysclock.update(|clock_src| {
+                        let inc = Self::get_sysclock_increment();
+
+                        match clock_src.0 & 0b11 {
+                            0 | 1 => inc,
+                            2 | 3 => inc / 8,
+                            _ => unreachable!(),
+                        }
+                    });
+                }
+
+                fn get_sysclock_increment() -> u16 {
+                    // TODO
+                    8
+                }
+
+                fn get_dotclock_increment() -> u16 {
+                    // TODO
+                    4
+                }
+
+                fn get_hblank_increment() -> u16 {
+                    // TODO
+                    1
+                }
             }
 
             #[derive(Debug, Default)]
             pub struct Timer {
-                pub counter: u32,
-                pub target: u32,
+                // Timer fields are supposed to be 32-bit but contain 16 bits of garbage, so they
+                // are represented here with [`u16`]. Accordingly, the [`read_field`] and
+                // [`write_field`] macros above perform the appropriate conversions between [`u32`]
+                // and [`u16`].
+
+                pub mode: Mode,
+                pub counter: u16,
+                pub target: u16,
+            }
+
+            impl Default for Mode {
+                fn default() -> Self {
+                    Self(0)
+                }
+            }
+
+            bitfield::bitfield! {
+                pub struct Mode(u16);
+                impl Debug;
+                pub should_sync, set_should_sync: 0;
+                pub sync_mode, set_sync_mode: 2, 1;
+                pub use_target, set_use_target: 3;
+                pub irqs_on_target_hit, set_irqs_on_target_hit: 4;
+                pub irqs_on_overflow, set_irqs_on_overflow: 5;
+                pub into ClockSource, clock_src, set_clock_src: 9, 8;
+                pub irq_is_pending, set_irq_is_pending: 10;
+                // TODO: Implement remaining fields.
+            }
+
+            impl From<u16> for ClockSource {
+                fn from(value: u16) -> Self {
+                    Self(value)
+                }
+            }
+
+            #[derive(Debug)]
+            pub struct ClockSource(u16);
+
+            impl From<ClockSource> for u16 {
+                fn from(src: ClockSource) -> Self {
+                    src.0
+                }
+            }
+
+            impl Timer {
+                fn take_irq(&mut self) -> Option<()> {
+                    if self.mode.irq_is_pending() {
+                        self.mode.set_irq_is_pending(false);
+
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
+
+                fn update(&mut self, calc_increment_amount: impl Fn(ClockSource) -> u16) {
+                    let hit_target = self.mode.use_target() && (self.counter >= self.target);
+                    let counter_overflowed = !hit_target && (self.counter == !0);
+
+                    // Update the counter.
+                    if hit_target {
+                        self.counter = 0
+                    } else {
+                        let increment_amount = calc_increment_amount(self.mode.clock_src());
+                        self.counter = self.counter.wrapping_add(increment_amount);
+                    }
+
+                    // Request an interrupt, if necessary.
+                    if (self.mode.irqs_on_target_hit() && hit_target) ||
+                       (self.mode.irqs_on_overflow() && counter_overflowed)
+                    {
+                        self.mode.set_irq_is_pending(true);
+                    }
+                }
             }
         },
     },
@@ -975,16 +1148,30 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: 0,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    *io.last_gpu_result
+                },
+                write_32: |_, io, mach| {
+                    io.gpu.queue_gp0_machine_command(mach);
+                },
             },
             Register {
                 name: 1,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    // TODO
+                    0
+                },
+                write_32: |_, io, mach| {
+                    io.gpu.queue_gp1_machine_command(mach);
+                },
             },
         ],
-        module: {},
+        module: {
+            bitfield::bitfield! {
+                pub struct Status(u32);
+                impl Debug;
+            }
+        },
     },
     // MDEC.
     Lut {

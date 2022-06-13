@@ -29,7 +29,7 @@ impl From<usize> for Address {
 }
 
 impl Address {
-    /// Creates a new [`Address`].
+    /// Creates a new `Address`.
     pub const fn new(init: usize, working: usize) -> Self {
         Self {
             init,
@@ -101,7 +101,7 @@ impl Address {
 }
 
 impl<'c, 'b> Memory<'c, 'b> {
-    /// Creates a new [`Memory`].
+    /// Creates a new `Memory`.
     pub fn new(cache: &'c mut Cache, bus: Bus<'b>) -> Self {
         Self { cache, bus }
     }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 mod about;
-pub mod game;
 mod log;
 mod main;
 mod prefs;
@@ -20,7 +19,7 @@ impl<'b> Windows<'b> {
                 }
                 .create_window(boing)?,
             )?,
-            game: game::Window::new(640, 480),
+            game: noctane_util::game::Window::new(640, 480),
             log: log::Window::new(
                 Descriptor {
                     title: "Log",
@@ -53,7 +52,7 @@ impl<'b> Windows<'b> {
 
 pub struct Windows<'b> {
     pub about: about::Window<'b>,
-    pub game: game::Window,
+    pub game: noctane_util::game::Window,
     pub log: log::Window<'b>,
     pub main: main::Window<'b>,
     pub prefs: prefs::Window<'b>,
