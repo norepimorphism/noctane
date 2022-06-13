@@ -234,8 +234,10 @@ pub mod cpr {
             }
         }
 
-        pub fn raise_interrupt(&mut self) {
-            self.raise_exception(crate::exc::code::INTERRUPT);
+        pub fn raise_std_interrupt(&mut self) {
+            let mut cause = self.cause();
+            cause.raise_std_interrupt();
+            self.set_cause(cause);
         }
 
         /// Raises an exception with the given code.
@@ -322,6 +324,10 @@ pub mod cpr {
         /// Determines if the interrupt at the given index is set.
         pub fn is_interrupt_set(&self, index: usize) -> bool {
             ((self.ip() >> index) & 1) == 1
+        }
+
+        pub fn raise_std_interrupt(&mut self) {
+            self.set_interrupt(6);
         }
 
         /// Sets the interrupt at the given index.

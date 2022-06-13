@@ -146,8 +146,13 @@ impl Pipeline {
         // magic lies in the fact that the only programmer-visible effect of pipelining is the delay
         // slot, which we can handle specially.
 
-        // We begin by processing interrupts if the SR permits us to do so. This may trigger an
-        // interrupt; if it does, it will update the PC, which will be used throughout the rest of
+        // Before we do anything, we should bring I/O up-to-speed.
+        let mut cause = reg.cause();
+        mem.bus_mut().io.update(&mut cause);
+        reg.set_cause(cause);
+
+        // Process interrupt requests (if the SR permits us to do so). This may trigger an interrupt
+        // exception; if it does, it will update the PC, which will be used throughout the rest of
         // this function.
         if reg.status().ie_c() {
             self.process_interrupts(reg);
@@ -791,7 +796,7 @@ macro_rules! def_instr_and_op_kind {
 
                 use super::{Register, reg};
 
-                /// An R-type instruction, where 'R' stands for 'register'.
+                /// R-type operands, where 'R' stands for 'register'.
                 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
                 pub struct Operands {
                     /// The *rs* operand.

@@ -206,7 +206,7 @@ impl<'s, 'b> Cpu<'s, 'b> {
         self.advance_pipeline(|_| instr)
     }
 
-    /// Executes the instruction decodeable from the given opcode.
+    /// Executes the given instruction its encoded, machine-readable form.
     ///
     /// This method returns the result of the execution.
     pub fn execute_machine_instr(&mut self, mach: u32) -> instr::Executed {

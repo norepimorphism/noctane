@@ -292,7 +292,6 @@ enum Jump {
 impl Debugger {
     fn step(&mut self) -> Step {
         let execed = self.core.cpu().execute_next_instr();
-        self.core.update_io();
         //self.game_window.gfx_mut().render();
         // self.game_window.update();
 

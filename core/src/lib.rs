@@ -6,15 +6,15 @@ pub use noctane_gpu::Gpu;
 #[derive(Default)]
 pub struct Core {
     pub banks: Banks,
-    pub bus_ctrl: noctane_cpu::bus::io::BusControl,
+    pub bus_cfg: noctane_cpu::bus::io::BusConfig,
     pub cpu_state: noctane_cpu::State,
-    pub dma_ctrl: noctane_cpu::bus::io::DmaControl,
+    pub dma_cfg: noctane_cpu::bus::io::DmaConfig,
     pub gpu: Gpu,
     pub last_gpu_result: u32,
-    pub post: noctane_cpu::bus::io::Post,
-    pub ram_ctrl: noctane_cpu::bus::io::RamControl,
-    pub spu_ctrl: noctane_cpu::bus::io::SpuControl,
-    pub spu_voices: [noctane_cpu::bus::io::SpuVoice; 24],
+    pub post: noctane_cpu::bus::io::PostStatus,
+    pub ram_cfg: noctane_cpu::bus::io::RamConfig,
+    pub spu_cfg: noctane_cpu::bus::io::SpuConfig,
+    pub spu_voices: [noctane_cpu::bus::io::SpuVoiceConfig; 24],
     pub timers: noctane_cpu::bus::io::Timers,
 }
 
@@ -32,26 +32,19 @@ impl Core {
             ram: &mut self.banks.ram,
             exp_1: &mut self.banks.exp_1,
             io: noctane_cpu::bus::Io {
-                bus_ctrl: &mut self.bus_ctrl,
-                dma_ctrl: &mut self.dma_ctrl,
+                bus: &mut self.bus_cfg,
+                dma: &mut self.dma_cfg,
                 gpu: &mut self.gpu,
                 last_gpu_result: &mut self.last_gpu_result,
                 post: &mut self.post,
-                ram_ctrl: &mut self.ram_ctrl,
-                spu_ctrl: &mut self.spu_ctrl,
+                ram: &mut self.ram_cfg,
+                spu: &mut self.spu_cfg,
                 spu_voices: &mut self.spu_voices,
                 timers: &mut self.timers,
             },
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })
-    }
-
-    pub fn update_io(&mut self) {
-        self.timers.update();
-        if self.timers.take_irq().is_some() {
-            self.cpu_state.reg.raise_interrupt();
-        }
     }
 }
 

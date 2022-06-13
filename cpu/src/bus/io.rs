@@ -7,12 +7,12 @@ use noctane_proc_macro::gen_cpu_bus_io;
 
 use crate::mem::Address;
 
-pub use bus_ctrl::Control as BusControl;
-pub use dma_ctrl::Control as DmaControl;
-pub use post::Post;
-pub use ram_ctrl::Control as RamControl;
-pub use spu_ctrl::Control as SpuControl;
-pub use spu_voice::Voice as SpuVoice;
+pub use bus::Config as BusConfig;
+pub use dma::Config as DmaConfig;
+pub use post::Status as PostStatus;
+pub use ram::Config as RamConfig;
+pub use spu::Config as SpuConfig;
+pub use spu_voice::Config as SpuVoiceConfig;
 pub use timers::{Timer, Timers};
 
 /// External components accessible to the CPU via I/O registers.
@@ -21,20 +21,31 @@ pub use timers::{Timer, Timers};
 /// I/O region.
 #[derive(Debug)]
 pub struct Io<'a> {
-    pub bus_ctrl: &'a mut BusControl,
-    pub dma_ctrl: &'a mut DmaControl,
+    pub bus: &'a mut BusConfig,
+    pub dma: &'a mut DmaConfig,
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
     /// The last result of a GPU command (GP0 or GP1).
     pub last_gpu_result: &'a mut u32,
-    pub post: &'a mut Post,
-    pub ram_ctrl: &'a mut RamControl,
-    pub spu_ctrl: &'a mut SpuControl,
-    pub spu_voices: &'a mut [SpuVoice; 24],
+    pub post: &'a mut PostStatus,
+    pub ram: &'a mut RamConfig,
+    pub spu: &'a mut SpuConfig,
+    pub spu_voices: &'a mut [SpuVoiceConfig; 24],
     pub timers: &'a mut Timers,
 }
 
 impl Io<'_> {
+    pub fn update(&mut self, cause: &mut crate::reg::cpr::Cause) {
+        self.dma.update();
+        self.timers.update();
+
+        if self.dma.take_irq().is_some() {
+            cause.raise_std_interrupt();
+        } else if self.timers.take_irq().is_some() {
+            cause.raise_std_interrupt();
+        }
+    }
+
     /// Selects the appropriate I/O register entry and byte index for a given address and passes it
     /// to a callback.
     fn access<T>(
@@ -60,17 +71,17 @@ impl Io<'_> {
             post::BASE_ADDR..       => get_lut_entry!(post),
             duart::BASE_ADDR..      => get_lut_entry!(duart),
             atcons::BASE_ADDR..     => get_lut_entry!(atcons),
-            spu_ctrl::BASE_ADDR..   => get_lut_entry!(spu_ctrl),
+            spu::BASE_ADDR..   => get_lut_entry!(spu),
             spu_voice::BASE_ADDR..  => get_lut_entry!(spu_voice),
             mdec::BASE_ADDR..       => get_lut_entry!(mdec),
             gpu::BASE_ADDR..        => get_lut_entry!(gpu),
             cdrom::BASE_ADDR..      => get_lut_entry!(cdrom),
             timers::BASE_ADDR..     => get_lut_entry!(timers),
-            dma_ctrl::BASE_ADDR..   => get_lut_entry!(dma_ctrl),
-            int_ctrl::BASE_ADDR..   => get_lut_entry!(int_ctrl),
-            ram_ctrl::BASE_ADDR..   => get_lut_entry!(ram_ctrl),
+            dma::BASE_ADDR..   => get_lut_entry!(dma),
+            int::BASE_ADDR..   => get_lut_entry!(int),
+            ram::BASE_ADDR..   => get_lut_entry!(ram),
             perif::BASE_ADDR..      => get_lut_entry!(perif),
-            bus_ctrl::BASE_ADDR..   => get_lut_entry!(bus_ctrl),
+            bus::BASE_ADDR..   => get_lut_entry!(bus),
             _ => (Err(()), ""),
         };
 
@@ -175,18 +186,18 @@ struct LutEntry {
 
 // Define the I/O registers. This is going to be quite long...
 gen_cpu_bus_io!(
-    // Bus Control.
+    // Bus Configuration.
     Lut {
-        name: bus_ctrl,
+        name: bus,
         base_addr: 0x0000,
         regs: [
             Register {
                 name: EXP_1_BASE,
                 read_32: |_, io| {
-                    io.bus_ctrl.exp_1_base
+                    io.bus.exp_1_base
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.exp_1_base = value;
+                    io.bus.exp_1_base = value;
                 },
             },
             Register {
@@ -195,78 +206,78 @@ gen_cpu_bus_io!(
                     // The bottom 24 bits show the base address, but the top byte is hardcoded to
                     // `0x1f`.
                     // TODO: This isn't synced with the bank selection code in [`bus`].
-                    (io.bus_ctrl.exp_2_base & ((1 << 25) - 1)) | (0x1f << 24)
+                    (io.bus.exp_2_base & ((1 << 25) - 1)) | (0x1f << 24)
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.exp_2_base = value;
+                    io.bus.exp_2_base = value;
                 },
             },
             Register {
                 name: EXP_1_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.exp_1_size
+                    io.bus.exp_1_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.exp_1_size = value;
+                    io.bus.exp_1_size = value;
                 },
             },
             Register {
                 name: EXP_3_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.exp_3_size
+                    io.bus.exp_3_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.exp_3_size = value;
+                    io.bus.exp_3_size = value;
                 },
             },
             Register {
                 name: BIOS_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.bios_size
+                    io.bus.bios_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.bios_size = value;
+                    io.bus.bios_size = value;
                 },
             },
             Register {
                 name: SPU_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.spu_size
+                    io.bus.spu_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.spu_size = value;
+                    io.bus.spu_size = value;
                 },
             },
             Register {
                 name: CDROM_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.cdrom_size
+                    io.bus.cdrom_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.cdrom_size = value;
+                    io.bus.cdrom_size = value;
                 },
             },
             Register {
                 name: EXP_2_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.exp_2_size
+                    io.bus.exp_2_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.exp_2_size = value;
+                    io.bus.exp_2_size = value;
                 },
             },
             Register {
                 name: COMMON_SIZE,
                 read_32: |_, io| {
-                    io.bus_ctrl.common_size
+                    io.bus.common_size
                 },
                 write_32: |_, io, value| {
-                    io.bus_ctrl.common_size = value;
+                    io.bus.common_size = value;
                 },
             },
         ],
         module: {
-            impl Default for Control {
+            impl Default for Config {
                 fn default() -> Self {
                     Self {
                         // Most of these fields can be 0 because the BIOS confgures them.
@@ -287,7 +298,7 @@ gen_cpu_bus_io!(
 
             /// Determines the base addresses and sizes of banks accessible to the CPU bus.
             #[derive(Debug)]
-            pub struct Control {
+            pub struct Config {
                 /// The base address of Expansion Region 1.
                 pub exp_1_base: u32,
                 /// The base address of Expansion Region 2.
@@ -368,23 +379,23 @@ gen_cpu_bus_io!(
         ],
         module: {},
     },
-    // Bus Control 2.
+    // RAM Configuration.
     Lut {
-        name: ram_ctrl,
+        name: ram,
         base_addr: 0x0060,
         regs: [
             Register {
                 name: RAM_CTRL,
                 read_32: |_, io| {
-                    io.ram_ctrl.0
+                    io.ram.0
                 },
                 write_32: |_, io, value| {
-                    *io.ram_ctrl = ram_ctrl::Control(value);
+                    *io.ram = ram::Config(value);
                 },
             },
         ],
         module: {
-            impl Default for Control {
+            impl Default for Config {
                 fn default() -> Self {
                     Self(0)
                 }
@@ -392,7 +403,7 @@ gen_cpu_bus_io!(
 
             // TODO
             bitfield::bitfield! {
-                pub struct Control(u32);
+                pub struct Config(u32);
                 impl Debug;
                 pub into LayoutKind, layout, set_layout: 11, 9;
             }
@@ -454,9 +465,9 @@ gen_cpu_bus_io!(
             }
         },
     },
-    // Interrupt Control.
+    // Interrupt Configuration.
     Lut {
-        name: int_ctrl,
+        name: int,
         base_addr: 0x0070,
         regs: [
             Register {
@@ -482,36 +493,36 @@ gen_cpu_bus_io!(
         ],
         module: {},
     },
-    // DMA Control.
+    // DMA Configuration.
     Lut {
-        name: dma_ctrl,
+        name: dma,
         base_addr: 0x0080,
         regs: [
             Register {
                 name: MDECin_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, mdec_in.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, mdec_in.base_addr = value);
                 },
             },
             Register {
                 name: MDECin_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, mdec_in.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, mdec_in.block_cfg = value);
                 },
             },
             Register {
                 name: MDECin_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, mdec_in.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, mdec_in.cfg = value);
                 },
             },
             Register {
@@ -526,28 +537,28 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECout_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, mdec_out.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, mdec_out.base_addr = value);
                 },
             },
             Register {
                 name: MDECout_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, mdec_out.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, mdec_out.block_cfg = value);
                 },
             },
             Register {
                 name: MDECout_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, mdec_out.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, mdec_out.cfg = value);
                 },
             },
             Register {
@@ -562,28 +573,28 @@ gen_cpu_bus_io!(
             Register {
                 name: GPU_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, gpu.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, gpu.base_addr = value);
                 },
             },
             Register {
                 name: GPU_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, gpu.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, gpu.block_cfg = value);
                 },
             },
             Register {
                 name: GPU_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, gpu.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, gpu.cfg = value);
                 },
             },
             Register {
@@ -598,28 +609,28 @@ gen_cpu_bus_io!(
             Register {
                 name: CDROM_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, cdrom.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, cdrom.base_addr = value);
                 },
             },
             Register {
                 name: CDROM_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, cdrom.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, cdrom.block_cfg = value);
                 },
             },
             Register {
                 name: CDROM_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, cdrom.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, cdrom.cfg = value);
                 },
             },
             Register {
@@ -634,28 +645,28 @@ gen_cpu_bus_io!(
             Register {
                 name: SPU_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, spu.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, spu.base_addr = value);
                 },
             },
             Register {
                 name: SPU_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, spu.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, spu.block_cfg = value);
                 },
             },
             Register {
                 name: SPU_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, spu.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, spu.cfg = value);
                 },
             },
             Register {
@@ -670,28 +681,28 @@ gen_cpu_bus_io!(
             Register {
                 name: PIO_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, pio.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, pio.base_addr = value);
                 },
             },
             Register {
                 name: PIO_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, pio.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, pio.block_cfg = value);
                 },
             },
             Register {
                 name: PIO_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, pio.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, pio.cfg = value);
                 },
             },
             Register {
@@ -706,28 +717,28 @@ gen_cpu_bus_io!(
             Register {
                 name: OTC_MADR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.base_addr
+                    dma::read_chan_field!(io, otc.base_addr)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.base_addr = value;
+                    dma::write_chan_field!(io, otc.base_addr = value);
                 },
             },
             Register {
                 name: OTC_BCR,
                 read_32: |_, io| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl
+                    dma::read_chan_field!(io, otc.block_cfg)
                 },
                 write_32: |_, io, value| {
-                    io.dma_ctrl.chan.mdec_in.block_ctrl = value
+                    dma::write_chan_field!(io, otc.block_cfg = value);
                 },
             },
             Register {
                 name: OTC_CHCR,
                 read_32: |_, io| {
-                    todo!()
+                    dma::read_chan_field!(io, otc.cfg)
                 },
                 write_32: |_, io, value| {
-                    todo!()
+                    dma::write_chan_field!(io, otc.cfg = value);
                 },
             },
             Register {
@@ -741,13 +752,21 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: DPCR,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    io.dma.chan.cfg.0
+                },
+                write_32: |_, io, value| {
+                    io.dma.chan.cfg = dma::ChannelsConfig(value);
+                },
             },
             Register {
                 name: DICR,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    io.dma.int.0
+                },
+                write_32: |_, io, value| {
+                    io.dma.int = dma::InterruptConfig(value);
+                },
             },
             Register {
                 name: 30,
@@ -761,13 +780,82 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            use bitfield::bitfield;
+
+            macro_rules! read_chan_field {
+                ($io:expr, $chan:ident . cfg) => {
+                    $io.dma.chan.$chan.cfg.0
+                };
+                ($io:expr, $chan:ident . $field:ident) => {
+                    $io.dma.chan.$chan.$field
+                };
+            }
+
+            macro_rules! write_chan_field {
+                ($io:expr, $chan:ident . cfg = $value:expr) => {
+                    $io.dma.chan.$chan.cfg = dma::ChannelConfig($value)
+                };
+                ($io:expr, $chan:ident . $field:ident = $value:expr) => {
+                    $io.dma.chan.$chan.$field = $value
+                };
+            }
+
+            pub(crate) use read_chan_field;
+            pub(crate) use write_chan_field;
+
             #[derive(Debug, Default)]
-            pub struct Control {
+            pub struct Config {
+                pub int: InterruptConfig,
                 pub chan: Channels,
+            }
+
+            impl Config {
+                pub fn take_irq(&mut self) -> Option<()> {
+                    // TODO
+                    if self.int.gpu_irq_is_pending() {
+                        self.int.set_gpu_irq_is_pending(false);
+                        // Some(())
+                        None
+                    } else {
+                        None
+                    }
+                }
+
+                pub fn update(&mut self) {
+                    // TODO
+                }
+            }
+
+            impl Default for InterruptConfig {
+                fn default() -> Self {
+                    Self(0)
+                }
+            }
+
+            bitfield! {
+                pub struct InterruptConfig(u32);
+                impl Debug;
+                pub mdec_in_irq_is_enabled, set_mdec_in_irq_is_enabled: 16;
+                pub mdec_out_irq_is_enabled, set_mdec_out_irq_is_enabled: 17;
+                pub gpu_irq_is_enabled, set_gpu_irq_is_enabled: 18;
+                pub cdrom_irq_is_enabled, set_cdrom_irq_is_enabled: 19;
+                pub spu_irq_is_enabled, set_spu_irq_is_enabled: 20;
+                pub pio_irq_is_enabled, set_pio_irq_is_enabled: 21;
+                pub otc_irq_is_enabled, set_otc_irq_is_enabled: 22;
+                pub irq_is_enabled, set_irq_is_enabled: 23;
+                pub mdec_in_irq_is_pending, set_mdec_in_irq_is_pending: 24;
+                pub mdec_out_irq_is_pending, set_mdec_out_irq_is_pending: 25;
+                pub gpu_irq_is_pending, set_gpu_irq_is_pending: 26;
+                pub cdrom_irq_is_pending, set_cdrom_irq_is_pending: 27;
+                pub spu_irq_is_pending, set_spu_irq_is_pending: 28;
+                pub pio_irq_is_pending, set_pio_irq_is_pending: 29;
+                pub otc_irq_is_pending, set_otc_irq_is_pending: 30;
+                pub irq_is_pending, set_irq_is_pending: 31;
             }
 
             #[derive(Debug, Default)]
             pub struct Channels {
+                pub cfg: ChannelsConfig,
                 pub mdec_in: Channel,
                 pub mdec_out: Channel,
                 pub gpu: Channel,
@@ -777,10 +865,47 @@ gen_cpu_bus_io!(
                 pub otc: Channel,
             }
 
+            impl Default for ChannelsConfig {
+                fn default() -> Self {
+                    Self(0)
+                }
+            }
+
+            bitfield! {
+                pub struct ChannelsConfig(u32);
+                impl Debug;
+                pub mdec_in_prio, set_mdec_in_prio: 2, 0;
+                pub mdec_in_is_enabled, set_mdec_in_is_enabled: 3;
+                pub mdec_out_prio, set_mdec_out_prio: 6, 4;
+                pub mdec_out_is_enabled, set_mdec_out_is_enabled: 7;
+                pub gpu_prio, set_gpu_prio: 10, 8;
+                pub gpu_is_enabled, set_gpu_is_enabled: 11;
+                pub cdrom_prio, set_cdrom_prio: 14, 12;
+                pub cdrom_is_enabled, set_cdrom_is_enabled: 15;
+                pub spu_prio, set_spu_prio: 18, 16;
+                pub spu_is_enabled, set_spu_is_enabled: 19;
+                pub pio_prio, set_pio_prio: 22, 20;
+                pub pio_is_enabled, set_pio_is_enabled: 23;
+                pub otc_prio, set_otc_prio: 26, 24;
+                pub otc_is_enabled, set_otc_is_enabled: 27;
+            }
+
             #[derive(Debug, Default)]
             pub struct Channel {
+                pub cfg: ChannelConfig,
                 pub base_addr: u32,
-                pub block_ctrl: u32,
+                pub block_cfg: u32,
+            }
+
+            impl Default for ChannelConfig {
+                fn default() -> Self {
+                    Self(0)
+                }
+            }
+
+            bitfield! {
+                pub struct ChannelConfig(u32);
+                impl Debug;
             }
 
             macro_rules! impl_deref_for_chan {
@@ -1258,7 +1383,7 @@ gen_cpu_bus_io!(
         ],
         module: {
             #[derive(Debug, Default)]
-            pub struct Voice {
+            pub struct Config {
                 pub l_vol: u16,
                 pub r_vol: u16,
                 pub adpcm_sample_rate: u16,
@@ -1315,18 +1440,18 @@ gen_cpu_bus_io!(
         // instantiate it 24 times with the following line.
         regs_count: 24,
     },
-    // SPU Control.
+    // SPU Configuration.
     Lut {
-        name: spu_ctrl,
+        name: spu,
         base_addr: 0x0d80,
         regs: [
             Register {
                 name: L_MAIN_VOL,
                 read_16: |_, io, addr| {
-                    io.spu_ctrl.l_main_vol
+                    io.spu.l_main_vol
                 },
                 write_16: |_, io, addr, value| {
-                    io.spu_ctrl.l_main_vol = value;
+                    io.spu.l_main_vol = value;
                 },
             },
             Register {
@@ -1432,7 +1557,7 @@ gen_cpu_bus_io!(
         ],
         module: {
             #[derive(Debug, Default)]
-            pub struct Control {
+            pub struct Config {
                 pub l_main_vol: u16,
                 pub r_main_vol: u16,
             }
@@ -1535,7 +1660,7 @@ gen_cpu_bus_io!(
         ],
         module: {
             #[derive(Debug, Default)]
-            pub struct Post {
+            pub struct Status {
                 /// A 7-segment display indicating the POST status.
                 pub seven_seg: Vec<u8>,
                 /// An LED indicating the POST status.

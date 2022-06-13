@@ -152,7 +152,7 @@ impl Bus<'_> {
 
         const MB: u32 = 1024 * 1024;
 
-        let ram_layout = io::ram_ctrl::Layout::from(self.io.ram_ctrl.layout());
+        let ram_layout = io::ram::Layout::from(self.io.ram.layout());
         let ram_data_size = MB * ram_layout.data_mb;
         let ram_high_z_size = MB * ram_layout.high_z_mb;
 
@@ -172,19 +172,19 @@ impl Bus<'_> {
             bios,
             Bios::BASE_ADDR,
             // TODO: This is incorrect.
-            self.io.bus_ctrl.bios_size,
+            self.io.bus.bios_size,
         );
         try_access_bank!(
             exp_1,
-            self.io.bus_ctrl.exp_1_base,
+            self.io.bus.exp_1_base,
             // TODO: This is incorrect.
-            self.io.bus_ctrl.exp_1_size,
+            self.io.bus.exp_1_size,
         );
         try_access_bank!(
             exp_3,
             Exp3::BASE_ADDR,
             // TODO: This is incorrect.
-            self.io.bus_ctrl.exp_3_size,
+            self.io.bus.exp_3_size,
         );
         try_access!(
             Self::IO_BASE_ADDR,
@@ -194,8 +194,8 @@ impl Bus<'_> {
             },
         );
         try_access!(
-            self.io.bus_ctrl.exp_2_base,
-            self.io.bus_ctrl.exp_2_size,
+            self.io.bus.exp_2_base,
+            self.io.bus.exp_2_size,
             |rebased_addr: usize| {
                 access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
             },

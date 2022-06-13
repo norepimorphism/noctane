@@ -8,6 +8,7 @@ impl Gpu {
     }
 }
 
+/// The PSX Graphics Processing Unit (GPU).
 #[derive(Debug, Default)]
 pub struct Gpu(());
 
