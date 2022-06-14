@@ -1,5 +1,9 @@
 # Progress Log
 
+# 6/13/2022
+
+Timers and SPU voice registers are now mostly implemented. I am currently implementing DMAs, which should be a bit of a challenging task.
+
 # 6/11/2022
 
 Documentation for the `noctane-cpu` crate is now mostly complete. I am very happy with how it looks.

@@ -7,12 +7,6 @@ use noctane_proc_macro::gen_cpu_bus_io;
 
 use crate::mem::Address;
 
-pub use bus::Config as BusConfig;
-pub use dma::Config as DmaConfig;
-pub use post::Status as PostStatus;
-pub use ram::Config as RamConfig;
-pub use spu::Config as SpuConfig;
-pub use spu_voice::Config as SpuVoiceConfig;
 pub use timers::{Timer, Timers};
 
 /// External components accessible to the CPU via I/O registers.
@@ -21,28 +15,35 @@ pub use timers::{Timer, Timers};
 /// I/O region.
 #[derive(Debug)]
 pub struct Io<'a> {
-    pub bus: &'a mut BusConfig,
-    pub dma: &'a mut DmaConfig,
+    pub bus: &'a mut bus::Config,
+    pub dma: &'a mut dma::Config,
     /// The graphics processing unit (GPU).
     pub gpu: &'a mut Gpu,
     /// The last result of a GPU command (GP0 or GP1).
     pub last_gpu_result: &'a mut u32,
-    pub post: &'a mut PostStatus,
-    pub ram: &'a mut RamConfig,
-    pub spu: &'a mut SpuConfig,
-    pub spu_voices: &'a mut [SpuVoiceConfig; 24],
+    pub post: &'a mut post::Status,
+    pub ram: &'a mut ram::Config,
+    pub spu: &'a mut spu::Config,
+    pub spu_voices: &'a mut [spu_voice::Config; 24],
     pub timers: &'a mut Timers,
 }
 
+pub enum InterruptRequest {
+    Dma(DmaRequest),
+    Timer,
+}
+
 impl Io<'_> {
-    pub fn update(&mut self, cause: &mut crate::reg::cpr::Cause) {
+    pub fn update(&mut self) -> Option<InterruptRequest> {
         self.dma.update();
         self.timers.update();
 
-        if self.dma.take_irq().is_some() {
-            cause.raise_std_interrupt();
+        if let Some(dma) = self.dma.take_irq() {
+            Some(InterruptRequest::Dma(dma))
         } else if self.timers.take_irq().is_some() {
-            cause.raise_std_interrupt();
+            Some(InterruptRequest::Timer)
+        } else {
+            None
         }
     }
 
