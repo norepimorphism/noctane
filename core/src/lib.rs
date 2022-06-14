@@ -6,15 +6,15 @@ pub use noctane_gpu::Gpu;
 #[derive(Default)]
 pub struct Core {
     pub banks: Banks,
-    pub bus_cfg: noctane_cpu::bus::io::BusConfig,
+    pub bus_cfg: noctane_cpu::bus::io::bus::Config,
     pub cpu_state: noctane_cpu::State,
-    pub dma_cfg: noctane_cpu::bus::io::DmaConfig,
+    pub dma_cfg: noctane_cpu::bus::io::dma::Config,
     pub gpu: Gpu,
     pub last_gpu_result: u32,
-    pub post: noctane_cpu::bus::io::PostStatus,
-    pub ram_cfg: noctane_cpu::bus::io::RamConfig,
-    pub spu_cfg: noctane_cpu::bus::io::SpuConfig,
-    pub spu_voices: [noctane_cpu::bus::io::SpuVoiceConfig; 24],
+    pub post: noctane_cpu::bus::io::post::Status,
+    pub ram_cfg: noctane_cpu::bus::io::ram::Config,
+    pub spu_cfg: noctane_cpu::bus::io::spu::Config,
+    pub spu_voices: [noctane_cpu::bus::io::spu_voice::Config; 24],
     pub timers: noctane_cpu::bus::io::Timers,
 }
 

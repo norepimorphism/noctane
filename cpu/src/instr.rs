@@ -147,20 +147,8 @@ impl Pipeline {
         // slot, which we can handle specially.
 
         // Before we do anything, we should bring I/O up-to-speed.
-        if let Some(irq) = mem.bus_mut().io.update() {
-            use crate::bus::io::InterruptRequest;
-
-            match irq {
-                InterruptRequest::Dma(dma) => {
-                    for addr in (0..dma.len).iter().map(|i| dma.start + (i * 4)) {
-                        // We do a little `memcpy`...
-                        let value = mem.read_32(addr)
-                        mem.write_32()
-                    }
-                }
-                _ => {}
-            };
-
+        let io_update = mem.bus_mut().io.update();
+        if io_update.requests_interrupt {
             reg.raise_std_interrupt();
         }
 

@@ -28,22 +28,22 @@ pub struct Io<'a> {
     pub timers: &'a mut Timers,
 }
 
-pub enum InterruptRequest {
-    Dma(DmaRequest),
-    Timer,
+pub struct Update {
+    pub requests_interrupt: bool,
+    pub dma_txfer_packet: Option<dma::TransferPacket>,
 }
 
 impl Io<'_> {
-    pub fn update(&mut self) -> Option<InterruptRequest> {
-        self.dma.update();
+    pub fn update(&mut self) -> Update {
+        let dma_txfer_packet = self.dma.update();
         self.timers.update();
 
-        if let Some(dma) = self.dma.take_irq() {
-            Some(InterruptRequest::Dma(dma))
-        } else if self.timers.take_irq().is_some() {
-            Some(InterruptRequest::Timer)
-        } else {
-            None
+        // Boolean operators are lazy, so `take_irq` is called a maximum of one time.
+        let requests_interrupt = self.dma.take_irq().is_some() ||self.timers.take_irq().is_some();
+
+        Update {
+            requests_interrupt,
+            dma_txfer_packet,
         }
     }
 
@@ -502,10 +502,10 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECin_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_in.base_addr)
+                    dma::read_chan_field!(io, mdec_in.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_in.base_addr = value);
+                    dma::write_chan_field!(io, mdec_in.cpu_bus_base = value);
                 },
             },
             Register {
@@ -538,10 +538,10 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECout_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_out.base_addr)
+                    dma::read_chan_field!(io, mdec_out.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_out.base_addr = value);
+                    dma::write_chan_field!(io, mdec_out.cpu_bus_base = value);
                 },
             },
             Register {
@@ -574,10 +574,10 @@ gen_cpu_bus_io!(
             Register {
                 name: GPU_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, gpu.base_addr)
+                    dma::read_chan_field!(io, gpu.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, gpu.base_addr = value);
+                    dma::write_chan_field!(io, gpu.cpu_bus_base = value);
                 },
             },
             Register {
@@ -610,10 +610,10 @@ gen_cpu_bus_io!(
             Register {
                 name: CDROM_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, cdrom.base_addr)
+                    dma::read_chan_field!(io, cdrom.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, cdrom.base_addr = value);
+                    dma::write_chan_field!(io, cdrom.cpu_bus_base = value);
                 },
             },
             Register {
@@ -646,10 +646,10 @@ gen_cpu_bus_io!(
             Register {
                 name: SPU_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, spu.base_addr)
+                    dma::read_chan_field!(io, spu.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, spu.base_addr = value);
+                    dma::write_chan_field!(io, spu.cpu_bus_base = value);
                 },
             },
             Register {
@@ -682,10 +682,10 @@ gen_cpu_bus_io!(
             Register {
                 name: PIO_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, pio.base_addr)
+                    dma::read_chan_field!(io, pio.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, pio.base_addr = value);
+                    dma::write_chan_field!(io, pio.cpu_bus_base = value);
                 },
             },
             Register {
@@ -718,10 +718,10 @@ gen_cpu_bus_io!(
             Register {
                 name: OTC_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, otc.base_addr)
+                    dma::read_chan_field!(io, otc.cpu_bus_base)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, otc.base_addr = value);
+                    dma::write_chan_field!(io, otc.cpu_bus_base = value);
                 },
             },
             Register {
@@ -766,6 +766,8 @@ gen_cpu_bus_io!(
                     io.dma.int.0
                 },
                 write_32: |_, io, value| {
+                    // TODO: Explain what's happening here.
+                    let value = (io.dma.int.0 & !value & !((1 << 24) - 1)) | (value & ((1 << 24) - 1));
                     io.dma.int = dma::InterruptConfig(value);
                 },
             },
@@ -813,18 +815,74 @@ gen_cpu_bus_io!(
             impl Config {
                 pub fn take_irq(&mut self) -> Option<()> {
                     // TODO
-                    if self.int.gpu_irq_is_pending() {
+                    if self.int.spu_irq_is_pending() {
+                        self.int.set_spu_irq_is_pending(false);
+
+                        Some(())
+                    } else if self.int.gpu_irq_is_pending() {
                         self.int.set_gpu_irq_is_pending(false);
-                        // Some(())
-                        None
+
+                        Some(())
                     } else {
                         None
                     }
                 }
 
-                pub fn update(&mut self) {
-                    // TODO
+                pub fn update(&mut self) -> Option<TransferPacket> {
+                    let active_chan = Channels::find_highest_prio(self.chan.enabled_with_prio());
+
+                    if let Some(chan) = active_chan {
+                        let txfer = chan.txfer.unwrap_or_else(|| {
+                            // A transfer is not in progress. We will start one now.
+                            let txfer = Transfer {
+                                src: TransferSource::decode(chan.cfg.src()),
+                                dir: TransferDirection::decode(chan.cfg.dir()),
+                                cpu_bus_base: chan.cpu_bus_base,
+                            };
+                            chan.txfer = Some(txfer);
+
+                            txfer
+                        });
+
+                        // TODO
+                        if true {
+                            // The transfer is complete.
+                            // TODO
+                            chan.txfer = None;
+                            self.int.set_spu_irq_is_pending(true);
+                            self.int.set_gpu_irq_is_pending(true);
+                        }
+
+                        None
+                    } else {
+                        None
+                    }
                 }
+            }
+
+            #[derive(Debug)]
+            pub struct TransferPacket {
+                pub src: TransferSource,
+                /// The direction in which data is moved during the transfer.
+                pub dir: TransferDirection,
+                /// The starting address of the transfer on the CPU bus side.
+                pub cpu_bus_base: u32,
+                /// The starting address of the transfer on the side of the external device.
+                pub extern_base: u32,
+                /// The length, in 32-bit words, of the transfer.
+                pub len: usize,
+            }
+
+            #[derive(Clone, Copy, Debug)]
+            pub enum TransferSource {
+                CpuBus,
+                External,
+            }
+
+            #[derive(Clone, Copy, Debug)]
+            pub enum TransferDirection {
+                Forward,
+                Backward,
             }
 
             impl Default for InterruptConfig {
@@ -854,7 +912,71 @@ gen_cpu_bus_io!(
                 pub irq_is_pending, set_irq_is_pending: 31;
             }
 
-            #[derive(Debug, Default)]
+            impl Default for Channels {
+                fn default() -> Self {
+                    Self {
+                        cfg: ChannelsConfig::default(),
+                        mdec_in: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        mdec_out: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        gpu: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        cdrom: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        spu: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        pio: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                        otc: Channel::new(
+                            |params| {
+                                todo!()
+                            },
+                            |params| {
+                                todo!()
+                            },
+                        ),
+                    }
+                }
+            }
+
+            #[derive(Debug)]
             pub struct Channels {
                 pub cfg: ChannelsConfig,
                 pub mdec_in: Channel,
@@ -864,6 +986,78 @@ gen_cpu_bus_io!(
                 pub spu: Channel,
                 pub pio: Channel,
                 pub otc: Channel,
+            }
+
+            impl Channels {
+                fn enabled_with_prio<'a>(
+                    &'a mut self,
+                ) -> impl 'a + Iterator<Item = (&'a mut Channel, Priority)> {
+                    [
+                        (
+                            &mut self.mdec_in,
+                            self.cfg.mdec_in_prio(),
+                            self.cfg.mdec_in_is_enabled(),
+                        ),
+                        (
+                            &mut self.mdec_out,
+                            self.cfg.mdec_out_prio(),
+                            self.cfg.mdec_out_is_enabled(),
+                        ),
+                        (
+                            &mut self.gpu,
+                            self.cfg.gpu_prio(),
+                            self.cfg.gpu_is_enabled(),
+                        ),
+                        (
+                            &mut self.cdrom,
+                            self.cfg.cdrom_prio(),
+                            self.cfg.cdrom_is_enabled(),
+                        ),
+                        (
+                            &mut self.spu,
+                            self.cfg.spu_prio(),
+                            self.cfg.spu_is_enabled(),
+                        ),
+                        (
+                            &mut self.pio,
+                            self.cfg.pio_prio(),
+                            self.cfg.pio_is_enabled(),
+                        ),
+                        (
+                            &mut self.otc,
+                            self.cfg.otc_prio(),
+                            self.cfg.otc_is_enabled(),
+                        ),
+                    ]
+                    .into_iter()
+                    .filter(|(chan, _, is_enabled)| *is_enabled)
+                    .map(|(chan, prio, _)| (chan, Priority(prio)))
+                }
+            }
+
+            struct Priority(u32);
+
+            impl Channels {
+                fn find_highest_prio<'a>(
+                    mut chan_with_prio: impl 'a + Iterator<Item = (&'a mut Channel, Priority)>,
+                ) -> Option<&'a mut Channel> {
+                    let Some((mut best_chan, mut highest_prio)) = chan_with_prio.next() else {
+                        return None;
+                    };
+
+                    while let Some((chan, prio)) = chan_with_prio.next() {
+                        // We use `<=` because, if two channels are of equal priority, then the
+                        // channel with the higher number (i.e. OTC is highest) is selected. Because
+                        // of [`Self::enabled_with_prio`], we are guaranteed to be iterating from
+                        // the least to highest numbered channels.
+                        if prio.0 <= highest_prio.0 {
+                            best_chan = chan;
+                            highest_prio = prio;
+                        }
+                    }
+
+                    Some(best_chan)
+                }
             }
 
             impl Default for ChannelsConfig {
@@ -891,11 +1085,34 @@ gen_cpu_bus_io!(
                 pub otc_is_enabled, set_otc_is_enabled: 27;
             }
 
-            #[derive(Debug, Default)]
+            impl Channel {
+                fn new(read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
+                    Self {
+                        txfer: None,
+                        cfg: ChannelConfig::default(),
+                        cpu_bus_base: 0,
+                        block_cfg: 0,
+                        read,
+                        write,
+                    }
+                }
+            }
+
+            #[derive(Debug)]
             pub struct Channel {
+                pub txfer: Option<Transfer>,
                 pub cfg: ChannelConfig,
-                pub base_addr: u32,
+                pub cpu_bus_base: u32,
                 pub block_cfg: u32,
+                pub read: fn(ReadParameters),
+                pub write: fn(WriteParameters)
+            }
+
+            #[derive(Clone, Copy, Debug)]
+            pub struct Transfer {
+                pub src: TransferSource,
+                pub dir: TransferDirection,
+                pub cpu_bus_base: u32,
             }
 
             impl Default for ChannelConfig {
@@ -907,6 +1124,36 @@ gen_cpu_bus_io!(
             bitfield! {
                 pub struct ChannelConfig(u32);
                 impl Debug;
+                pub src, set_src: 0;
+                pub dir, set_dir: 1;
+            }
+
+            impl TransferSource {
+                fn decode(value: bool) -> Self {
+                    if value {
+                        Self::CpuBus
+                    } else {
+                        Self::External
+                    }
+                }
+            }
+
+            impl TransferDirection {
+                fn decode(value: bool) -> Self {
+                    if value {
+                        Self::Backward
+                    } else {
+                        Self::Forward
+                    }
+                }
+            }
+
+            pub struct ReadParameters {
+
+            }
+
+            pub struct WriteParameters {
+
             }
 
             macro_rules! impl_deref_for_chan {
