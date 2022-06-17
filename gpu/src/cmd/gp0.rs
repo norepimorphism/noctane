@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use bit::BitIndex as _;
+use noctane_util::BitStack as _;
 
 use super::MachineCommand;
 
@@ -41,7 +41,7 @@ impl Command {
             3 => rect::Command::decode(subopcode, mach.param).map(Self::Rectangle),
             4..=6 => txfer::Command::decode(subopcode, mach.param).map(Self::Transfer),
             7 => env::Command::decode(subopcode, mach.param).map(Self::Env),
-            _ => unsafe { unreachable_unchecked!() },
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 }
@@ -51,7 +51,7 @@ pub mod misc {
     pub struct Command;
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
             todo!()
         }
     }
@@ -64,7 +64,7 @@ pub mod env {
     }
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(opcode: u8, _param: u32) -> Option<Self> {
             match opcode {
                 // TODO
                 1 => Some(Self::SetTexpage),
@@ -80,7 +80,7 @@ pub mod poly {
     pub struct Command;
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
             todo!()
         }
     }
@@ -91,7 +91,7 @@ pub mod line {
     pub struct Command;
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
             todo!()
         }
     }
@@ -102,18 +102,18 @@ pub mod rect {
     pub struct Command;
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
             todo!()
         }
     }
 }
 
-pub mod tx {
+pub mod txfer {
     #[derive(Debug)]
     pub struct Command;
 
     impl Command {
-        pub fn decode(opcode: u8, param: u32) -> Option<Self> {
+        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
             todo!()
         }
     }

@@ -8,4 +8,5 @@ license = "MPL-2.0"
 
 [dependencies]
 bitfield = "0.13"
+noctane-util = { path = "../util" }
 tracing = "0.1"

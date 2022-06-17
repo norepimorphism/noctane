@@ -43,7 +43,7 @@ pub struct Update {
 impl Io<'_> {
     pub fn update(&mut self) -> Update {
         let dma_txfer_packet = self.dma.update();
-        self.timers.update();
+        self.timers.update(&mut self.int);
 
         // Boolean operators are lazy, so `take_irq` is called a maximum of one time.
         let requests_interrupt = self.dma.take_irq().is_some() || self.timers.take_irq().is_some();
@@ -215,7 +215,7 @@ gen_cpu_bus_io!(
                 },
                 write_32: |_, io, value| {
                     // The top byte is hardcoded to `0x1f`.
-                    io.bus.exp_2.base = (value & ((1 << 25) - 1)) | (0x1f << 24);
+                    io.bus.exp_2.base = (0x1f << 24) | (value & ((1 << 25) - 1));
                 },
             },
             Register {
@@ -302,7 +302,7 @@ gen_cpu_bus_io!(
             }
 
             /// Determines the base addresses and sizes of banks accessible to the CPU bus.
-            #[derive(Clone, Debug, Default)]
+            #[derive(Clone, Debug)]
             pub struct Config {
                 pub exp_1: RebaseableBankConfig,
                 pub exp_2: RebaseableBankConfig,
@@ -315,7 +315,7 @@ gen_cpu_bus_io!(
 
             #[derive(Clone, Debug, Default)]
             pub struct RebaseableBankConfig {
-                inner: BankConfig,
+                pub(super) inner: BankConfig,
                 pub base: u32,
             }
 
@@ -344,6 +344,7 @@ gen_cpu_bus_io!(
                         unk_14: code.pop_bits(2),
                         size_shift: code.pop_bits(5),
                         unk_21: code.pop_bits(3),
+                    }
                 }
 
                 pub fn bios() -> Self {
@@ -399,7 +400,7 @@ gen_cpu_bus_io!(
             #[derive(Clone, Copy, Debug, Default)]
             pub struct PeriodsConfig {
                 pub recovery_is_enabled: bool,
-                pub hold_is_enabled,
+                pub hold_is_enabled: bool,
                 pub floating_is_enabled: bool,
                 pub pre_strobe_is_enabled: bool,
             }
@@ -563,7 +564,7 @@ gen_cpu_bus_io!(
             Register {
                 name: RAM_CFG,
                 read_32: |_, io| {
-                    io.ram.layout.encode()
+                    io.ram.encode()
                 },
                 write_32: |_, io, value| {
                     *io.ram = ram::Config::decode(value);
@@ -580,6 +581,7 @@ gen_cpu_bus_io!(
                         unk_3: code.pop_bits(1),
                         unk_4: code.pop_bits(3),
                         should_delay_on_simult_read: code.pop_bool(),
+                        unk_8: code.pop_bits(1),
                         layout_kind: LayoutKind::decode(code.pop_bits(3)),
                         unk_12: code.pop_bits(4),
                         unk_16: code.pop_bits(16),
@@ -605,7 +607,7 @@ gen_cpu_bus_io!(
                     code.push_bits(16, self.unk_16);
                     code.push_bits(4, self.unk_12);
                     code.push_bits(3, self.layout_kind.encode());
-                    code.push_bits(self.unk_8);
+                    code.push_bits(1, self.unk_8);
                     code.push_bool(self.should_delay_on_simult_read);
                     code.push_bits(3, self.unk_4);
                     code.push_bits(1, self.unk_3);
@@ -636,8 +638,9 @@ gen_cpu_bus_io!(
                 }
             }
 
-            #[derive(Clone, Copy, Debug)]
+            #[derive(Clone, Copy, Debug, Default)]
             pub enum LayoutKind {
+                #[default]
                 _1M,
                 _4M,
                 _1MPlus1MHighZ,
@@ -755,7 +758,7 @@ gen_cpu_bus_io!(
                 pub gpu: Source,
                 pub cdrom: Source,
                 pub dma: Source,
-                pub timers: [Source; 3],
+                pub timers: [TimerSource; 3],
                 pub perif: Source,
                 pub sio: Source,
                 pub spu: Source,
@@ -789,6 +792,36 @@ gen_cpu_bus_io!(
                 /// Whether or not this interrupt source is requesting an interrupt.
                 pub is_requesting: bool,
             }
+
+            macro_rules! impl_deref_for_src {
+                ($ty:ty) => {
+                    impl std::ops::Deref for $ty {
+                        type Target = Source;
+
+                        fn deref(&self) -> &Self::Target {
+                            &self.inner
+                        }
+                    }
+
+                    impl std::ops::DerefMut for $ty {
+                        fn deref_mut(&mut self) -> &mut Self::Target {
+                            &mut self.inner
+                        }
+                    }
+                };
+            }
+
+            pub struct TimerSource {
+                pub is_enabled_on_target_hit: bool,
+                pub is_enabled_on_overflow: bool,
+                pub is_requesting: bool,
+            }
+
+            impl TimerSource {
+                pub fn is_enabled(&self) -> bool {
+                    self.is_enabled_on_target_hit || self.is_enabled_on_overflow
+                }
+            }
         },
     },
     // DMA Configuration.
@@ -799,28 +832,28 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECin_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_in.cpu_bus_base)
+                    dma::read_madr!(io, mdec_in)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_in.cpu_bus_base = value);
+                    dma::write_madr!(io, mdec_in, value);
                 },
             },
             Register {
                 name: MDECin_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_in.block_cfg)
+                    dma::read_bcr!(io, mdec_in)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_in.block_cfg = value);
+                    dma::write_bcr!(io, mdec_in, value);
                 },
             },
             Register {
                 name: MDECin_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_in.cfg)
+                    dma::read_chcr!(io, mdec_in)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_in.cfg = value);
+                    dma::write_chcr!(io, mdec_in, value);
                 },
             },
             Register {
@@ -835,28 +868,28 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECout_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_out.cpu_bus_base)
+                    dma::read_madr!(io, mdec_out)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_out.cpu_bus_base = value);
+                    dma::write_madr!(io, mdec_out, value);
                 },
             },
             Register {
                 name: MDECout_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_out.block_cfg)
+                    dma::read_bcr!(io, mdec_out)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_out.block_cfg = value);
+                    dma::write_bcr!(io, mdec_out, value);
                 },
             },
             Register {
                 name: MDECout_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, mdec_out.cfg)
+                    dma::read_chcr!(io, mdec_out)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, mdec_out.cfg = value);
+                    dma::write_chcr!(io, mdec_out, value);
                 },
             },
             Register {
@@ -871,28 +904,28 @@ gen_cpu_bus_io!(
             Register {
                 name: GPU_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, gpu.cpu_bus_base)
+                    dma::read_madr!(io, gpu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, gpu.cpu_bus_base = value);
+                    dma::write_madr!(io, gpu, value);
                 },
             },
             Register {
                 name: GPU_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, gpu.block_cfg)
+                    dma::read_bcr!(io, gpu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, gpu.block_cfg = value);
+                    dma::write_bcr!(io, gpu, value);
                 },
             },
             Register {
                 name: GPU_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, gpu.cfg)
+                    dma::read_chcr!(io, gpu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, gpu.cfg = value);
+                    dma::write_chcr!(io, gpu, value);
                 },
             },
             Register {
@@ -907,28 +940,28 @@ gen_cpu_bus_io!(
             Register {
                 name: CDROM_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, cdrom.cpu_bus_base)
+                    dma::read_madr!(io, cdrom)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, cdrom.cpu_bus_base = value);
+                    dma::write_madr!(io, cdrom, value);
                 },
             },
             Register {
                 name: CDROM_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, cdrom.block_cfg)
+                    dma::read_bcr!(io, cdrom)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, cdrom.block_cfg = value);
+                    dma::write_bcr!(io, cdrom, value);
                 },
             },
             Register {
                 name: CDROM_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, cdrom.cfg)
+                    dma::read_chcr!(io, cdrom)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, cdrom.cfg = value);
+                    dma::write_chcr!(io, cdrom, value);
                 },
             },
             Register {
@@ -943,28 +976,28 @@ gen_cpu_bus_io!(
             Register {
                 name: SPU_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, spu.cpu_bus_base)
+                    dma::read_madr!(io, spu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, spu.cpu_bus_base = value);
+                    dma::write_madr!(io, spu, value);
                 },
             },
             Register {
                 name: SPU_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, spu.block_cfg)
+                    dma::read_bcr!(io, spu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, spu.block_cfg = value);
+                    dma::write_bcr!(io, spu, value);
                 },
             },
             Register {
                 name: SPU_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, spu.cfg)
+                    dma::read_chcr!(io, spu)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, spu.cfg = value);
+                    dma::write_chcr!(io, spu, value);
                 },
             },
             Register {
@@ -979,28 +1012,28 @@ gen_cpu_bus_io!(
             Register {
                 name: PIO_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, pio.cpu_bus_base)
+                    dma::read_madr!(io, pio)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, pio.cpu_bus_base = value);
+                    dma::write_madr!(io, pio, value);
                 },
             },
             Register {
                 name: PIO_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, pio.block_cfg)
+                    dma::read_bcr!(io, pio)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, pio.block_cfg = value);
+                    dma::write_bcr!(io, pio, value);
                 },
             },
             Register {
                 name: PIO_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, pio.cfg)
+                    dma::read_chcr!(io, pio)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, pio.cfg = value);
+                    dma::write_chcr!(io, pio, value);
                 },
             },
             Register {
@@ -1015,28 +1048,28 @@ gen_cpu_bus_io!(
             Register {
                 name: OTC_MADR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, otc.cpu_bus_base)
+                    dma::read_madr!(io, otc)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, otc.cpu_bus_base = value);
+                    dma::write_madr!(io, otc, value);
                 },
             },
             Register {
                 name: OTC_BCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, otc.block_cfg)
+                    dma::read_bcr!(io, otc)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, otc.block_cfg = value);
+                    dma::write_bcr!(io, otc, value);
                 },
             },
             Register {
                 name: OTC_CHCR,
                 read_32: |_, io| {
-                    dma::read_chan_field!(io, otc.cfg)
+                    dma::read_chcr!(io, otc)
                 },
                 write_32: |_, io, value| {
-                    dma::write_chan_field!(io, otc.cfg = value);
+                    dma::write_chcr!(io, otc, value);
                 },
             },
             Register {
@@ -1051,21 +1084,21 @@ gen_cpu_bus_io!(
             Register {
                 name: DPCR,
                 read_32: |_, io| {
-                    io.dma.chan.cfg.0
+                    todo!()
                 },
                 write_32: |_, io, value| {
-                    io.dma.chan.cfg = dma::ChannelsConfig(value);
+                    todo!()
                 },
             },
             Register {
                 name: DICR,
                 read_32: |_, io| {
-                    io.dma.int.0
+                    todo!()
                 },
                 write_32: |_, io, value| {
                     // TODO: Explain what's happening here.
                     let value = (io.dma.int.0 & !value & !((1 << 24) - 1)) | (value & ((1 << 24) - 1));
-                    io.dma.int = dma::InterruptConfig(value);
+                    todo!()
                 },
             },
             Register {
@@ -1080,28 +1113,51 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
-            use bitfield::bitfield;
-
-            macro_rules! read_chan_field {
-                ($io:expr, $chan:ident . cfg) => {
-                    $io.dma.chan.$chan.cfg.0
-                };
-                ($io:expr, $chan:ident . $field:ident) => {
-                    $io.dma.chan.$chan.$field
+            macro_rules! read_madr {
+                ($io:expr, $chan:ident $(,)?) => {
+                    $io.dma.chan.$chan.cpu_bus_base
                 };
             }
 
-            macro_rules! write_chan_field {
-                ($io:expr, $chan:ident . cfg = $value:expr) => {
-                    $io.dma.chan.$chan.cfg = dma::ChannelConfig($value)
-                };
-                ($io:expr, $chan:ident . $field:ident = $value:expr) => {
-                    $io.dma.chan.$chan.$field = $value
+            macro_rules! write_madr {
+                ($io:expr, $chan:ident, $value:expr $(,)?) => {
+                    // The top byte is zeroed.
+                    $io.dma.chan.$chan.cpu_bus_base = $value & ((1 << 25) - 1);
                 };
             }
 
-            pub(crate) use read_chan_field;
-            pub(crate) use write_chan_field;
+            macro_rules! read_bcr {
+                ($io:expr, $chan:ident $(,)?) => {
+                    $io.dma.chan.$chan.block_cfg
+                };
+            }
+
+            macro_rules! write_bcr {
+                ($io:expr, $chan:ident, $value:expr $(,)?) => {
+                    $io.dma.chan.$chan.block_cfg = $value;
+                };
+            }
+
+            macro_rules! read_chcr {
+                ($io:expr, $chan:ident $(,)?) => {
+                    $io.dma.chan.$chan.encode_chcr()
+                };
+            }
+
+            macro_rules! write_chcr {
+                ($io:expr, $chan:ident, $value:expr $(,)?) => {
+                    $io.dma.chan.$chan.decode_chcr($value);
+                };
+            }
+
+            pub(crate) use read_madr;
+            pub(crate) use write_madr;
+
+            pub(crate) use read_bcr;
+            pub(crate) use write_bcr;
+
+            pub(crate) use read_chcr;
+            pub(crate) use write_chcr;
 
             #[derive(Debug, Default)]
             pub struct Config {
@@ -1109,21 +1165,6 @@ gen_cpu_bus_io!(
             }
 
             impl Config {
-                pub fn take_irq(&mut self) -> Option<()> {
-                    // TODO
-                    if self.int.spu_irq_is_pending() {
-                        self.int.set_spu_irq_is_pending(false);
-
-                        Some(())
-                    } else if self.int.gpu_irq_is_pending() {
-                        self.int.set_gpu_irq_is_pending(false);
-
-                        Some(())
-                    } else {
-                        None
-                    }
-                }
-
                 pub fn update(&mut self) -> Option<TransferPacket> {
                     let active_chan = Channels::find_highest_prio(self.chan.enabled_with_prio());
 
@@ -1145,8 +1186,8 @@ gen_cpu_bus_io!(
                             // The transfer is complete.
                             // TODO
                             chan.txfer = None;
-                            self.int.set_spu_irq_is_pending(true);
-                            self.int.set_gpu_irq_is_pending(true);
+                            self.int.dma.spu.is_requesting = true;
+                            self.int.dma.gpu.is_requesting = true;
                         }
 
                         None
@@ -1158,7 +1199,7 @@ gen_cpu_bus_io!(
 
             #[derive(Debug)]
             pub struct TransferPacket {
-                pub src: TransferSource,
+                pub source: TransferSource,
                 /// The direction in which data is moved during the transfer.
                 pub dir: TransferDirection,
                 /// The starting address of the transfer on the CPU bus side.
@@ -1184,7 +1225,6 @@ gen_cpu_bus_io!(
             impl Default for Channels {
                 fn default() -> Self {
                     Self {
-                        cfg: ChannelsConfig::default(),
                         mdec_in: Channel::new(
                             |params| {
                                 todo!()
@@ -1332,7 +1372,6 @@ gen_cpu_bus_io!(
                 fn new(read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
                     Self {
                         txfer: None,
-                        cfg: ChannelConfig::default(),
                         cpu_bus_base: 0,
                         block_cfg: 0,
                         read,
@@ -1344,7 +1383,6 @@ gen_cpu_bus_io!(
             #[derive(Debug)]
             pub struct Channel {
                 pub txfer: Option<Transfer>,
-                pub cfg: ChannelConfig,
                 pub cpu_bus_base: u32,
                 pub block_cfg: u32,
                 pub read: fn(ReadParameters),
@@ -1560,7 +1598,7 @@ gen_cpu_bus_io!(
         module: {
             macro_rules! read_field {
                 ($io:expr, $timer:ident . mode) => {
-                    $io.timers.$timer.mode.0 as u32
+                    $io.timers.$timer.encode_mode()
                 };
                 ($io:expr, $timer:ident . $field:ident) => {
                     $io.timers.$timer.$field as u32
@@ -1569,7 +1607,7 @@ gen_cpu_bus_io!(
 
             macro_rules! write_field {
                 ($io:expr, $timer:ident . mode = $value:expr) => {
-                    $io.timers.$timer.mode = timers::Mode($value as u16);
+                    $io.timers.$timer.decode_mode($value as u16);
                 };
                 ($io:expr, $timer:ident . $field:ident = $value:expr) => {
                     $io.timers.$timer.$field = $value as u16;
@@ -1579,7 +1617,46 @@ gen_cpu_bus_io!(
             pub(crate) use read_field;
             pub(crate) use write_field;
 
-            #[derive(Debug, Default)]
+            impl Default for Timers {
+                fn default() -> Self {
+                    Self {
+                        dotclock: Timer::new(
+                            0,
+                            |src| {
+                                match src.0 & 0b11 {
+                                    0 | 2 => Self::get_sysclock_increment(),
+                                    1 | 3 => Self::get_dotclock_increment(),
+                                    _ => unreachable!(),
+                                }
+                            },
+                        ),
+                        hblank: Timer::new(
+                            1,
+                            |src| {
+                                match src.0 & 0b11 {
+                                    0 | 2 => Self::get_sysclock_increment(),
+                                    1 | 3 => Self::get_hblank_increment(),
+                                    _ => unreachable!(),
+                                }
+                            },
+                        ),
+                        sysclock: Timer::new(
+                            2,
+                            |src| {
+                                let inc = Self::get_sysclock_increment();
+
+                                match src.0 & 0b11 {
+                                    0 | 1 => inc,
+                                    2 | 3 => inc / 8,
+                                    _ => unreachable!(),
+                                }
+                            },
+                        ),
+                    }
+                }
+            }
+
+            #[derive(Debug)]
             pub struct Timers {
                 pub dotclock: Timer,
                 pub hblank: Timer,
@@ -1587,38 +1664,10 @@ gen_cpu_bus_io!(
             }
 
             impl Timers {
-                pub fn take_irq(&mut self) -> Option<()> {
-                    self.dotclock.take_irq()?;
-                    self.hblank.take_irq()?;
-                    self.sysclock.take_irq()?;
-
-                    None
-                }
-
-                pub fn update(&mut self) {
-                    self.dotclock.update(|clock_src| {
-                        match clock_src.0 & 0b11 {
-                            0 | 2 => Self::get_sysclock_increment(),
-                            1 | 3 => Self::get_dotclock_increment(),
-                            _ => unreachable!(),
-                        }
-                    });
-                    self.hblank.update(|clock_src| {
-                        match clock_src.0 & 0b11 {
-                            0 | 2 => Self::get_sysclock_increment(),
-                            1 | 3 => Self::get_hblank_increment(),
-                            _ => unreachable!(),
-                        }
-                    });
-                    self.sysclock.update(|clock_src| {
-                        let inc = Self::get_sysclock_increment();
-
-                        match clock_src.0 & 0b11 {
-                            0 | 1 => inc,
-                            2 | 3 => inc / 8,
-                            _ => unreachable!(),
-                        }
-                    });
+                pub fn update(&mut self, int: &mut super::int::Sources) {
+                    self.dotclock.update(int);
+                    self.hblank.update(int);
+                    self.sysclock.update(int);
                 }
 
                 fn get_sysclock_increment() -> u16 {
@@ -1637,64 +1686,40 @@ gen_cpu_bus_io!(
                 }
             }
 
+            impl Timer {
+                pub fn new(
+                    index: usize,
+                    calc_increment_amount: fn(ClockSource) -> u16,
+                ) -> Self {
+                    Self {
+                        index,
+                        counter: 0,
+                        target: 0,
+                        clock_source: ClockSource(0),
+                        calc_increment_amount,
+                    }
+                }
+            }
+
             #[derive(Debug, Default)]
             pub struct Timer {
+                pub index: usize,
                 // Timer fields are supposed to be 32-bit but contain 16 bits of garbage, so they
                 // are represented here with [`u16`]. Accordingly, the [`read_field`] and
                 // [`write_field`] macros above perform the appropriate conversions between [`u32`]
                 // and [`u16`].
-
-                pub mode: Mode,
                 pub counter: u16,
                 pub target: u16,
-            }
 
-            impl Default for Mode {
-                fn default() -> Self {
-                    Self(0)
-                }
-            }
-
-            bitfield::bitfield! {
-                pub struct Mode(u16);
-                impl Debug;
-                pub should_sync, set_should_sync: 0;
-                pub sync_mode, set_sync_mode: 2, 1;
-                pub use_target, set_use_target: 3;
-                pub irqs_on_target_hit, set_irqs_on_target_hit: 4;
-                pub irqs_on_overflow, set_irqs_on_overflow: 5;
-                pub into ClockSource, clock_src, set_clock_src: 9, 8;
-                pub irq_is_pending, set_irq_is_pending: 10;
-                // TODO: Implement remaining fields.
-            }
-
-            impl From<u16> for ClockSource {
-                fn from(value: u16) -> Self {
-                    Self(value)
-                }
+                pub clock_source: ClockSource,
+                pub calc_increment_amount: fn(ClockSource) -> u16,
             }
 
             #[derive(Debug)]
             pub struct ClockSource(u16);
 
-            impl From<ClockSource> for u16 {
-                fn from(src: ClockSource) -> Self {
-                    src.0
-                }
-            }
-
             impl Timer {
-                fn take_irq(&mut self) -> Option<()> {
-                    if self.mode.irq_is_pending() {
-                        self.mode.set_irq_is_pending(false);
-
-                        Some(())
-                    } else {
-                        None
-                    }
-                }
-
-                fn update(&mut self, calc_increment_amount: impl Fn(ClockSource) -> u16) {
+                fn update(&mut self, int: &mut super::int::Sources) {
                     let hit_target = self.mode.use_target() && (self.counter >= self.target);
                     let counter_overflowed = !hit_target && (self.counter == !0);
 
@@ -1702,15 +1727,16 @@ gen_cpu_bus_io!(
                     if hit_target {
                         self.counter = 0
                     } else {
-                        let increment_amount = calc_increment_amount(self.mode.clock_src());
+                        let increment_amount = (self.calc_increment_amount)(self.clock_source);
                         self.counter = self.counter.wrapping_add(increment_amount);
                     }
 
+                    let int_source = &mut int.timers[self.index];
                     // Request an interrupt, if necessary.
-                    if (self.mode.irqs_on_target_hit() && hit_target) ||
-                       (self.mode.irqs_on_overflow() && counter_overflowed)
+                    if (int_source.is_enabled_on_target_hit && hit_target) ||
+                       (int_source.is_enabled_on_overflow && counter_overflowed)
                     {
-                        self.mode.set_irq_is_pending(true);
+                        int_source.is_requesting = true;
                     }
                 }
             }
@@ -1761,8 +1787,7 @@ gen_cpu_bus_io!(
             Register {
                 name: 1,
                 read_32: |_, io| {
-                    // TODO
-                    0
+                    todo!()
                 },
                 write_32: |_, io, mach| {
                     io.gpu.queue_gp1_machine_command(mach);

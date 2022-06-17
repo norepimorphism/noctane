@@ -1395,6 +1395,7 @@ name = "noctane-gpu"
 version = "0.1.0"
 dependencies = [
  "bitfield",
+ "noctane-util",
  "tracing",
 ]
 

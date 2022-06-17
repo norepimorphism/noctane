@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use futures::io::Take;
-
 #[macro_export]
 macro_rules! format_int {
     ($value:expr, $abs_value:expr $(,)?) => {
@@ -23,21 +21,7 @@ pub trait BitStack {
     fn push_bits(&mut self, count: Self, value: Self);
 }
 
-impl BitStack for u32 {
-    #[inline(always)]
-    fn pop_bits(&mut self, count: u32) -> u32 {
-        let value = *self & ((1 << count).saturating_sub(1));
-        *self >>= T;
 
-        value
-    }
-
-    #[inline(always)]
-    fn push_bits(&mut self, count: u32, value: u32) {
-        *self |= value;
-        *self <<= count;
-    }
-}
 
 pub trait BitStackExt {
     fn pop_bool(&mut self) -> bool;
@@ -45,14 +29,38 @@ pub trait BitStackExt {
     fn push_bool(&mut self, value: bool);
 }
 
-impl<T: BitStack + From<bool>> BitStackExt for T {
-    #[inline(always)]
-    fn pop_bool(&mut self) -> bool {
-        self.pop_bits(1) == 1
-    }
+macro_rules! impl_bitstack_for_ty {
+    ($($ty:ty)*) => {
+        $(
+                impl BitStack for $ty {
+                #[inline(always)]
+                fn pop_bits(&mut self, count: $ty) -> $ty {
+                    let value = *self & (((1 as $ty) << count).saturating_sub(1));
+                    *self >>= count;
 
-    #[inline(always)]
-    fn push_bool(&mut self, value: bool) {
-        self.push_bits(1, value.into())
-    }
+                    value
+                }
+
+                #[inline(always)]
+                fn push_bits(&mut self, count: $ty, value: $ty) {
+                    *self |= value;
+                    *self <<= count;
+                }
+            }
+
+            impl BitStackExt for $ty {
+                #[inline(always)]
+                fn pop_bool(&mut self) -> bool {
+                    self.pop_bits(1) == 1
+                }
+
+                #[inline(always)]
+                fn push_bool(&mut self, value: bool) {
+                    self.push_bits(1, value.into())
+                }
+            }
+        )*
+    };
 }
+
+impl_bitstack_for_ty! { u8 u16 u32 }
