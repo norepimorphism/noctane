@@ -3,9 +3,29 @@
 pub mod gp0;
 pub mod gp1;
 
-pub fn split_mach(mach: u32) -> (u8, u32) {
-    let opcode = (mach >> 24) as u8;
-    let param = mach & ((1 << 25) - 1);
+use noctane_util::BitStack as _;
 
-    (opcode, param)
+impl MachineCommand {
+    pub fn decode(code: u32) -> Self {
+        Self {
+            opcode: code.pop_bits(8),
+            param: code,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MachineCommand {
+    pub opcode: u8,
+    pub param: u32,
+}
+
+impl MachineCommand {
+    pub fn encode(self) -> u32 {
+        let mut value = 0;
+        value.push_bits(24, self.param);
+        value.push_bits(8, self.opcode);
+
+        value
+    }
 }

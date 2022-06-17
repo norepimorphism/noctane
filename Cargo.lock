@@ -99,12 +99,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b645c5c09a7d4035949cfce1a915785aaad6f17800c35fda8a8c311c491f284"
-
-[[package]]
 name = "bit-set"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1387,8 +1381,6 @@ dependencies = [
 name = "noctane-cpu"
 version = "0.1.0"
 dependencies = [
- "bit",
- "bitfield",
  "const_queue",
  "indoc",
  "noctane-gpu",
@@ -1402,7 +1394,7 @@ dependencies = [
 name = "noctane-gpu"
 version = "0.1.0"
 dependencies = [
- "bit",
+ "bitfield",
  "tracing",
 ]
 
@@ -1548,12 +1540,12 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "open"
-version = "2.1.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0524af9508f9b5c4eb41dce095860456727748f63b478d625f119a70e0d764a"
+checksum = "360bcc8316bf6363aa3954c3ccc4de8add167b087e0259190a043c9514f910fe"
 dependencies = [
  "pathdiff",
- "winapi",
+ "windows-sys",
 ]
 
 [[package]]

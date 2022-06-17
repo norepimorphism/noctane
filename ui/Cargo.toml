@@ -20,7 +20,7 @@ noctane = { path = "../core" }
 noctane-cdrom = { path = "../cdrom" }
 noctane-cpu = { path = "../cpu" }
 noctane-util = { path = "../util" }
-open = "2.1"
+open = "3.0"
 rust-embed = "6.4"
 tracing = "0.1"
 tracing-appender = "0.2"

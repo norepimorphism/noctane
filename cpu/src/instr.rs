@@ -323,7 +323,7 @@ macro_rules! def_instr_and_op_kind {
         fn try_decode_opcode(mach: u32) -> Option<Operation> {
             const SPECIAL_OPCODE: u8 = 0;
 
-            let opcode = decode_opcode(mach);
+            let opcode = mach >> 26;
 
             if opcode == SPECIAL_OPCODE {
                 let funct = decode_funct(mach);
@@ -332,37 +332,6 @@ macro_rules! def_instr_and_op_kind {
             } else {
                 Operation::try_decode_normal(opcode)
             }
-        }
-
-        macro_rules! def_decode_mach_part {
-            ($fn_name:ident, $range:tt, $part_ty:ty) => {
-                #[inline(always)]
-                fn $fn_name(mach: u32) -> $part_ty {
-                    mach.bit_range(mach_bits::$range) as $part_ty
-                }
-            };
-        }
-
-        def_decode_mach_part!(decode_opcode, OPCODE, u8);
-        def_decode_mach_part!(decode_target, TARGET, u32);
-        def_decode_mach_part!(decode_imm, IMM, u16);
-        def_decode_mach_part!(decode_rs, RS, u8);
-        def_decode_mach_part!(decode_rt, RT, u8);
-        def_decode_mach_part!(decode_rd, RD, u8);
-        def_decode_mach_part!(decode_shamt, SHAMT, u8);
-        def_decode_mach_part!(decode_funct, FUNCT, u8);
-
-        mod mach_bits {
-            use std::ops::Range;
-
-            pub const FUNCT:    Range<usize> = 0..6;
-            pub const SHAMT:    Range<usize> = 6..11;
-            pub const RD:       Range<usize> = 11..16;
-            pub const RT:       Range<usize> = 16..21;
-            pub const RS:       Range<usize> = 21..26;
-            pub const IMM:      Range<usize> = 0..16;
-            pub const TARGET:   Range<usize> = 0..26;
-            pub const OPCODE:   Range<usize> = 26..32;
         }
 
         impl Operation {

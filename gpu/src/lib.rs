@@ -2,6 +2,8 @@
 
 pub mod cmd;
 
+pub use cmd::MachineCommand;
+
 impl Gpu {
     pub fn new() -> Self {
         Self(())
@@ -14,8 +16,8 @@ pub struct Gpu(());
 
 impl Gpu {
     pub fn queue_gp0_machine_command(&mut self, mach: u32) {
-        let (opcode, param) = cmd::split_mach(mach);
-        if let Some(cmd) = cmd::gp0::Command::decode(opcode, param) {
+        let mach = MachineCommand::decode(mach);
+        if let Some(cmd) = cmd::gp0::Command::decode(mach) {
             self.queue_gp0_command(cmd);
         } else {
             tracing::warn!("Invalid command: {:#010x}", mach);

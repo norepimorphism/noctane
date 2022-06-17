@@ -15,20 +15,27 @@ pub use timers::{Timer, Timers};
 /// I/O region.
 #[derive(Debug)]
 pub struct Io<'a> {
+    /// The configuration for the CPU bus, except for [main RAM](ram::Config).
     pub bus: &'a mut bus::Config,
+    /// The configuration for Direct Memory Access (DMA) channels and transfers.
     pub dma: &'a mut dma::Config,
-    /// The graphics processing unit (GPU).
+    /// The Graphics Processing Unit (GPU).
     pub gpu: &'a mut Gpu,
+    pub int: &'a mut int::Sources,
     /// The last result of a GPU command (GP0 or GP1).
     pub last_gpu_result: &'a mut u32,
     pub post: &'a mut post::Status,
+    /// The configuration for main RAM.
     pub ram: &'a mut ram::Config,
+    /// The configuration for the Sound Processing Unit (SPU).
     pub spu: &'a mut spu::Config,
     pub spu_voices: &'a mut [spu_voice::Config; 24],
     pub timers: &'a mut Timers,
 }
 
+/// The result of [`Io::update`].
 pub struct Update {
+    /// Whether or not an interrupt was requested.
     pub requests_interrupt: bool,
     pub dma_txfer_packet: Option<dma::TransferPacket>,
 }
@@ -39,7 +46,7 @@ impl Io<'_> {
         self.timers.update();
 
         // Boolean operators are lazy, so `take_irq` is called a maximum of one time.
-        let requests_interrupt = self.dma.take_irq().is_some() ||self.timers.take_irq().is_some();
+        let requests_interrupt = self.dma.take_irq().is_some() || self.timers.take_irq().is_some();
 
         Update {
             requests_interrupt,
@@ -72,17 +79,17 @@ impl Io<'_> {
             post::BASE_ADDR..       => get_lut_entry!(post),
             duart::BASE_ADDR..      => get_lut_entry!(duart),
             atcons::BASE_ADDR..     => get_lut_entry!(atcons),
-            spu::BASE_ADDR..   => get_lut_entry!(spu),
+            spu::BASE_ADDR..        => get_lut_entry!(spu),
             spu_voice::BASE_ADDR..  => get_lut_entry!(spu_voice),
             mdec::BASE_ADDR..       => get_lut_entry!(mdec),
             gpu::BASE_ADDR..        => get_lut_entry!(gpu),
             cdrom::BASE_ADDR..      => get_lut_entry!(cdrom),
             timers::BASE_ADDR..     => get_lut_entry!(timers),
-            dma::BASE_ADDR..   => get_lut_entry!(dma),
-            int::BASE_ADDR..   => get_lut_entry!(int),
-            ram::BASE_ADDR..   => get_lut_entry!(ram),
+            dma::BASE_ADDR..        => get_lut_entry!(dma),
+            int::BASE_ADDR..        => get_lut_entry!(int),
+            ram::BASE_ADDR..        => get_lut_entry!(ram),
             perif::BASE_ADDR..      => get_lut_entry!(perif),
-            bus::BASE_ADDR..   => get_lut_entry!(bus),
+            bus::BASE_ADDR..        => get_lut_entry!(bus),
             _ => (Err(()), ""),
         };
 
@@ -195,125 +202,249 @@ gen_cpu_bus_io!(
             Register {
                 name: EXP_1_BASE,
                 read_32: |_, io| {
-                    io.bus.exp_1_base
+                    io.bus.exp_1.base
                 },
                 write_32: |_, io, value| {
-                    io.bus.exp_1_base = value;
+                    io.bus.exp_1.base = value;
                 },
             },
             Register {
                 name: EXP_2_BASE,
                 read_32: |_, io| {
-                    // The bottom 24 bits show the base address, but the top byte is hardcoded to
-                    // `0x1f`.
-                    // TODO: This isn't synced with the bank selection code in [`bus`].
-                    (io.bus.exp_2_base & ((1 << 25) - 1)) | (0x1f << 24)
+                    io.bus.exp_2.base
                 },
                 write_32: |_, io, value| {
-                    io.bus.exp_2_base = value;
+                    // The top byte is hardcoded to `0x1f`.
+                    io.bus.exp_2.base = (value & ((1 << 25) - 1)) | (0x1f << 24);
                 },
             },
             Register {
-                name: EXP_1_SIZE,
+                name: EXP_1_CFG,
                 read_32: |_, io| {
-                    io.bus.exp_1_size
+                    io.bus.exp_1.inner.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.exp_1_size = value;
+                    io.bus.exp_1.inner = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: EXP_3_SIZE,
+                name: EXP_3_CFG,
                 read_32: |_, io| {
-                    io.bus.exp_3_size
+                    io.bus.exp_3.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.exp_3_size = value;
+                    io.bus.exp_3 = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: BIOS_SIZE,
+                name: BIOS_CFG,
                 read_32: |_, io| {
-                    io.bus.bios_size
+                    io.bus.bios.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.bios_size = value;
+                    io.bus.bios = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: SPU_SIZE,
+                name: SPU_CFG,
                 read_32: |_, io| {
-                    io.bus.spu_size
+                    io.bus.spu.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.spu_size = value;
+                    io.bus.spu = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: CDROM_SIZE,
+                name: CDROM_CFG,
                 read_32: |_, io| {
-                    io.bus.cdrom_size
+                    io.bus.cdrom.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.cdrom_size = value;
+                    io.bus.cdrom = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: EXP_2_SIZE,
+                name: EXP_2_CFG,
                 read_32: |_, io| {
-                    io.bus.exp_2_size
+                    io.bus.exp_2.inner.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.exp_2_size = value;
+                    io.bus.exp_2.inner = bus::BankConfig::decode(value);
                 },
             },
             Register {
-                name: COMMON_SIZE,
+                name: COMMON_CFG,
                 read_32: |_, io| {
-                    io.bus.common_size
+                    io.bus.common.encode()
                 },
                 write_32: |_, io, value| {
-                    io.bus.common_size = value;
+                    io.bus.common = bus::BankConfig::decode(value);
                 },
             },
         ],
         module: {
+            use std::ops::{Deref, DerefMut};
+
+            use noctane_util::{BitStack as _, BitStackExt as _};
+
             impl Default for Config {
                 fn default() -> Self {
                     Self {
-                        // Most of these fields can be 0 because the BIOS confgures them.
-                        exp_1_base: 0,
-                        exp_2_base: 0,
-                        exp_1_size: 0,
-                        exp_2_size: 0,
-                        exp_3_size: 0,
-                        // However, the BIOS size must be large enough on boot to at least fit the
-                        // code to configure the other bank bases/sizes. We'll give it `0x800`.
-                        bios_size: 0x800,
-                        spu_size: 0,
-                        cdrom_size: 0,
-                        common_size: 0,
+                        exp_1: RebaseableBankConfig::default(),
+                        exp_2: RebaseableBankConfig::default(),
+                        exp_3: BankConfig::default(),
+                        bios: BankConfig::bios(),
+                        spu: BankConfig::default(),
+                        cdrom: BankConfig::default(),
+                        common: BankConfig::default(),
                     }
                 }
             }
 
             /// Determines the base addresses and sizes of banks accessible to the CPU bus.
-            #[derive(Debug)]
+            #[derive(Clone, Debug, Default)]
             pub struct Config {
-                /// The base address of Expansion Region 1.
-                pub exp_1_base: u32,
-                /// The base address of Expansion Region 2.
-                pub exp_2_base: u32,
-                /// The size, in bytes, of Expansion Region 1.
-                pub exp_1_size: u32,
-                /// The size, in bytes, of Expansion Region 2.
-                pub exp_2_size: u32,
-                /// The size, in bytes, of Expansion Region 3.
-                pub exp_3_size: u32,
-                pub bios_size: u32,
-                pub spu_size: u32,
-                pub cdrom_size: u32,
-                pub common_size: u32,
+                pub exp_1: RebaseableBankConfig,
+                pub exp_2: RebaseableBankConfig,
+                pub exp_3: BankConfig,
+                pub bios: BankConfig,
+                pub spu: BankConfig,
+                pub cdrom: BankConfig,
+                pub common: BankConfig,
+            }
+
+            #[derive(Clone, Debug, Default)]
+            pub struct RebaseableBankConfig {
+                inner: BankConfig,
+                pub base: u32,
+            }
+
+            impl Deref for RebaseableBankConfig {
+                type Target = BankConfig;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.inner
+                }
+            }
+
+            impl DerefMut for RebaseableBankConfig {
+                fn deref_mut(&mut self) -> &mut Self::Target {
+                    &mut self.inner
+                }
+            }
+
+            impl BankConfig {
+                pub fn decode(code: u32) -> Self {
+                    Self {
+                        write_delay: code.pop_bits(4).wrapping_add(1),
+                        read_delay: code.pop_bits(4).wrapping_add(1),
+                        periods: PeriodsConfig::decode(code.pop_bits(4)),
+                        bit_width: BitWidth::decode(code.pop_bits(1)),
+                        should_auto_inc: code.pop_bool(),
+                        unk_14: code.pop_bits(2),
+                        size_shift: code.pop_bits(5),
+                        unk_21: code.pop_bits(3),
+                }
+
+                pub fn bios() -> Self {
+                    Self {
+                        // The BIOS size must be large enough on boot to at least accommodate the
+                        // code that configures the other banks.
+                        size_shift: 4,
+                        ..Default::default()
+                    }
+                }
+            }
+
+            #[derive(Clone, Debug, Default)]
+            pub struct BankConfig {
+                pub write_delay: u32,
+                pub read_delay: u32,
+                pub periods: PeriodsConfig,
+                pub bit_width: BitWidth,
+                pub should_auto_inc: bool,
+                pub unk_14: u32,
+                pub size_shift: u32,
+                pub unk_21: u32,
+                // TODO
+            }
+
+            impl BankConfig {
+                pub fn encode(&self) -> u32 {
+                    let mut code = 0;
+                    code.push_bits(3, self.unk_21);
+                    code.push_bits(5, self.size_shift);
+                    code.push_bits(2, self.unk_14);
+                    code.push_bool(self.should_auto_inc);
+                    code.push_bits(1, self.bit_width.encode());
+                    code.push_bits(4, self.periods.encode());
+                    code.push_bits(4, self.read_delay);
+                    code.push_bits(4, self.write_delay);
+
+                    code
+                }
+            }
+
+            impl PeriodsConfig {
+                pub fn decode(mut code: u32) -> Self {
+                    Self {
+                        recovery_is_enabled:    code.pop_bool(),
+                        hold_is_enabled:        code.pop_bool(),
+                        floating_is_enabled:    code.pop_bool(),
+                        pre_strobe_is_enabled:  code.pop_bool(),
+                    }
+                }
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct PeriodsConfig {
+                pub recovery_is_enabled: bool,
+                pub hold_is_enabled,
+                pub floating_is_enabled: bool,
+                pub pre_strobe_is_enabled: bool,
+            }
+
+            impl PeriodsConfig {
+                pub fn encode(self) -> u32 {
+                    let mut code = 0;
+                    code.push_bool(self.pre_strobe_is_enabled);
+                    code.push_bool(self.floating_is_enabled);
+                    code.push_bool(self.hold_is_enabled);
+                    code.push_bool(self.recovery_is_enabled);
+
+                    code
+                }
+            }
+
+            impl BitWidth {
+                ///
+                ///
+                /// # Panics
+                ///
+                /// This function panics if `code` is greater than 1.
+                pub fn decode(code: u32) -> Self {
+                    match code {
+                        0 => Self::Eight,
+                        1 => Self::Sixteen,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub enum BitWidth {
+                #[default]
+                Eight,
+                Sixteen,
+            }
+
+            impl BitWidth {
+                pub fn encode(self) -> u32 {
+                    match self {
+                        Self::Eight     => 0,
+                        Self::Sixteen   => 1,
+                    }
+                }
             }
         },
     },
@@ -324,61 +455,105 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: JOY_DATA,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: JOY_STAT,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: JOY_MODE,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
-                name: JOY_CTRL,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                name: JOY_CFG,
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: JOY_BAUD,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: SIO_DATA,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: SIO_STAT,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: SIO_MODE,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
-                name: SIO_CTRL,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                name: SIO_CFG,
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: SIO_MISC,
-                read_16: |_, io, addr| 0,
-                write_16: |this, i, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |this, i, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: SIO_BAUD,
                 read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
         ],
-        module: {},
+        module: {
+            // TODO
+        },
     },
     // RAM Configuration.
     Lut {
@@ -386,66 +561,116 @@ gen_cpu_bus_io!(
         base_addr: 0x0060,
         regs: [
             Register {
-                name: RAM_CTRL,
+                name: RAM_CFG,
                 read_32: |_, io| {
-                    io.ram.0
+                    io.ram.layout.encode()
                 },
                 write_32: |_, io, value| {
-                    *io.ram = ram::Config(value);
+                    *io.ram = ram::Config::decode(value);
                 },
             },
         ],
         module: {
-            impl Default for Config {
-                fn default() -> Self {
-                    Self(0)
+            use noctane_util::{BitStack as _, BitStackExt as _};
+
+            impl Config {
+                pub fn decode(code: u32) -> Self {
+                    Self {
+                        unk_0: code.pop_bits(3),
+                        unk_3: code.pop_bits(1),
+                        unk_4: code.pop_bits(3),
+                        should_delay_on_simult_read: code.pop_bool(),
+                        layout_kind: LayoutKind::decode(code.pop_bits(3)),
+                        unk_12: code.pop_bits(4),
+                        unk_16: code.pop_bits(16),
+                    }
                 }
             }
 
-            // TODO
-            bitfield::bitfield! {
-                pub struct Config(u32);
-                impl Debug;
-                pub into LayoutKind, layout, set_layout: 11, 9;
+            #[derive(Debug, Default)]
+            pub struct Config {
+                pub unk_0: u32,
+                pub unk_3: u32,
+                pub unk_4: u32,
+                pub should_delay_on_simult_read: bool,
+                pub unk_8: u32,
+                pub layout_kind: LayoutKind,
+                pub unk_12: u32,
+                pub unk_16: u32,
             }
 
-            impl From<u32> for LayoutKind {
-                fn from(value: u32) -> Self {
-                    match value & 0b111 {
+            impl Config {
+                pub fn encode(&self) -> u32 {
+                    let code = 0;
+                    code.push_bits(16, self.unk_16);
+                    code.push_bits(4, self.unk_12);
+                    code.push_bits(3, self.layout_kind.encode());
+                    code.push_bits(self.unk_8);
+                    code.push_bool(self.should_delay_on_simult_read);
+                    code.push_bits(3, self.unk_4);
+                    code.push_bits(1, self.unk_3);
+                    code.push_bits(3, self.unk_0);
+
+                    code
+                }
+            }
+
+            impl LayoutKind {
+                ///
+                ///
+                /// # Panics
+                ///
+                /// This function panics if `code` is greater than 7.
+                pub fn decode(code: u32) -> Self {
+                    match code {
                         0 => Self::_1M,
                         1 => Self::_4M,
                         2 => Self::_1MPlus1MHighZ,
                         3 => Self::_4MPlus4MHighZ,
                         4 => Self::_2M,
-                        5 | 7 => Self::_8M,
+                        5 => Self::_8M_0,
                         6 => Self::_2MPlus2MHighZ,
+                        7 => Self::_8M_1,
                         _ => unreachable!(),
                     }
                 }
             }
 
-            #[derive(Debug)]
+            #[derive(Clone, Copy, Debug)]
             pub enum LayoutKind {
                 _1M,
                 _4M,
                 _1MPlus1MHighZ,
                 _4MPlus4MHighZ,
                 _2M,
-                _8M,
+                _8M_0,
                 _2MPlus2MHighZ,
+                _8M_1,
             }
 
-            impl From<LayoutKind> for Layout {
-                fn from(kind: LayoutKind) -> Self {
-                    match kind {
-                        LayoutKind::_1M             => Self::new(1, 0),
-                        LayoutKind::_1MPlus1MHighZ  => Self::new(1, 1),
-                        LayoutKind::_2M             => Self::new(2, 0),
-                        LayoutKind::_2MPlus2MHighZ  => Self::new(2, 2),
-                        LayoutKind::_4M             => Self::new(4, 0),
-                        LayoutKind::_4MPlus4MHighZ  => Self::new(4, 4),
-                        LayoutKind::_8M             => Self::new(8, 0),
+            impl LayoutKind {
+                pub fn encode(self) -> u32 {
+                    match self {
+                        Self::_1M               => 0,
+                        Self::_4M               => 1,
+                        Self::_1MPlus1MHighZ    => 2,
+                        Self::_4MPlus4MHighZ    => 3,
+                        Self::_2M               => 4,
+                        Self::_8M_0             => 5,
+                        Self::_2MPlus2MHighZ    => 6,
+                        Self::_8M_1             => 7,
+                    }
+                }
 
+                pub fn gen_layout(self) -> Layout {
+                    match self {
+                        Self::_1M                   => Layout::new(1, 0),
+                        Self::_1MPlus1MHighZ        => Layout::new(1, 1),
+                        Self::_2M                   => Layout::new(2, 0),
+                        Self::_2MPlus2MHighZ        => Layout::new(2, 2),
+                        Self::_4M                   => Layout::new(4, 0),
+                        Self::_4MPlus4MHighZ        => Layout::new(4, 4),
+                        Self::_8M_0 | Self::_8M_1   => Layout::new(8, 0),
                     }
                 }
             }
@@ -459,7 +684,7 @@ gen_cpu_bus_io!(
                 }
             }
 
-            #[derive(Debug)]
+            #[derive(Clone, Copy, Debug)]
             pub struct Layout {
                 pub data_mb: u32,
                 pub high_z_mb: u32,
@@ -473,26 +698,98 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: STAT,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: MASK,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    io.int.encode_mask()
+                },
+                write_32: |_, io, value| {
+                    io.int.decode_mask(value);
+                },
             },
             Register {
                 name: 2,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 3,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, io| {
+                    todo!()
+                },
+                write_32: |_, io, value| {
+                    todo!()
+                },
             },
         ],
-        module: {},
+        module: {
+            impl Sources {
+                pub fn decode_mask(&mut self, code: u32) {
+                    self.vblank.is_enabled  = code.pop_bool();
+                    self.gpu.is_enabled     = code.pop_bool();
+                    self.cdrom.is_enabled   = code.pop_bool();
+                    self.dma.is_enabled     = code.pop_bool();
+                    for timer in self.timers.iter_mut() {
+                        timer.is_enabled    = code.pop_bool();
+                    }
+                    self.perif.is_enabled   = code.pop_bool();
+                    self.sio                = code.pop_bool();
+                    self.spu                = code.pop_bool();
+                    self.lightpen           = code.pop_bool();
+                }
+            }
+
+            pub struct Sources {
+                pub vblank: Source,
+                pub gpu: Source,
+                pub cdrom: Source,
+                pub dma: Source,
+                pub timers: [Source; 3],
+                pub perif: Source,
+                pub sio: Source,
+                pub spu: Source,
+                pub lightpen: Source,
+            }
+
+            impl Sources {
+                pub fn encode_mask(&self) -> u32 {
+                    let mut code = 0;
+                    code.push_bool(self.lightpen.is_enabled);
+                    code.push_bool(self.spu.is_enabled);
+                    code.push_bool(self.sio.is_enabled);
+                    code.push_bool(self.perf.is_enabled);
+                    for timer in self.timers.iter_mut().rev() {
+                        code.push_bool(timer.is_enabled);
+                    }
+                    code.push_bool(self.dma.is_enabled);
+                    code.push_bool(self.cdrom.is_enabled);
+                    code.push_bool(self.cdrom.is_enabled);
+                    code.push_bool(self.gpu.is_enabled);
+                    code.push_bool(self.vblank.is_enabled);
+
+                    code
+                }
+            }
+
+            /// The source of an interrupt,
+            pub struct Source {
+                /// Whether or not this interrupt source is enabled.
+                pub is_enabled: bool,
+                /// Whether or not this interrupt source is requesting an interrupt.
+                pub is_requesting: bool,
+            }
+        },
     },
     // DMA Configuration.
     Lut {
@@ -808,7 +1105,6 @@ gen_cpu_bus_io!(
 
             #[derive(Debug, Default)]
             pub struct Config {
-                pub int: InterruptConfig,
                 pub chan: Channels,
             }
 
@@ -885,33 +1181,6 @@ gen_cpu_bus_io!(
                 Backward,
             }
 
-            impl Default for InterruptConfig {
-                fn default() -> Self {
-                    Self(0)
-                }
-            }
-
-            bitfield! {
-                pub struct InterruptConfig(u32);
-                impl Debug;
-                pub mdec_in_irq_is_enabled, set_mdec_in_irq_is_enabled: 16;
-                pub mdec_out_irq_is_enabled, set_mdec_out_irq_is_enabled: 17;
-                pub gpu_irq_is_enabled, set_gpu_irq_is_enabled: 18;
-                pub cdrom_irq_is_enabled, set_cdrom_irq_is_enabled: 19;
-                pub spu_irq_is_enabled, set_spu_irq_is_enabled: 20;
-                pub pio_irq_is_enabled, set_pio_irq_is_enabled: 21;
-                pub otc_irq_is_enabled, set_otc_irq_is_enabled: 22;
-                pub irq_is_enabled, set_irq_is_enabled: 23;
-                pub mdec_in_irq_is_pending, set_mdec_in_irq_is_pending: 24;
-                pub mdec_out_irq_is_pending, set_mdec_out_irq_is_pending: 25;
-                pub gpu_irq_is_pending, set_gpu_irq_is_pending: 26;
-                pub cdrom_irq_is_pending, set_cdrom_irq_is_pending: 27;
-                pub spu_irq_is_pending, set_spu_irq_is_pending: 28;
-                pub pio_irq_is_pending, set_pio_irq_is_pending: 29;
-                pub otc_irq_is_pending, set_otc_irq_is_pending: 30;
-                pub irq_is_pending, set_irq_is_pending: 31;
-            }
-
             impl Default for Channels {
                 fn default() -> Self {
                     Self {
@@ -978,7 +1247,6 @@ gen_cpu_bus_io!(
 
             #[derive(Debug)]
             pub struct Channels {
-                pub cfg: ChannelsConfig,
                 pub mdec_in: Channel,
                 pub mdec_out: Channel,
                 pub gpu: Channel,
@@ -1060,31 +1328,6 @@ gen_cpu_bus_io!(
                 }
             }
 
-            impl Default for ChannelsConfig {
-                fn default() -> Self {
-                    Self(0)
-                }
-            }
-
-            bitfield! {
-                pub struct ChannelsConfig(u32);
-                impl Debug;
-                pub mdec_in_prio, set_mdec_in_prio: 2, 0;
-                pub mdec_in_is_enabled, set_mdec_in_is_enabled: 3;
-                pub mdec_out_prio, set_mdec_out_prio: 6, 4;
-                pub mdec_out_is_enabled, set_mdec_out_is_enabled: 7;
-                pub gpu_prio, set_gpu_prio: 10, 8;
-                pub gpu_is_enabled, set_gpu_is_enabled: 11;
-                pub cdrom_prio, set_cdrom_prio: 14, 12;
-                pub cdrom_is_enabled, set_cdrom_is_enabled: 15;
-                pub spu_prio, set_spu_prio: 18, 16;
-                pub spu_is_enabled, set_spu_is_enabled: 19;
-                pub pio_prio, set_pio_prio: 22, 20;
-                pub pio_is_enabled, set_pio_is_enabled: 23;
-                pub otc_prio, set_otc_prio: 26, 24;
-                pub otc_is_enabled, set_otc_is_enabled: 27;
-            }
-
             impl Channel {
                 fn new(read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
                     Self {
@@ -1113,19 +1356,6 @@ gen_cpu_bus_io!(
                 pub src: TransferSource,
                 pub dir: TransferDirection,
                 pub cpu_bus_base: u32,
-            }
-
-            impl Default for ChannelConfig {
-                fn default() -> Self {
-                    Self(0)
-                }
-            }
-
-            bitfield! {
-                pub struct ChannelConfig(u32);
-                impl Debug;
-                pub src, set_src: 0;
-                pub dir, set_dir: 1;
             }
 
             impl TransferSource {
@@ -1539,12 +1769,7 @@ gen_cpu_bus_io!(
                 },
             },
         ],
-        module: {
-            bitfield::bitfield! {
-                pub struct Status(u32);
-                impl Debug;
-            }
-        },
+        module: {},
     },
     // MDEC.
     Lut {
@@ -1704,8 +1929,12 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: R_MAIN_VOL,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: REVERB_VOL,
@@ -1773,7 +2002,7 @@ gen_cpu_bus_io!(
                 write_16: |_, io, addr, value| {},
             },
             Register {
-                name: DATA_TXFR_CTRL,
+                name: DATA_TXFR_CFG,
                 read_16: |_, io, addr| 0,
                 write_16: |_, io, addr, value| {},
             },
@@ -1820,31 +2049,53 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: STAT,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 1,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: DATA,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 3,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 4,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, addr| {
+                    todo!()
+                },
+                write_16: |_, io, addr, value| {
+                    todo!()
+                },
             },
         ],
-        module: {},
+        module: {
+            // TODO
+        },
     },
     // Dual Serial Port.
     Lut {
@@ -1853,32 +2104,54 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: MODE_0,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: STAT_0,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 3,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: FIFO_0,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             Register {
                 name: 4,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, io, addr| {
+                    todo!()
+                },
+                write_8: |_, io, addr, value| {
+                    todo!()
+                },
             },
             // TODO
         ],
-        module: {},
+        module: {
+            // TODO
+        },
     },
     Lut {
         name: post,
@@ -1886,7 +2159,9 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: BOOT_MODE,
-                read_8: |_, io, addr| 0,
+                read_8: |_, io, addr| {
+                    todo!()
+                },
                 write_8: |_, io, addr, value| {
                     todo!()
                 },
