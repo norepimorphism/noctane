@@ -117,10 +117,10 @@ impl Bus<'_> {
         access_io: impl FnOnce(&mut Self, Address) -> Result<T, ()>,
     ) -> Result<T, ()> {
         macro_rules! try_access {
-            ($start:expr, $size:expr, $f:expr $(,)?) => {
+            ($start:expr, $size_shift:expr, $f:expr $(,)?) => {
                 if (addr.working >= ($start as usize)) {
                     let rebased_addr = addr.working - ($start as usize);
-                    if rebased_addr < ($size as usize) {
+                    if rebased_addr < ((1 << $size_shift) as usize) {
                         return $f(rebased_addr);
                     }
                 }
@@ -128,10 +128,10 @@ impl Bus<'_> {
         }
 
         macro_rules! try_access_bank {
-            ($field_name:ident, $start:expr, $size:expr $(,)?) => {
+            ($field_name:ident, $start:expr, $size_shift:expr $(,)?) => {
                 try_access!(
                     $start,
-                    $size,
+                    $size_shift,
                     |rebased_addr: usize| {
                         tracing::trace!(
                             "Accessing `cpu_bus.{}[{:#010x}]`",
@@ -152,7 +152,7 @@ impl Bus<'_> {
 
         const MB: u32 = 1024 * 1024;
 
-        let ram_layout = io::ram::Layout::from(self.io.ram.layout());
+        let ram_layout = self.io.ram.layout_kind.gen_layout();
         let ram_data_size = MB * ram_layout.data_mb;
         let ram_high_z_size = MB * ram_layout.high_z_mb;
 
@@ -172,19 +172,19 @@ impl Bus<'_> {
             bios,
             Bios::BASE_ADDR,
             // TODO: This is incorrect.
-            self.io.bus.bios_size,
+            self.io.bus.bios.size_shift,
         );
         try_access_bank!(
             exp_1,
-            self.io.bus.exp_1_base,
+            self.io.bus.exp_1.base,
             // TODO: This is incorrect.
-            self.io.bus.exp_1_size,
+            self.io.bus.exp_1.size_shift,
         );
         try_access_bank!(
             exp_3,
             Exp3::BASE_ADDR,
             // TODO: This is incorrect.
-            self.io.bus.exp_3_size,
+            self.io.bus.exp_3.size_shift,
         );
         try_access!(
             Self::IO_BASE_ADDR,
@@ -194,8 +194,8 @@ impl Bus<'_> {
             },
         );
         try_access!(
-            self.io.bus.exp_2_base,
-            self.io.bus.exp_2_size,
+            self.io.bus.exp_2.base,
+            self.io.bus.exp_2.size_shift,
             |rebased_addr: usize| {
                 access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
             },

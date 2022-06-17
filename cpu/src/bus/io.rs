@@ -42,11 +42,9 @@ pub struct Update {
 
 impl Io<'_> {
     pub fn update(&mut self) -> Update {
-        let dma_txfer_packet = self.dma.update();
+        let dma_txfer_packet = self.dma.update(&mut self.int);
         self.timers.update(&mut self.int);
-
-        // Boolean operators are lazy, so `take_irq` is called a maximum of one time.
-        let requests_interrupt = self.dma.take_irq().is_some() || self.timers.take_irq().is_some();
+        let requests_interrupt = self.int.take_irq().is_some();
 
         Update {
             requests_interrupt,
@@ -313,9 +311,11 @@ gen_cpu_bus_io!(
                 pub common: BankConfig,
             }
 
+            /// The configuration for a rebaseable CPU bus bank.
             #[derive(Clone, Debug, Default)]
             pub struct RebaseableBankConfig {
                 pub(super) inner: BankConfig,
+                /// The base address of this bank on the CPU bus.
                 pub base: u32,
             }
 
@@ -357,6 +357,7 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// The configuration for a CPU bus bank.
             #[derive(Clone, Debug, Default)]
             pub struct BankConfig {
                 pub write_delay: u32,
@@ -737,27 +738,30 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            use noctane_util::BitStackExt as _;
+
             impl Sources {
                 pub fn decode_mask(&mut self, code: u32) {
-                    self.vblank.is_enabled  = code.pop_bool();
-                    self.gpu.is_enabled     = code.pop_bool();
-                    self.cdrom.is_enabled   = code.pop_bool();
-                    self.dma.is_enabled     = code.pop_bool();
+                    self.vblank.is_enabled      = code.pop_bool();
+                    self.gpu.is_enabled         = code.pop_bool();
+                    self.cdrom.is_enabled       = code.pop_bool();
+                    self.dma.is_enabled         = code.pop_bool();
                     for timer in self.timers.iter_mut() {
-                        timer.is_enabled    = code.pop_bool();
+                        timer.is_enabled        = code.pop_bool();
                     }
-                    self.perif.is_enabled   = code.pop_bool();
-                    self.sio                = code.pop_bool();
-                    self.spu                = code.pop_bool();
-                    self.lightpen           = code.pop_bool();
+                    self.perif.is_enabled       = code.pop_bool();
+                    self.sio.is_enabled         = code.pop_bool();
+                    self.spu.is_enabled         = code.pop_bool();
+                    self.lightpen.is_enabled    = code.pop_bool();
                 }
             }
 
+            #[derive(Clone, Debug)]
             pub struct Sources {
                 pub vblank: Source,
                 pub gpu: Source,
                 pub cdrom: Source,
-                pub dma: Source,
+                pub dma: DmaSource,
                 pub timers: [TimerSource; 3],
                 pub perif: Source,
                 pub sio: Source,
@@ -771,7 +775,7 @@ gen_cpu_bus_io!(
                     code.push_bool(self.lightpen.is_enabled);
                     code.push_bool(self.spu.is_enabled);
                     code.push_bool(self.sio.is_enabled);
-                    code.push_bool(self.perf.is_enabled);
+                    code.push_bool(self.perif.is_enabled);
                     for timer in self.timers.iter_mut().rev() {
                         code.push_bool(timer.is_enabled);
                     }
@@ -783,14 +787,53 @@ gen_cpu_bus_io!(
 
                     code
                 }
+
+                pub fn take_irq(&mut self) -> Option<()> {
+                    macro_rules! take_irq {
+                        ($field:ident) => {
+                            if self.$field.take_irq().is_some() {
+                                return Some(());
+                            }
+                        };
+                    }
+
+                    take_irq!(vblank);
+                    take_irq!(gpu);
+                    take_irq!(cdrom);
+                    take_irq!(dma);
+                    for timer in self.timers.iter_mut() {
+                        if timer.take_irq().is_some() {
+                            return Some(());
+                        }
+                    }
+                    take_irq!(perif);
+                    take_irq!(sio);
+                    take_irq!(spu);
+                    take_irq!(lightpen);
+
+                    None
+                }
             }
 
             /// The source of an interrupt,
+            #[derive(Clone, Debug)]
             pub struct Source {
                 /// Whether or not this interrupt source is enabled.
                 pub is_enabled: bool,
                 /// Whether or not this interrupt source is requesting an interrupt.
                 pub is_requesting: bool,
+            }
+
+            impl Source {
+                pub fn take_irq(&mut self) -> Option<()> {
+                    if self.is_enabled && self.is_requesting {
+                        self.is_requesting = false;
+
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
             }
 
             macro_rules! impl_deref_for_src {
@@ -811,15 +854,34 @@ gen_cpu_bus_io!(
                 };
             }
 
+            #[derive(Clone, Debug)]
             pub struct TimerSource {
+                inner: Source,
                 pub is_enabled_on_target_hit: bool,
                 pub is_enabled_on_overflow: bool,
-                pub is_requesting: bool,
             }
 
-            impl TimerSource {
-                pub fn is_enabled(&self) -> bool {
-                    self.is_enabled_on_target_hit || self.is_enabled_on_overflow
+            impl_deref_for_src!(TimerSource);
+
+            #[derive(Clone, Debug)]
+            pub struct DmaSource {
+                pub is_enabled: bool,
+                pub chan: [Source; 7],
+            }
+
+            impl DmaSource {
+                pub fn is_requesting(&self) -> bool {
+                    self.chan.iter().any(|it| it.is_requesting)
+                }
+
+                pub fn take_irq(&mut self) -> Option<()> {
+                    if let Some(chan) = self.chan.iter().filter(|it| it.is_requesting).next() {
+                        chan.is_requesting = false;
+
+                        Some(())
+                    } else {
+                        None
+                    }
                 }
             }
         },
@@ -1096,8 +1158,6 @@ gen_cpu_bus_io!(
                     todo!()
                 },
                 write_32: |_, io, value| {
-                    // TODO: Explain what's happening here.
-                    let value = (io.dma.int.0 & !value & !((1 << 24) - 1)) | (value & ((1 << 24) - 1));
                     todo!()
                 },
             },
@@ -1113,6 +1173,8 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            use noctane_util::{BitStack as _, BitStackExt as _};
+
             macro_rules! read_madr {
                 ($io:expr, $chan:ident $(,)?) => {
                     $io.dma.chan.$chan.cpu_bus_base
@@ -1165,15 +1227,15 @@ gen_cpu_bus_io!(
             }
 
             impl Config {
-                pub fn update(&mut self) -> Option<TransferPacket> {
-                    let active_chan = Channels::find_highest_prio(self.chan.enabled_with_prio());
+                pub fn update(&mut self, int: &mut super::int::Sources) -> Option<TransferPacket> {
+                    let active_chan = Channels::find_highest_prio(self.chan.enabled());
 
                     if let Some(chan) = active_chan {
                         let txfer = chan.txfer.unwrap_or_else(|| {
                             // A transfer is not in progress. We will start one now.
                             let txfer = Transfer {
-                                src: TransferSource::decode(chan.cfg.src()),
-                                dir: TransferDirection::decode(chan.cfg.dir()),
+                                source: chan.source,
+                                dir: chan.dir,
                                 cpu_bus_base: chan.cpu_bus_base,
                             };
                             chan.txfer = Some(txfer);
@@ -1186,8 +1248,7 @@ gen_cpu_bus_io!(
                             // The transfer is complete.
                             // TODO
                             chan.txfer = None;
-                            self.int.dma.spu.is_requesting = true;
-                            self.int.dma.gpu.is_requesting = true;
+                            int.dma.chan[chan.index].is_requesting = true;
                         }
 
                         None
@@ -1226,6 +1287,7 @@ gen_cpu_bus_io!(
                 fn default() -> Self {
                     Self {
                         mdec_in: Channel::new(
+                            0,
                             |params| {
                                 todo!()
                             },
@@ -1234,6 +1296,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         mdec_out: Channel::new(
+                            1,
                             |params| {
                                 todo!()
                             },
@@ -1242,6 +1305,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         gpu: Channel::new(
+                            2,
                             |params| {
                                 todo!()
                             },
@@ -1250,6 +1314,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         cdrom: Channel::new(
+                            3,
                             |params| {
                                 todo!()
                             },
@@ -1258,6 +1323,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         spu: Channel::new(
+                            4,
                             |params| {
                                 todo!()
                             },
@@ -1266,6 +1332,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         pio: Channel::new(
+                            5,
                             |params| {
                                 todo!()
                             },
@@ -1274,6 +1341,7 @@ gen_cpu_bus_io!(
                             },
                         ),
                         otc: Channel::new(
+                            6,
                             |params| {
                                 todo!()
                             },
@@ -1297,70 +1365,38 @@ gen_cpu_bus_io!(
             }
 
             impl Channels {
-                fn enabled_with_prio<'a>(
+                fn enabled<'a>(
                     &'a mut self,
-                ) -> impl 'a + Iterator<Item = (&'a mut Channel, Priority)> {
+                ) -> impl 'a + Iterator<Item = &'a mut Channel> {
                     [
-                        (
-                            &mut self.mdec_in,
-                            self.cfg.mdec_in_prio(),
-                            self.cfg.mdec_in_is_enabled(),
-                        ),
-                        (
-                            &mut self.mdec_out,
-                            self.cfg.mdec_out_prio(),
-                            self.cfg.mdec_out_is_enabled(),
-                        ),
-                        (
-                            &mut self.gpu,
-                            self.cfg.gpu_prio(),
-                            self.cfg.gpu_is_enabled(),
-                        ),
-                        (
-                            &mut self.cdrom,
-                            self.cfg.cdrom_prio(),
-                            self.cfg.cdrom_is_enabled(),
-                        ),
-                        (
-                            &mut self.spu,
-                            self.cfg.spu_prio(),
-                            self.cfg.spu_is_enabled(),
-                        ),
-                        (
-                            &mut self.pio,
-                            self.cfg.pio_prio(),
-                            self.cfg.pio_is_enabled(),
-                        ),
-                        (
-                            &mut self.otc,
-                            self.cfg.otc_prio(),
-                            self.cfg.otc_is_enabled(),
-                        ),
+                        &mut self.mdec_in,
+                        &mut self.mdec_out,
+                        &mut self.gpu,
+                        &mut self.cdrom,
+                        &mut self.spu,
+                        &mut self.pio,
+                        &mut self.otc,
                     ]
                     .into_iter()
-                    .filter(|(chan, _, is_enabled)| *is_enabled)
-                    .map(|(chan, prio, _)| (chan, Priority(prio)))
+                    .filter(|chan| chan.is_enabled)
                 }
             }
 
-            struct Priority(u32);
-
             impl Channels {
                 fn find_highest_prio<'a>(
-                    mut chan_with_prio: impl 'a + Iterator<Item = (&'a mut Channel, Priority)>,
+                    mut enabled: impl 'a + Iterator<Item = &'a mut Channel>,
                 ) -> Option<&'a mut Channel> {
-                    let Some((mut best_chan, mut highest_prio)) = chan_with_prio.next() else {
+                    let Some(mut best_chan) = enabled.next() else {
                         return None;
                     };
 
-                    while let Some((chan, prio)) = chan_with_prio.next() {
+                    while let Some(chan) = enabled.next() {
                         // We use `<=` because, if two channels are of equal priority, then the
                         // channel with the higher number (i.e. OTC is highest) is selected. Because
-                        // of [`Self::enabled_with_prio`], we are guaranteed to be iterating from
-                        // the least to highest numbered channels.
-                        if prio.0 <= highest_prio.0 {
+                        // of [`Self::enabled`], we are guaranteed to be iterating from the least to
+                        // highest numbered channels.
+                        if chan.prio <= best_chan.prio {
                             best_chan = chan;
-                            highest_prio = prio;
                         }
                     }
 
@@ -1369,11 +1405,16 @@ gen_cpu_bus_io!(
             }
 
             impl Channel {
-                fn new(read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
+                fn new(index: usize, read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
                     Self {
-                        txfer: None,
+                        index,
+                        is_enabled: false,
+                        prio: 0,
+                        source: TransferSource::External,
+                        dir: TransferDirection::Forward,
                         cpu_bus_base: 0,
                         block_cfg: 0,
+                        txfer: None,
                         read,
                         write,
                     }
@@ -1382,36 +1423,72 @@ gen_cpu_bus_io!(
 
             #[derive(Debug)]
             pub struct Channel {
-                pub txfer: Option<Transfer>,
+                pub index: usize,
+                pub is_enabled: bool,
+                pub prio: u32,
+                pub source: TransferSource,
+                pub dir: TransferDirection,
                 pub cpu_bus_base: u32,
                 pub block_cfg: u32,
+                pub txfer: Option<Transfer>,
                 pub read: fn(ReadParameters),
                 pub write: fn(WriteParameters)
             }
 
+            impl Channel {
+                pub fn decode_chcr(&mut self, mut code: u32) {
+                    self.source = TransferSource::decode(code.pop_bits(1));
+                    self.dir = TransferDirection::decode(code.pop_bits(1));
+                    // TODO
+                }
+
+                pub fn encode_chcr(&self) -> u32 {
+                    let mut code = 0;
+                    code.push_bits(1, self.dir.encode());
+                    code.push_bits(1, self.source.encode());
+                    // TODO
+
+                    code
+                }
+            }
+
             #[derive(Clone, Copy, Debug)]
             pub struct Transfer {
-                pub src: TransferSource,
+                pub source: TransferSource,
                 pub dir: TransferDirection,
                 pub cpu_bus_base: u32,
             }
 
             impl TransferSource {
-                fn decode(value: bool) -> Self {
-                    if value {
-                        Self::CpuBus
-                    } else {
-                        Self::External
+                fn decode(value: u32) -> Self {
+                    match value {
+                        0 => Self::External,
+                        1 => Self::CpuBus,
+                        _ => unreachable!(),
+                    }
+                }
+
+                fn encode(self) -> u32 {
+                    match self {
+                        Self::External => 0,
+                        Self::CpuBus => 1,
                     }
                 }
             }
 
             impl TransferDirection {
-                fn decode(value: bool) -> Self {
-                    if value {
-                        Self::Backward
-                    } else {
-                        Self::Forward
+                fn decode(value: u32) -> Self {
+                    match value {
+                        0 => Self::Forward,
+                        1 => Self::Backward,
+                        _ => unreachable!(),
+                    }
+                }
+
+                fn encode(self) -> u32 {
+                    match self {
+                        Self::Forward => 0,
+                        Self::Backward => 1,
                     }
                 }
             }
@@ -1596,9 +1673,11 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            use noctane_util::{BitStack as _, BitStackExt as _};
+
             macro_rules! read_field {
                 ($io:expr, $timer:ident . mode) => {
-                    $io.timers.$timer.encode_mode()
+                    $io.timers.$timer.encode_mode(&mut $io.int)
                 };
                 ($io:expr, $timer:ident . $field:ident) => {
                     $io.timers.$timer.$field as u32
@@ -1607,7 +1686,7 @@ gen_cpu_bus_io!(
 
             macro_rules! write_field {
                 ($io:expr, $timer:ident . mode = $value:expr) => {
-                    $io.timers.$timer.decode_mode($value as u16);
+                    $io.timers.$timer.decode_mode(&mut $io.int, $value);
                 };
                 ($io:expr, $timer:ident . $field:ident = $value:expr) => {
                     $io.timers.$timer.$field = $value as u16;
@@ -1695,13 +1774,14 @@ gen_cpu_bus_io!(
                         index,
                         counter: 0,
                         target: 0,
+                        uses_target: false,
                         clock_source: ClockSource(0),
                         calc_increment_amount,
                     }
                 }
             }
 
-            #[derive(Debug, Default)]
+            #[derive(Debug)]
             pub struct Timer {
                 pub index: usize,
                 // Timer fields are supposed to be 32-bit but contain 16 bits of garbage, so they
@@ -1711,16 +1791,52 @@ gen_cpu_bus_io!(
                 pub counter: u16,
                 pub target: u16,
 
+                pub uses_target: bool,
                 pub clock_source: ClockSource,
                 pub calc_increment_amount: fn(ClockSource) -> u16,
             }
 
-            #[derive(Debug)]
-            pub struct ClockSource(u16);
-
             impl Timer {
+                pub fn decode_mode(&mut self, int: &mut super::int::Sources, mut code: u32) {
+                    let int_source = &mut int.timers[self.index];
+
+                    // TODO
+                    let _ = code.pop_bits(3);
+                    self.uses_target = code.pop_bool();
+                    int_source.is_enabled_on_target_hit = code.pop_bool();
+                    int_source.is_enabled_on_overflow = code.pop_bool();
+                    // TODO
+                    let _ = code.pop_bits(2);
+                    self.clock_source.0 = code.pop_bits(2);
+                    // This is inverted for some reason.
+                    int_source.is_requesting = !code.pop_bool();
+                    // TODO
+                }
+
+                pub fn encode_mode(&self, int: &mut super::int::Sources) -> u32 {
+                    let int_source = &mut int.timers[self.index];
+
+                    let mut code = 0;
+                    // Seems to always be zero.
+                    code.push_bits(3, 0);
+                    // TODO
+                    code.push_bits(2, 0);
+                    // This is inverted for some reason.
+                    code.push_bool(!int_source.is_requesting);
+                    code.push_bits(2, self.clock_source.0);
+                    // TODO
+                    code.push_bits(2, 0);
+                    code.push_bool(int_source.is_enabled_on_overflow);
+                    code.push_bool(int_source.is_enabled_on_target_hit);
+                    code.push_bool(self.uses_target);
+                    // TODO
+                    code.push_bits(3, 0);
+
+                    code
+                }
+
                 fn update(&mut self, int: &mut super::int::Sources) {
-                    let hit_target = self.mode.use_target() && (self.counter >= self.target);
+                    let hit_target = self.uses_target && (self.counter >= self.target);
                     let counter_overflowed = !hit_target && (self.counter == !0);
 
                     // Update the counter.
@@ -1740,6 +1856,9 @@ gen_cpu_bus_io!(
                     }
                 }
             }
+
+            #[derive(Debug)]
+            pub struct ClockSource(u32);
         },
     },
     // CD-ROM.
