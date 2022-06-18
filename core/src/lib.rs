@@ -9,6 +9,7 @@ pub struct Core {
     pub bus_cfg: noctane_cpu::bus::io::bus::Config,
     pub cpu_state: noctane_cpu::State,
     pub dma_cfg: noctane_cpu::bus::io::dma::Config,
+    pub int: noctane_cpu::bus::io::int::Sources,
     pub gpu: Gpu,
     pub last_gpu_result: u32,
     pub post: noctane_cpu::bus::io::post::Status,
@@ -34,6 +35,7 @@ impl Core {
             io: noctane_cpu::bus::Io {
                 bus: &mut self.bus_cfg,
                 dma: &mut self.dma_cfg,
+                int: &mut self.int,
                 gpu: &mut self.gpu,
                 last_gpu_result: &mut self.last_gpu_result,
                 post: &mut self.post,
@@ -45,6 +47,12 @@ impl Core {
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })
+    }
+
+    pub fn io_update(&mut self) -> noctane_cpu::bus::io::Update {
+        noctane_cpu::bus::io::Update {
+            dma_txfer_packet: None,
+        }
     }
 }
 

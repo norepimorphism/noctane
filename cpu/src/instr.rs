@@ -138,6 +138,7 @@ impl Pipeline {
         &mut self,
         mem: &mut Memory,
         reg: &mut reg::File,
+        io_update: crate::bus::io::Update,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Executed {
         // As it turns out, we don't actually have to implement a traditional pipeline here. The
@@ -145,9 +146,8 @@ impl Pipeline {
         // slot, which we can handle specially.
 
         // Before we do anything, we should bring I/O up-to-speed.
-        let io_update = mem.bus_mut().io.update();
-        if io_update.requests_interrupt {
-            reg.cause_mut().raise_std_interrupt();
+        if mem.bus().io.int.is_requesting() {
+            reg.raise_std_interrupt();
         }
 
         // Process interrupt requests (if the SR permits us to do so). This may trigger an interrupt
@@ -336,7 +336,7 @@ macro_rules! def_instr_and_op_kind {
             ($fn_name:ident, $range:tt, $part_ty:ty) => {
                 #[inline(always)]
                 fn $fn_name(mach: u32) -> $part_ty {
-                    ((mach & ((1 << mach_bits::$range.end) - 1)) >> mach_bits::$range.start) as $part_ty
+                    ((mach & (!0 >> (32 - mach_bits::$range.end))) >> mach_bits::$range.start) as $part_ty
                 }
             };
         }

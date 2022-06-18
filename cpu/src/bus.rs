@@ -75,7 +75,7 @@ const fn make_index(addr: usize) -> usize {
 // are).
 def_bank!(Ram,  0x20_0000 @ 0x0000_0000);
 def_bank!(Exp1, 0x80_0000);
-// `Exp2` is missing here as it is located within the I/O region.
+def_bank!(Exp2, 0x80      @ 0x1f80_2000);
 def_bank!(Exp3, 0x20_0000 @ 0x1fa0_0000);
 def_bank!(Bios, 0x08_0000 @ 0x1fc0_0000);
 
@@ -120,7 +120,7 @@ impl Bus<'_> {
             ($start:expr, $size_shift:expr, $f:expr $(,)?) => {
                 if (addr.working >= ($start as usize)) {
                     let rebased_addr = addr.working - ($start as usize);
-                    if rebased_addr < ((1 << $size_shift) as usize) {
+                    if rebased_addr < ($size_shift as usize) {
                         return $f(rebased_addr);
                     }
                 }
@@ -171,20 +171,12 @@ impl Bus<'_> {
         try_access_bank!(
             bios,
             Bios::BASE_ADDR,
-            // TODO: This is incorrect.
-            self.io.bus.bios.size_shift,
+            1 << self.io.bus.bios.size_shift,
         );
         try_access_bank!(
             exp_1,
             self.io.bus.exp_1.base,
-            // TODO: This is incorrect.
-            self.io.bus.exp_1.size_shift,
-        );
-        try_access_bank!(
-            exp_3,
-            Exp3::BASE_ADDR,
-            // TODO: This is incorrect.
-            self.io.bus.exp_3.size_shift,
+            1 << self.io.bus.exp_1.size_shift,
         );
         try_access!(
             Self::IO_BASE_ADDR,
@@ -193,12 +185,20 @@ impl Bus<'_> {
                 access_io(self, addr.map_working(|_| rebased_addr))
             },
         );
-        try_access!(
-            self.io.bus.exp_2.base,
-            self.io.bus.exp_2.size_shift,
-            |rebased_addr: usize| {
-                access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
-            },
+        // Exp. Region 2 is only enabled if the base address is correct.
+        if Exp2::BASE_ADDR == self.io.bus.exp_2.base {
+            try_access!(
+                self.io.bus.exp_2.base,
+                1 << self.io.bus.exp_2.size_shift,
+                |rebased_addr: usize| {
+                    access_io(self, addr.map_working(|_| rebased_addr.wrapping_add(0x1000)))
+                },
+            );
+        }
+        try_access_bank!(
+            exp_3,
+            Exp3::BASE_ADDR,
+            1 << self.io.bus.exp_3.size_shift,
         );
 
         Err(())

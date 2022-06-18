@@ -291,8 +291,9 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
-        let execed = self.core.cpu().execute_next_instr();
-        //self.game_window.gfx_mut().render();
+        let io_update = self.core.io_update();
+        let execed = self.core.cpu().execute_next_instr(io_update);
+        // self.game_window.gfx_mut().render();
         // self.game_window.update();
 
         if let noctane_cpu::instr::PcBehavior::Jumps {

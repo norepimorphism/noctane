@@ -194,24 +194,32 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`reg`]: Self::reg
     /// [`execute_instr`]: Self::execute_instr
     /// [`execute_opcode`]: Self::execute_opcode
-    pub fn execute_next_instr(&mut self) -> instr::Executed {
+    pub fn execute_next_instr(&mut self, io_update: bus::io::Update) -> instr::Executed {
         // TODO: Don't unwrap!
-        self.advance_pipeline(|mach| Instr::decode(mach).unwrap())
+        self.advance_pipeline(io_update, |mach| Instr::decode(mach).unwrap())
     }
 
     /// Executes the given instruction.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_instr(&mut self, instr: Instr) -> instr::Executed {
-        self.advance_pipeline(|_| instr)
+    pub fn execute_instr(
+        &mut self,
+        io_update: bus::io::Update,
+        instr: Instr,
+    ) -> instr::Executed {
+        self.advance_pipeline(io_update, |_| instr)
     }
 
     /// Executes the given instruction its encoded, machine-readable form.
     ///
     /// This method returns the result of the execution.
-    pub fn execute_machine_instr(&mut self, mach: u32) -> instr::Executed {
+    pub fn execute_machine_instr(
+        &mut self,
+        io_update: bus::io::Update,
+        mach: u32,
+    ) -> instr::Executed {
         // TODO: Don't unwrap!
-        self.advance_pipeline(|_| Instr::decode(mach).unwrap())
+        self.advance_pipeline(io_update, |_| Instr::decode(mach).unwrap())
     }
 
     /// Processes the current stage, and then advances to the next stage, of each instruction
@@ -225,8 +233,9 @@ impl<'s, 'b> Cpu<'s, 'b> {
     /// [`execute_opcode`]: Self::execute_opcode
     pub fn advance_pipeline(
         &mut self,
+        io_update: bus::io::Update,
         decode_instr: impl Fn(u32) -> Instr,
     ) -> instr::Executed {
-        self.pipeline.advance(&mut self.mem, &mut self.reg, &decode_instr)
+        self.pipeline.advance(&mut self.mem, &mut self.reg, io_update, &decode_instr)
     }
 }
