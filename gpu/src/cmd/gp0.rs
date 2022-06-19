@@ -1,120 +1,116 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use noctane_util::BitStack as _;
-
 use super::MachineCommand;
 
-macro_rules! def_cmd_and_kind {
-    (
-        $($variant_name:ident ($mod_name:ident)),* $(,)?
-    ) => {
-        #[derive(Debug)]
-        pub enum Kind {
-            $($variant_name,)*
-        }
-
-        #[derive(Debug)]
-        pub enum Command {
-            $($variant_name($mod_name::Command),)*
-        }
-    };
+#[derive(Clone, Debug)]
+pub enum Command {
+    Nop,
+    ClearTexCache,
+    QuickfillRect,
+    _3,
+    RequestInt,
+    RenderPoly {
+        coloring: Coloring,
+        kind: PolygonKind,
+        opacity: Opacity,
+    },
 }
-
-def_cmd_and_kind!(
-    Misc(misc),
-    Env(env),
-    Polygon(poly),
-    Line(line),
-    Rectangle(rect),
-    Transfer(txfer),
-);
 
 impl Command {
-    pub fn decode(mut mach: MachineCommand) -> Option<Self> {
-        let subopcode = mach.opcode.pop_bits(5);
-
-        // Hopefully, this gets optimized into a jump table.
+    pub fn decode(mach: MachineCommand) -> Self {
+        // Crossing my fingers that this gets optimized into a LUT...
         match mach.opcode {
-            0 => misc::Command::decode(subopcode, mach.param).map(Self::Misc),
-            1 => poly::Command::decode(subopcode, mach.param).map(Self::Polygon),
-            2 => line::Command::decode(subopcode, mach.param).map(Self::Line),
-            3 => rect::Command::decode(subopcode, mach.param).map(Self::Rectangle),
-            4..=6 => txfer::Command::decode(subopcode, mach.param).map(Self::Transfer),
-            7 => env::Command::decode(subopcode, mach.param).map(Self::Env),
-            _ => unsafe { std::hint::unreachable_unchecked() },
+            0x00 => Self::Nop,
+            0x01 => Self::ClearTexCache,
+            0x02 => Self::QuickfillRect,
+            0x03 => Self::_3,
+            0x04..=0x1e => Self::Nop,
+            0x1f => Self::RequestInt,
+            0x20 | 0x21 => Self::RenderPoly {
+                coloring: Coloring::Monochrome,
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::Opaque,
+            },
+            0x22 | 0x23 => Self::RenderPoly {
+                coloring: Coloring::Monochrome,
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::SemiTrans,
+            },
+            0x24 => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Blended),
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::Opaque,
+            },
+            0x25 => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Raw),
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::Opaque,
+            },
+            0x26 => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Blended),
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::SemiTrans,
+            },
+            0x27 => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Raw),
+                kind: PolygonKind::Triangle,
+                opacity: Opacity::SemiTrans,
+            },
+            0x28 | 0x29 => Self::RenderPoly {
+                coloring: Coloring::Monochrome,
+                kind: PolygonKind::Quad,
+                opacity: Opacity::Opaque,
+            },
+            0x2a | 0x2b => Self::RenderPoly {
+                coloring: Coloring::Monochrome,
+                kind: PolygonKind::Quad,
+                opacity: Opacity::SemiTrans,
+            },
+            0x2c => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Blended),
+                kind: PolygonKind::Quad,
+                opacity: Opacity::Opaque,
+            },
+            0x2d => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Raw),
+                kind: PolygonKind::Quad,
+                opacity: Opacity::Opaque,
+            },
+            0x2e => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Blended),
+                kind: PolygonKind::Quad,
+                opacity: Opacity::SemiTrans,
+            },
+            0x2f => Self::RenderPoly {
+                coloring: Coloring::Textured(Texturing::Raw),
+                kind: PolygonKind::Quad,
+                opacity: Opacity::SemiTrans,
+            },
+            _ => todo!(),
         }
     }
 }
 
-pub mod misc {
-    #[derive(Debug)]
-    pub struct Command;
-
-    impl Command {
-        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
-            todo!()
-        }
-    }
+#[derive(Clone, Debug)]
+pub enum Coloring {
+    Monochrome,
+    Textured(Texturing),
 }
 
-pub mod env {
-    #[derive(Debug)]
-    pub enum Command {
-        SetTexpage,
-    }
-
-    impl Command {
-        pub fn decode(opcode: u8, _param: u32) -> Option<Self> {
-            match opcode {
-                // TODO
-                1 => Some(Self::SetTexpage),
-                // TODO
-                _ => None,
-            }
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum Texturing {
+    Blended,
+    Raw,
 }
 
-pub mod poly {
-    #[derive(Debug)]
-    pub struct Command;
-
-    impl Command {
-        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
-            todo!()
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum PolygonKind {
+    Triangle,
+    Quad,
 }
 
-pub mod line {
-    #[derive(Debug)]
-    pub struct Command;
-
-    impl Command {
-        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
-            todo!()
-        }
-    }
-}
-
-pub mod rect {
-    #[derive(Debug)]
-    pub struct Command;
-
-    impl Command {
-        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
-            todo!()
-        }
-    }
-}
-
-pub mod txfer {
-    #[derive(Debug)]
-    pub struct Command;
-
-    impl Command {
-        pub fn decode(_opcode: u8, _param: u32) -> Option<Self> {
-            todo!()
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum Opacity {
+    Opaque,
+    SemiTrans,
 }

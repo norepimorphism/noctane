@@ -2,7 +2,7 @@
 
 # 6/19/2022
 
-Noctane is not at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines).
+Noctane is now at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines).
 
 The DMA and SPU registers are mostly implemented or stubbed-out now.
 

@@ -768,7 +768,7 @@ gen_cpu_bus_io!(
                         ($field:ident) => {
                             // If this field is set to 0, the IRQ bit is cleared.
                             if !code.pop_bool() {
-                                self.$field.is_requesting = false;
+                                self.$field.request = None;
                             }
                         }
                     }
@@ -782,7 +782,7 @@ gen_cpu_bus_io!(
                     ack!(dma);
                     for timer in self.timers.iter_mut() {
                         if !code.pop_bool() {
-                            timer.is_requesting = false;
+                            timer.request = None;
                         }
                     }
                     ack!(perif);
@@ -793,17 +793,17 @@ gen_cpu_bus_io!(
 
                 pub fn encode_stat(&self) -> u32 {
                     let mut code = 0;
-                    code.push_bool(self.lightpen.is_requesting);
-                    code.push_bool(self.spu.is_requesting);
-                    code.push_bool(self.sio.is_requesting);
-                    code.push_bool(self.perif.is_requesting);
+                    code.push_bool(self.lightpen.request.is_some());
+                    code.push_bool(self.spu.request.is_some());
+                    code.push_bool(self.sio.request.is_some());
+                    code.push_bool(self.perif.request.is_some());
                     for timer in self.timers.iter().rev() {
-                        code.push_bool(timer.is_requesting);
+                        code.push_bool(timer.request.is_some());
                     }
-                    code.push_bool(self.dma.is_requesting);
-                    code.push_bool(self.cdrom.is_requesting);
-                    code.push_bool(self.gpu.is_requesting);
-                    code.push_bool(self.vblank.is_requesting);
+                    code.push_bool(self.dma.request.is_some());
+                    code.push_bool(self.cdrom.request.is_some());
+                    code.push_bool(self.gpu.request.is_some());
+                    code.push_bool(self.vblank.request.is_some());
 
                     code
                 }
@@ -843,21 +843,21 @@ gen_cpu_bus_io!(
                     // TODO
                     let _ = code.pop_bits(6);
                     code.pop_bits(9);
-                    self.dma.is_requesting = code.pop_bool();
+                    self.dma.request = code.pop_bool().then_some(Request::default());
                     for chan in self.dma.chan.iter_mut() {
                         chan.is_enabled = code.pop_bool();
                     }
                     self.dma.is_enabled = code.pop_bool();
                     for chan in self.dma.chan.iter_mut() {
-                        chan.is_requesting = code.pop_bool();
+                        chan.request = code.pop_bool().then_some(Request::default());
                     }
                 }
 
                 pub fn encode_dicr(&self) -> u32 {
                     let mut code = 0;
-                    code.push_bool(self.dma.is_requesting);
+                    code.push_bool(self.dma.request.is_some());
                     for chan in self.dma.chan.iter().rev() {
-                        code.push_bool(chan.is_requesting);
+                        code.push_bool(chan.request.is_some());
                     }
                     code.push_bool(self.dma.is_enabled);
                     for chan in self.dma.chan.iter().rev() {
@@ -871,28 +871,38 @@ gen_cpu_bus_io!(
                     code
                 }
 
-                pub fn is_requesting(&self) -> bool {
-                    macro_rules! test {
+                pub fn take_request(&mut self) -> Option<()> {
+                    macro_rules! take_request {
                         ($field:ident) => {
-                            if self.$field.is_enabled_and_requesting() {
-                                return true;
+                            if self.$field.take_request().is_some() {
+                                return Some(());
                             }
                         };
                     }
 
-                    test!(vblank);
-                    test!(gpu);
-                    test!(cdrom);
-                    test!(dma);
-                    if self.timers.iter().any(|it| it.is_enabled_and_requesting()) {
-                        return true;
+                    take_request!(vblank);
+                    take_request!(gpu);
+                    take_request!(cdrom);
+                    take_request!(dma);
+                    // TODO:
+                    //
+                    // Should individual DMA channel requests be checked here? The current behavior
+                    // is that, when any DMA channel requests an interrupt, the master IRQ flag is
+                    // set as well as that of the channel, and when the interrupt is served, only
+                    // the master IRQ flag is checked. This means that acknowledging the
+                    // channel-specific IRQ flag has no bearing on whether the interrupt request is
+                    // reset. The alternative would be to require both the master IRQ flag and the
+                    // channel-specific IRQ flag to be acknowledged in order for the interrupt
+                    // request to be reset.
+                    if self.timers.iter_mut().any(|it| it.take_request().is_some()) {
+                        return Some(());
                     }
-                    test!(perif);
-                    test!(sio);
-                    test!(spu);
-                    test!(lightpen);
+                    take_request!(perif);
+                    take_request!(sio);
+                    take_request!(spu);
+                    take_request!(lightpen);
 
-                    false
+                    None
                 }
             }
 
@@ -901,14 +911,29 @@ gen_cpu_bus_io!(
             pub struct Source {
                 /// Whether or not this interrupt source is enabled.
                 pub is_enabled: bool,
-                /// Whether or not this interrupt source is requesting an interrupt.
-                pub is_requesting: bool,
+                pub request: Option<Request>,
             }
 
             impl Source {
-                pub fn is_enabled_and_requesting(&self) -> bool {
-                    self.is_enabled && self.is_requesting
+                pub fn take_request(&mut self) -> Option<()> {
+                    if self.is_enabled {
+                        if let Some(req) = self.request.as_mut() {
+                            if !req.was_served {
+                                req.was_served = true;
+
+                                return Some(());
+                            }
+                        }
+                    }
+
+                    None
                 }
+            }
+
+            #[derive(Clone, Debug, Default)]
+            pub struct Request {
+                /// Whether or not this interrupt request was served by the CPU.
+                pub was_served: bool,
             }
 
             macro_rules! impl_deref_for_src {
@@ -981,10 +1006,11 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECin_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1017,10 +1043,11 @@ gen_cpu_bus_io!(
             Register {
                 name: MDECout_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1053,10 +1080,11 @@ gen_cpu_bus_io!(
             Register {
                 name: GPU_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1089,10 +1117,11 @@ gen_cpu_bus_io!(
             Register {
                 name: CDROM_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1125,10 +1154,11 @@ gen_cpu_bus_io!(
             Register {
                 name: SPU_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1161,10 +1191,11 @@ gen_cpu_bus_io!(
             Register {
                 name: PIO_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1197,10 +1228,11 @@ gen_cpu_bus_io!(
             Register {
                 name: OTC_4,
                 read_32: |_, _| {
-                    todo!()
+                    // TODO: Undocumented.
+                    0
                 },
                 write_32: |_, _, _| {
-                    todo!()
+                    // TODO: Undocumented.
                 },
             },
             Register {
@@ -1359,8 +1391,8 @@ gen_cpu_bus_io!(
                             // TODO
                             chan.txfer = None;
                             // We must set both of these.
-                            int.dma.is_requesting = true;
-                            int.dma.chan[chan.index].is_requesting = true;
+                            int.dma.request = Some(super::int::Request::default());
+                            int.dma.chan[chan.index].request = Some(super::int::Request::default());
                         }
 
                         None
@@ -1960,8 +1992,9 @@ gen_cpu_bus_io!(
                     // TODO
                     let _ = code.pop_bits(2);
                     self.clock_source.0 = code.pop_bits(2);
-                    // This is inverted for some reason.
-                    int_source.is_requesting = !code.pop_bool();
+                    int_source.request =
+                        // This is inverted for some reason.
+                        (!code.pop_bool()).then_some(super::int::Request::default());
                     // TODO
                 }
 
@@ -1973,8 +2006,7 @@ gen_cpu_bus_io!(
                     code.push_bits(3, 0);
                     // TODO
                     code.push_bits(2, 0);
-                    // This is inverted for some reason.
-                    code.push_bool(!int_source.is_requesting);
+                    code.push_bool(!int_source.request.is_none());
                     code.push_bits(2, self.clock_source.0);
                     // TODO
                     code.push_bits(2, 0);
@@ -2004,7 +2036,7 @@ gen_cpu_bus_io!(
                     if (int_source.is_enabled_on_target_hit && hit_target) ||
                        (int_source.is_enabled_on_overflow && counter_overflowed)
                     {
-                        int_source.is_requesting = true;
+                        int_source.request = Some(super::int::Request::default());
                     }
                 }
             }
@@ -2074,7 +2106,10 @@ gen_cpu_bus_io!(
             Register {
                 name: 1,
                 read_32: |_, _| {
-                    todo!()
+                    let mut code = 0;
+                    // TODO
+
+                    code
                 },
                 write_32: |_, io, mach| {
                     io.gpu.queue_gp1_machine_command(mach);

@@ -1,9 +1,30 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use std::time::Instant;
+
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 
-#[derive(Default)]
+impl Default for Core {
+    fn default() -> Self {
+        Self {
+            banks: Default::default(),
+            bus_cfg: Default::default(),
+            cpu_state: Default::default(),
+            dma_cfg: Default::default(),
+            int: Default::default(),
+            gpu: Default::default(),
+            last_gpu_result: 0,
+            last_vblank: Instant::now(),
+            post: Default::default(),
+            ram_cfg: Default::default(),
+            spu_cfg: Default::default(),
+            spu_voices: Default::default(),
+            timers: Default::default(),
+        }
+    }
+}
+
 pub struct Core {
     pub banks: Banks,
     pub bus_cfg: noctane_cpu::bus::io::bus::Config,
@@ -12,6 +33,7 @@ pub struct Core {
     pub int: noctane_cpu::bus::io::int::Sources,
     pub gpu: Gpu,
     pub last_gpu_result: u32,
+    pub last_vblank: Instant,
     pub post: noctane_cpu::bus::io::post::Status,
     pub ram_cfg: noctane_cpu::bus::io::ram::Config,
     pub spu_cfg: noctane_cpu::bus::io::spu::Config,
@@ -53,6 +75,22 @@ impl Core {
         noctane_cpu::bus::io::Update {
             dma_txfer_packet: None,
         }
+    }
+
+    pub fn take_vblank(&mut self) -> Option<()> {
+        // 60 Hz.
+        if self.last_vblank.elapsed().as_nanos() >= 16666667 {
+            self.last_vblank = Instant::now();
+
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn issue_vblank(&mut self) {
+        // Request a V-blank interrupt.
+        self.int.vblank.request = Some(noctane_cpu::bus::io::int::Request::default());
     }
 }
 

@@ -17,11 +17,7 @@ pub struct Gpu(());
 impl Gpu {
     pub fn queue_gp0_machine_command(&mut self, mach: u32) {
         let mach = MachineCommand::decode(mach);
-        if let Some(cmd) = cmd::gp0::Command::decode(mach) {
-            self.queue_gp0_command(cmd);
-        } else {
-            tracing::warn!("Invalid command: {:?}", mach);
-        }
+        self.queue_gp0_command(cmd::gp0::Command::decode(mach));
     }
 
     pub fn queue_gp0_command(&mut self, cmd: cmd::gp0::Command) {
@@ -29,7 +25,7 @@ impl Gpu {
         tracing::info!("GP0: {:?}", cmd);
     }
 
-    pub fn queue_gp1_machine_command(&mut self, _: u32) -> u32 {
-        todo!()
+    pub fn queue_gp1_machine_command(&mut self, mach: u32) {
+        tracing::info!("GP1: {:#010x}", mach);
     }
 }

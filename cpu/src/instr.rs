@@ -146,7 +146,7 @@ impl Pipeline {
         // slot, which we can handle specially.
 
         // Before we do anything, we should bring I/O up-to-speed.
-        if mem.bus().io.int.is_requesting() {
+        if mem.bus_mut().io.int.take_request().is_some() {
             reg.raise_std_interrupt();
         }
 
@@ -196,6 +196,7 @@ impl Pipeline {
             reg.raise_exception(exc::code::INTERRUPT);
             // Indicate that this interrupt has been processed.
             cause.clear_interrupt(index);
+            reg.set_cause(cause);
         }
     }
 
