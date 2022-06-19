@@ -65,6 +65,7 @@ impl Io<'_> {
         // well-defined order from the first to last pattern.
         let (lut_entry, group_name) = match addr.working {
             post::BASE_ADDR..       => get_lut_entry!(post),
+            x1030::BASE_ADDR..      => get_lut_entry!(x1030),
             duart::BASE_ADDR..      => get_lut_entry!(duart),
             atcons::BASE_ADDR..     => get_lut_entry!(atcons),
             spu::BASE_ADDR..        => get_lut_entry!(spu),
@@ -191,7 +192,7 @@ gen_cpu_bus_io!(
                 read_32: |_, io| {
                     io.bus.exp_1.base
                 },
-                write_32: |_, io, mut value| {
+                write_32: |_, io, value| {
                     // To properly align Exp. Region 1, the lower bits of the base address are
                     // ignored.
                     io.bus.exp_1.base = value & !((1 << io.bus.exp_1.size_shift) - 1);
@@ -457,98 +458,100 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: JOY_DATA,
-                read_32: |_, io| {
+                read_32: |_, _| {
                     todo!()
                 },
-                write_32: |_, io, value| {
+                write_32: |_, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: JOY_STAT,
-                read_32: |_, io| {
+                read_32: |_, _| {
                     todo!()
                 },
-                write_32: |_, io, value| {
+                write_32: |_, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: JOY_MODE,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: JOY_CFG,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: JOY_BAUD,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_DATA,
-                read_32: |_, io| {
+                read_32: |_, _| {
                     todo!()
                 },
-                write_32: |_, io, value| {
+                write_32: |_, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_STAT,
-                read_32: |_, io| {
+                read_32: |_, _| {
                     todo!()
                 },
-                write_32: |_, io, value| {
+                write_32: |_, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_MODE,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_CFG,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_MISC,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |this, i, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SIO_BAUD,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {
+                read_16: |_, _, _|  {
+                    todo!()
+                },
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
@@ -944,7 +947,6 @@ gen_cpu_bus_io!(
             impl_deref_for_src!(DmaSource);
         },
     },
-    // DMA Configuration.
     Lut {
         name: dma,
         base_addr: 0x0080,
@@ -1241,6 +1243,8 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            //! DMA configuration.
+
             use noctane_util::{BitStack as _, BitStackExt as _};
 
             macro_rules! read_madr {
@@ -1666,7 +1670,6 @@ gen_cpu_bus_io!(
             }
         },
     },
-    // Timers (Root Counters).
     Lut {
         name: timers,
         base_addr: 0x0100,
@@ -1781,6 +1784,8 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            //! Timers (Root Counters).
+
             use noctane_util::{BitStack as _, BitStackExt as _};
 
             macro_rules! read_counter {
@@ -2008,35 +2013,51 @@ gen_cpu_bus_io!(
             pub struct ClockSource(u32);
         },
     },
-    // CD-ROM.
     Lut {
         name: cdrom,
         base_addr: 0x0800,
         regs: [
             Register {
                 name: INDEX,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, _, _| {
+                    todo!()
+                },
+                write_8: |_, _, _, _| {
+                    todo!()
+                },
             },
             Register {
                 name: 1,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, _, _| {
+                    todo!()
+                },
+                write_8: |_, _, _, _| {
+                    todo!()
+                },
             },
             Register {
                 name: 2,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, _, _| {
+                    todo!()
+                },
+                write_8: |_, _, _, _| {
+                    todo!()
+                },
             },
             Register {
                 name: 3,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {},
+                read_8: |_, _, _| {
+                    todo!()
+                },
+                write_8: |_, _, _, _| {
+                    todo!()
+                },
             },
         ],
-        module: {},
+        module: {
+            //! CD-ROM.
+        },
     },
-    // GPU.
     Lut {
         name: gpu,
         base_addr: 0x0810,
@@ -2052,7 +2073,7 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: 1,
-                read_32: |_, io| {
+                read_32: |_, _| {
                     todo!()
                 },
                 write_32: |_, io, mach| {
@@ -2060,27 +2081,37 @@ gen_cpu_bus_io!(
                 },
             },
         ],
-        module: {},
+        module: {
+            //! Graphics Processing Unit (GPU).
+        },
     },
-    // MDEC.
     Lut {
         name: mdec,
         base_addr: 0x0820,
         regs: [
             Register {
                 name: CHAN,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    todo!()
+                },
+                write_32: |_, _, _| {
+                    todo!()
+                },
             },
             Register {
                 name: CTRL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    todo!()
+                },
+                write_32: |_, _, _| {
+                    todo!()
+                },
             },
         ],
-        module: {},
+        module: {
+            //! MDEC.
+        },
     },
-    // SPU Voice.
     Lut {
         name: spu_voice,
         base_addr: 0x0c00,
@@ -2088,19 +2119,19 @@ gen_cpu_bus_io!(
             Register {
                 name: L_VOL,
                 read_16: |i: usize, _, io: &Io, _| {
-                    io.spu_voices[i].l_vol
+                    io.spu_voices[i].vol.left
                 },
                 write_16: |i: usize, _, io: &mut Io, _, value| {
-                    io.spu_voices[i].l_vol = value;
+                    io.spu_voices[i].vol.left = value;
                 },
             },
             Register {
                 name: R_VOL,
                 read_16: |i: usize, _, io: &Io, _| {
-                    io.spu_voices[i].r_vol
+                    io.spu_voices[i].vol.right
                 },
                 write_16: |i: usize, _, io: &mut Io, _, value| {
-                    io.spu_voices[i].r_vol = value;
+                    io.spu_voices[i].vol.right = value;
                 },
             },
             Register {
@@ -2123,16 +2154,21 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: ADSR_CONFIG,
-                read_32: |i: usize, _, io: &Io| 0,
-                write_32: |i: usize, _, io: &mut Io, value| {},
+                read_32: |_, _, _| {
+                    // TODO: Don't care right now.
+                    0
+                },
+                write_32: |_, _, _, _| {
+                    // TODO
+                },
             },
             Register {
-                name: ADSR_CURRENT_VOL,
+                name: ADSR_CUR_VOL,
                 read_16: |i: usize, _, io: &Io, _| {
-                    io.spu_voices[i].current_vol
+                    io.spu_voices[i].cur_vol
                 },
                 write_16: |i: usize, _, io: &mut Io, _, value| {
-                    io.spu_voices[i].current_vol = value;
+                    io.spu_voices[i].cur_vol = value;
                 },
             },
             Register {
@@ -2146,18 +2182,33 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
+            //! SPU voices.
+
             #[derive(Debug, Default)]
             pub struct Config {
-                pub l_vol: u16,
-                pub r_vol: u16,
+                pub is_enabled: bool,
+                pub key: Key,
+                pub vol: super::spu::StereoVolume,
                 pub adpcm_sample_rate: u16,
                 pub adpcm_base_addr: u16,
+                pub cur_vol: u16,
+                pub rep_addr: u16,
+            }
+
+            #[derive(Debug, Default)]
+            pub struct Key {
+                pub state: KeyState,
                 pub attack: Attack,
                 pub decay: Decay,
                 pub sustain: Sustain,
                 pub release: Release,
-                pub current_vol: u16,
-                pub rep_addr: u16,
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub enum KeyState {
+                #[default]
+                Off,
+                On,
             }
 
             #[derive(Debug, Default)]
@@ -2204,7 +2255,6 @@ gen_cpu_bus_io!(
         // instantiate it 24 times with the following line.
         regs_count: 24,
     },
-    // SPU Configuration.
     Lut {
         name: spu,
         base_addr: 0x0d80,
@@ -2212,237 +2262,458 @@ gen_cpu_bus_io!(
             Register {
                 name: L_MAIN_VOL,
                 read_16: |_, io, _| {
-                    io.spu.l_main_vol
+                    io.spu.vol.main.left
                 },
                 write_16: |_, io, _, value| {
-                    io.spu.l_main_vol = value;
+                    io.spu.vol.main.left = value;
                 },
             },
             Register {
                 name: R_MAIN_VOL,
                 read_16: |_, io, _| {
-                    io.spu.r_main_vol
+                    io.spu.vol.main.right
                 },
                 write_16: |_, io, _, value| {
-                    io.spu.r_main_vol = value;
+                    io.spu.vol.main.right = value;
                 },
             },
             Register {
-                name: REVERB_VOL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: L_REVERB_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.reverb.left
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.reverb.left = value;
+                },
+            },
+            Register {
+                name: R_REVERB_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.reverb.right
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.reverb.right = value;
+                },
             },
             Register {
                 name: KEY_ON,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO: I think this is unreadable (?).
+                    0
+                },
+                write_32: |_, io, value| {
+                    io.spu.decode_kon(value);
+                },
             },
             Register {
                 name: KEY_OFF,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO: I think this is unreadable (?).
+                    0
+                },
+                write_32: |_, io, value| {
+                    io.spu.decode_koff(value);
+                },
             },
+            // I don't care about these four registers right now.
             Register {
                 name: CHAN_FM,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO
+                    0
+                },
+                write_32: |_, _, _| {
+                    // TODO
+                },
             },
             Register {
                 name: CHAN_NOISE,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO
+                    0
+                },
+                write_32: |_, _, _| {
+                    // TODO
+                },
             },
             Register {
                 name: CHAN_REVERB,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO
+                    0
+                },
+                write_32: |_, _, _| {
+                    // TODO
+                },
             },
             Register {
                 name: CHAN_STAT,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO
+                    0
+                },
+                write_32: |_, _, _| {
+                    // TODO
+                },
             },
             Register {
                 name: 8,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, _, _| {
+                    // TODO: Undocumented.
+                    0
+                },
+                write_16: |_, _, _, _| {
+                    // TODO: Undocumented.
+                },
             },
             Register {
                 name: REVERB_WRAM_BASE,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, _| {
+                    io.spu.reverb_wram_base
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.reverb_wram_base = value;
+                },
             },
             Register {
-                name: IRQ_ADDR,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                name: IRQ_IDX,
+                read_16: |_, io, _| {
+                    io.spu.irq_idx
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.irq_idx = value;
+                },
             },
             Register {
-                name: DATA_TXFR_ADDR,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                name: DATA_TXFR_IDX,
+                read_16: |_, io, _| {
+                    io.spu.txfr.idx
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.txfr.idx = value;
+                },
             },
             Register {
                 name: DATA_TXFR_FIFO,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, _| {
+                    io.spu.txfr.fifo
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.txfr.fifo = value;
+                },
             },
             Register {
                 name: CTRL,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, _| {
+                    io.spu.encode_ctrl()
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.decode_ctrl(value);
+                },
             },
             Register {
-                name: DATA_TXFR_CFG,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                name: DATA_TXFR_CTRL,
+                read_16: |_, io, _| {
+                    io.spu.txfr.encode_ctrl()
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.txfr.decode_ctrl(value);
+                },
             },
             Register {
                 name: STAT,
-                read_16: |_, io, addr| 0,
-                write_16: |_, io, addr, value| {},
+                read_16: |_, io, _| {
+                    // TODO: Don't care right now.
+                    0
+                },
+                write_16: |_, io, _, value| {
+                    // TODO: Don't care right now.
+                },
             },
             Register {
-                name: CD_VOL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: L_CD_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.cd.left
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.cd.left = value;
+                },
             },
             Register {
-                name: EXT_VOL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: R_CD_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.cd.right
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.cd.right = value;
+                },
             },
             Register {
-                name: CUR_MAIN_VOL,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                name: L_EXT_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.ext.left
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.ext.left = value;
+                },
+            },
+            Register {
+                name: R_EXT_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.ext.right
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.ext.right = value;
+                },
+            },
+            Register {
+                name: L_CUR_MAIN_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.cur_main.left
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.cur_main.left = value;
+                },
+            },
+            Register {
+                name: R_CUR_MAIN_VOL,
+                read_16: |_, io, _| {
+                    io.spu.vol.cur_main.right
+                },
+                write_16: |_, io, _, value| {
+                    io.spu.vol.cur_main.right = value;
+                },
             },
             Register {
                 name: 19,
-                read_32: |_, io| 0,
-                write_32: |_, io, value| {},
+                read_32: |_, _| {
+                    // TODO: Undocumented.
+                    0
+                },
+                write_32: |_, _, _| {
+                    // TODO: Undocumented.
+                },
             },
         ],
         module: {
-            #[derive(Debug, Default)]
+            //! SPU configuration.
+
+            use noctane_util::{BitStack as _, BitStackExt as _};
+
+            #[derive(Clone, Debug, Default)]
             pub struct Config {
-                pub l_main_vol: u16,
-                pub r_main_vol: u16,
+                pub is_enabled: bool,
+                pub is_muted: bool,
+                pub vol: VolumeConfig,
+                pub irq_idx: u16,
+                pub txfr: TransferState,
+                pub reverb_wram_base: u16,
+            }
+
+            impl Config {
+                pub fn decode_ctrl(&mut self, mut code: u16) {
+                    // TODO
+                    let _ = code.pop_bits(14);
+                    self.is_muted = !code.pop_bool();
+                    self.is_enabled = code.pop_bool();
+                }
+
+                pub fn encode_ctrl(&self) -> u16 {
+                    let mut code = 0;
+                    code.push_bool(self.is_enabled);
+                    code.push_bool(!self.is_muted);
+                    // TODO
+
+                    code
+                }
+
+                // TODO: Move these two methods to SPU voices somehow. Maybe make SPU voices a
+                // newtype around an array.
+
+                pub fn decode_kon(&mut self, mut code: u32) {
+                    // TODO
+                }
+
+                pub fn decode_koff(&mut self, mut code: u32) {
+                    // TODO
+                }
+            }
+
+            #[derive(Clone, Debug, Default)]
+            pub struct VolumeConfig {
+                pub main: StereoVolume,
+                pub reverb: StereoVolume,
+                pub cd: StereoVolume,
+                pub ext: StereoVolume,
+                pub cur_main: StereoVolume,
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct StereoVolume {
+                /// The volume level of the left channel.
+                pub left: u16,
+                /// The volume level of the right channel.
+                pub right: u16,
+            }
+
+            #[derive(Clone, Debug, Default)]
+            pub struct TransferState {
+                pub idx: u16,
+                pub fifo: u16,
+            }
+
+            impl TransferState {
+                pub fn decode_ctrl(&mut self, mut code: u16) {
+                    // TODO
+                }
+
+                pub fn encode_ctrl(&self) -> u16 {
+                    // TODO
+                    0
+                }
             }
         },
     },
     // SPU Reverb Configuration.
     // SPU Internal.
-    // ATCONS (?).
     Lut {
         name: atcons,
         base_addr: 0x1000,
         regs: [
             Register {
                 name: STAT,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: 1,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: DATA,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: 3,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: 4,
-                read_16: |_, io, addr| {
+                read_16: |_, _, _| {
                     todo!()
                 },
-                write_16: |_, io, addr, value| {
+                write_16: |_, _, _, _| {
                     todo!()
                 },
             },
         ],
         module: {
-            // TODO
+            //! ATCONS (?).
         },
     },
-    // Dual Serial Port.
     Lut {
         name: duart,
         base_addr: 0x1020,
         regs: [
             Register {
                 name: MODE_0,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: STAT_0,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: 3,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: FIFO_0,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: 4,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             // TODO
         ],
         module: {
+            //! Dual serial port (DUART).
+
             // TODO
         },
+    },
+    Lut {
+        name: x1030,
+        base_addr: 0x1030,
+        regs: [
+            // Who knows what these do!
+            Register {
+                name: LIGHTPEN,
+                read_16: |_, _, _| {
+                    todo!()
+                },
+                write_16: |_, _, _, _| {
+                    todo!()
+                },
+            },
+            Register {
+                name: CTRL,
+                read_8: |_, _, _| {
+                    todo!()
+                },
+                write_8: |_, _, _, _| {
+                    todo!()
+                },
+            },
+        ],
+        module: {
+            // TODO
+        }
     },
     Lut {
         name: post,
@@ -2450,29 +2721,38 @@ gen_cpu_bus_io!(
         regs: [
             Register {
                 name: BOOT_MODE,
-                read_8: |_, io, addr| {
+                read_8: |_, _, _| {
                     todo!()
                 },
-                write_8: |_, io, addr, value| {
+                write_8: |_, _, _, _| {
                     todo!()
                 },
             },
             Register {
                 name: SEVEN_SEG,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {
+                read_8: |_, io, _| {
+                    // TODO: I don't know if this is right.
+                    io.post.seven_seg.last().copied().unwrap_or(0)
+                },
+                write_8: |_, io, _, value| {
                     io.post.seven_seg.push(value as u8);
                 },
             },
             Register {
                 name: LED,
-                read_8: |_, io, addr| 0,
-                write_8: |_, io, addr, value| {
+                read_8: |_, io, _| {
+                    // TODO: I don't know if this is right.
+                    io.post.led.last().copied().unwrap_or(0)
+                },
+                write_8: |_, io, _, value| {
                     io.post.led.push(value as u8);
                 },
             },
         ],
         module: {
+            //! POST status.
+
+            /// POST status.
             #[derive(Debug, Default)]
             pub struct Status {
                 /// A 7-segment display indicating the POST status.

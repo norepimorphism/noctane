@@ -1,5 +1,11 @@
 # Progress Log
 
+# 6/19/2022
+
+Noctane is not at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines).
+
+The DMA and SPU registers are mostly implemented or stubbed-out now.
+
 # 6/13/2022
 
 Timers and SPU voice registers are now mostly implemented. I am currently implementing DMAs, which should be a bit of a challenging task.

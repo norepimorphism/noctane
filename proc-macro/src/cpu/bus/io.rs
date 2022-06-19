@@ -91,6 +91,9 @@ pub fn gen(input: TokenStream) -> TokenStream {
 
         lut_mods.extend(quote! {
             pub mod #mod_name {
+                // This goes first for module documentation.
+                #mod_stmts
+
                 /// The base address, relative to the start of the I/O region, of the group of I/O
                 /// registers represented by [`LUT`].
                 pub(super) const BASE_ADDR: usize = #lut_base_addr;
@@ -98,8 +101,6 @@ pub fn gen(input: TokenStream) -> TokenStream {
                 /// A lookup table (LUT) of [`LutEntry`]s, indexed by an address relative to the
                 /// start of the I/O region.
                 pub(super) static LUT: &[super::LutEntry] = &[#lut_entries];
-
-                #mod_stmts
             }
         });
     }
