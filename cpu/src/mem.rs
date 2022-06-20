@@ -141,7 +141,7 @@ impl<'b> Memory<'_, 'b> {
 /// Defines an `access` method for redirecting a program address into one of the three address
 /// regions.
 macro_rules! def_access {
-    ($fn_name:ident $width:tt) => {
+    ($fn_name:ident $kind:tt $width:tt) => {
         fn $fn_name<T>(
             &mut self,
             addr: u32,
@@ -195,21 +195,20 @@ macro_rules! def_access {
             macro_rules! call_access_fn {
                 ($f:expr, $region_id:expr) => {
                     {
-                        let make_address = |region_id: usize| {
-                            Address::new(
-                                addr,
-                                // Rebase the address to the start of its address region.
-                                addr - (region_id << 29),
-                            )
-                        };
+                        let addr = Address::new(
+                            addr,
+                            // Rebase the address to the start of its address region.
+                            addr - ($region_id << 29),
+                        );
 
-                        if self.cache.i.is_isolated() {
-                            // When the I-cache is isolated, *all* memory accesses are cached, and
-                            // there are no write-throughs. KSEG0 is like the other segments except
-                            // cached, so we can simply redirect everything to that handler.
-                            access_kseg0(self, make_address($region_id))
+                        if self.cache.i_is_enabled && self.cache.i.is_isolated() {
+                            // When the I-cache is isolated, *all* memory accesses are
+                            // cached, and there are no write-throughs. KSEG0 is like the
+                            // other segments except cached, so we can simply redirect
+                            // everything to that handler.
+                            access_kseg0(self, addr)
                         } else {
-                            $f(self, make_address($region_id))
+                            $f(self, addr)
                         }
                     }
                 };
@@ -230,9 +229,9 @@ macro_rules! def_access {
                 // 0xc000_0000
                 6 => call_access_fn!(access_kseg2, 6),
                 7 => call_access_fn!(access_kseg2, 6),
-                // Three bits allows for 2^3 different possibilities, so it is impossible for this
-                // value to be greater than 7.
-                _ => unreachable!(),
+                // SAFETY: Three bits allows for 2^3 different possibilities, so it is impossible
+                // for this value to be greater than 7.
+                _ => unsafe { std::hint::unreachable_unchecked() },
             }
         }
     };
@@ -240,29 +239,46 @@ macro_rules! def_access {
 
 /// Defines a `read` method for a given bit width.
 macro_rules! def_read_fn {
-    ($fn_name:ident $access_name:ident $ty:ty) => {
+    ($fn_name:ident $access_name:ident $kind:tt $bus_fn_name:ident $ty:ty) => {
         pub fn $fn_name(&mut self, addr: u32) -> Result<$ty, ()> {
             let value = self.$access_name(
                 addr,
                 |this, addr| {
-                    if this.cache.i_is_enabled {
-                        this.cache
-                            .i
-                            .$fn_name(addr, |addr| this.bus.fetch_cache_line(addr))
-                    } else {
-                        this.bus.$fn_name(addr)
+                    macro_rules! gen_access_kseg0 {
+                        (instr) => {
+                            if this.cache.i_is_enabled {
+                                this.cache.i.read(addr, |addr| this.bus.fetch_cache_line(addr))
+                            } else {
+                                gen_access_kseg0!(data)
+                            }
+                        };
+                        (data) => {
+                            this.bus.$bus_fn_name(addr)
+                        };
                     }
+
+                    gen_access_kseg0!($kind)
                 },
                 |this, addr| {
-                    this.bus.$fn_name(addr)
+                    this.bus.$bus_fn_name(addr)
                 },
                 |this, addr| {
-                    // TODO: This only works for word-aligned accesses.
-                    if addr.init == (crate::cache::CTRL_ADDR as usize) {
-                        Ok(this.cache.encode_ctrl() as $ty)
-                    } else {
-                        Err(())
+                    macro_rules! gen_access_kseg2 {
+                        (instr) => {
+                            // There's no code here.
+                            Err(())
+                        };
+                        (data) => {
+                            // TODO: This only works for word-aligned accesses.
+                            if addr.init == (crate::cache::CTRL_ADDR as usize) {
+                                Ok(this.cache.encode_ctrl() as $ty)
+                            } else {
+                                Err(())
+                            }
+                        };
                     }
+
+                    gen_access_kseg2!($kind)
                 },
             );
             if let Ok(value) = value {
@@ -276,35 +292,60 @@ macro_rules! def_read_fn {
 
 /// Defines a `write` method for a given bit width.
 macro_rules! def_write_fn {
-    ($fn_name:ident $access_name:ident $ty:ty) => {
+    ($fn_name:ident $access_name:ident $kind:tt $bus_fn_name:ident $ty:ty) => {
         pub fn $fn_name(&mut self, addr: u32, value: $ty) -> Result<(), ()> {
             tracing::trace!("#[{:#010x}] <- {:#010x}", addr, value);
 
             self.$access_name(
                 addr,
                 |this, addr| {
-                    if this.cache.i_is_enabled {
-                        this.cache.i.$fn_name(addr, value);
-                        if !this.cache.i.is_isolated() {
-                            // When not isolated, write-through to the CPU bus.
-                            this.bus.$fn_name(addr, value)?;
-                        }
-                    } else {
-                        this.bus.$fn_name(addr, value)?;
+                    macro_rules! gen_access_kseg0 {
+                        (instr) => {
+                            if this.cache.i_is_enabled {
+                                this.cache.i.write(addr, value);
+                                if !this.cache.i.is_isolated() {
+                                    // When not isolated, write-through to the CPU bus.
+                                    this.bus.$bus_fn_name(addr, value)?;
+                                }
+                            } else {
+                                gen_access_kseg0!(data);
+                            }
+                        };
+                        (data) => {
+                            if this.cache.i.is_isolated() {
+                                this.cache.i.write(addr, value.into());
+                            } else {
+                                this.bus.$bus_fn_name(addr, value)?
+                            }
+                        };
                     }
+
+                    gen_access_kseg0!($kind);
 
                     Ok(())
                 },
                 |this, addr| {
-                    this.bus.$fn_name(addr, value)
+                    this.bus.$bus_fn_name(addr, value)
                 },
                 |this, addr| {
-                    // TODO: This only works for word-aligned accesses.
-                    if addr.init == (crate::cache::CTRL_ADDR as usize) {
-                        this.cache.decode_ctrl(value.into());
+                    macro_rules! gen_access_kseg2 {
+                        (instr) => {
+                            // There's no code here.
+                            Err(())
+                        };
+                        (data) => {
+                            {
+                                // TODO: This only works for word-aligned accesses.
+                                if addr.init == (crate::cache::CTRL_ADDR as usize) {
+                                    this.cache.decode_ctrl(value.into());
+                                }
+
+                                Ok(())
+                            }
+                        };
                     }
 
-                    Ok(())
+                    gen_access_kseg2!($kind)
                 },
             )
         }
@@ -312,15 +353,18 @@ macro_rules! def_write_fn {
 }
 
 impl Memory<'_, '_> {
-    def_access!(access_8 8);
-    def_access!(access_16 16);
-    def_access!(access_32 32);
+    def_access!(access_instr instr 32);
+    def_access!(access_data_8 data 8);
+    def_access!(access_data_16 data 16);
+    def_access!(access_data_32 data 32);
 
-    def_read_fn!(read_8 access_8 u8);
-    def_read_fn!(read_16 access_16 u16);
-    def_read_fn!(read_32 access_32 u32);
+    def_read_fn!(read_instr access_instr instr read_32 u32);
+    def_read_fn!(read_data_8 access_data_8 data read_8 u8);
+    def_read_fn!(read_data_16 access_data_16 data read_16 u16);
+    def_read_fn!(read_data_32 access_data_32 data read_32 u32);
 
-    def_write_fn!(write_8 access_8 u8);
-    def_write_fn!(write_16 access_16 u16);
-    def_write_fn!(write_32 access_32 u32);
+    def_write_fn!(write_instr access_instr instr write_32 u32);
+    def_write_fn!(write_data_8 access_data_8 data write_8 u8);
+    def_write_fn!(write_data_16 access_data_16 data write_16 u16);
+    def_write_fn!(write_data_32 access_data_32 data write_32 u32);
 }

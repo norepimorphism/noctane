@@ -182,7 +182,7 @@ impl Pipeline {
         // I'm not sure if this is really necessary, but we will continuously attempt to fetch the
         // next instruction, generating exceptions on every erroneous access.
         let op = loop {
-            if let Ok(op) = mem.read_32(pc) {
+            if let Ok(op) = mem.read_instr(pc) {
                 // Success! Here's the operation.
                 break op;
             }
@@ -1155,7 +1155,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lb" %(rt), #(s), %(rs)],
         fn: |mut ctx: Context<opn::i::State>| {
-            if let Ok(value) = ctx.mem.read_8(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
+            if let Ok(value) = ctx.mem.read_data_8(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
                 ctx.reg.set_gpr(ctx.opn.rt.index, sign_extend_8(value));
 
                 PcBehavior::Increments
@@ -1169,7 +1169,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lbu" %(rt), #(s), %(rs)],
         fn: |mut ctx: Context<opn::i::State>| {
-            if let Ok(value) = ctx.mem.read_8(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
+            if let Ok(value) = ctx.mem.read_data_8(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
                 ctx.reg.set_gpr(ctx.opn.rt.index, value.into());
 
                 PcBehavior::Increments
@@ -1183,7 +1183,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lh" %(rt), #(s), %(rs)],
         fn: |mut ctx: Context<opn::i::State>| {
-            if let Ok(value) = ctx.mem.read_16(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
+            if let Ok(value) = ctx.mem.read_data_16(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
                 ctx.reg.set_gpr(ctx.opn.rt.index, sign_extend_16(value));
 
                 PcBehavior::Increments
@@ -1197,7 +1197,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lhu" %(rt), #(s), %(rs)],
         fn: |mut ctx: Context<opn::i::State>| {
-            if let Ok(value) = ctx.mem.read_16(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
+            if let Ok(value) = ctx.mem.read_data_16(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
                 ctx.reg.set_gpr(ctx.opn.rt.index, value.into());
 
                 PcBehavior::Increments
@@ -1221,7 +1221,7 @@ def_instr_and_op_kind!(
         type: i,
         asm: ["lw" %(rt), #(s), %(rs)],
         fn: |mut ctx: Context<opn::i::State>| {
-            if let Ok(value) = ctx.mem.read_32(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
+            if let Ok(value) = ctx.mem.read_data_32(calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm)) {
                 ctx.reg.set_gpr(ctx.opn.rt.index, value);
 
                 PcBehavior::Increments
@@ -1380,7 +1380,7 @@ def_instr_and_op_kind!(
         fn: |mut ctx: Context<opn::i::State>| {
             let vaddr = calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm);
 
-            if ctx.mem.write_8(vaddr, ctx.opn.rt.gpr_value as u8).is_err() {
+            if ctx.mem.write_data_8(vaddr, ctx.opn.rt.gpr_value as u8).is_err() {
                 ctx.raise_exc(exc::code::ADDRESS_STORE)
             } else {
                 PcBehavior::Increments
@@ -1394,7 +1394,7 @@ def_instr_and_op_kind!(
         fn: |mut ctx: Context<opn::i::State>| {
             let vaddr = calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm);
 
-            if ctx.mem.write_16(vaddr, ctx.opn.rt.gpr_value as u16).is_err() {
+            if ctx.mem.write_data_16(vaddr, ctx.opn.rt.gpr_value as u16).is_err() {
                 ctx.raise_exc(exc::code::ADDRESS_STORE)
             } else {
                 PcBehavior::Increments
@@ -1535,7 +1535,7 @@ def_instr_and_op_kind!(
         fn: |mut ctx: Context<opn::i::State>| {
             let vaddr = calc_vaddr(ctx.opn.rs.gpr_value, ctx.opn.imm);
 
-            if ctx.mem.write_32(vaddr, ctx.opn.rt.gpr_value).is_err() {
+            if ctx.mem.write_data_32(vaddr, ctx.opn.rt.gpr_value).is_err() {
                 ctx.raise_exc(exc::code::ADDRESS_STORE)
             } else {
                 PcBehavior::Increments

@@ -108,22 +108,6 @@ impl Entry {
         }
     }
 
-    /// Modifies a word in this entry.
-    ///
-    /// As this entry contains four words, the precise word returned is selected by the `addr`
-    /// argument. The word is then modified with the `modify_word` function.
-    pub(super) fn write_partial(&mut self, addr: Address, modify_word: impl FnOnce(&mut u32)) {
-        if self.is_valid && self.test_hit(addr) {
-            let word = &mut self.line[addr.word_idx];
-            modify_word(word);
-            // As with [`Self::write`], we can assume that the CPU bus was writen-through to, so
-            // this entry is still valid.
-        } else {
-            // Unlike normal 32-bit writes, partial-word writes with addresses that don't match the
-            // tag of this entry are simply ignored.
-        }
-    }
-
     /// Manually invalidates this entry.
     pub fn invalidate(&mut self) {
         self.is_valid = false;

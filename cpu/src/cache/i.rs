@@ -145,56 +145,18 @@ impl Cache {
 
         self.is_isolated = value;
     }
-}
 
-macro_rules! def_read_fn {
-    (
-        docs: $docs:literal,
-        $fn_name:ident() -> $ty:ty { $extract:expr } $(,)?
-    ) => {
-        #[doc = $docs]
-        ///
-        /// If a cache miss occurs, a cache line is read from the `fetch_line` argument, which is
-        /// expected to return either an array of four native-endian words, or an error, in which
-        /// case this method returns that error.
-        pub fn $fn_name(
-            &mut self,
-            addr: mem::Address,
-            fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], ()>,
-        ) -> Result<$ty, ()> {
-            self.read(addr.into(), fetch_line, |word| $extract(word, addr))
-        }
-    };
-}
-
-impl Cache {
-    def_read_fn!(
-        docs: "Reads an 8-bit value from the given address within this cache.",
-        read_8() -> u8 {
-            |word: u32, addr: mem::Address| addr.index_byte_in_word(word)
-        }
-    );
-    def_read_fn!(
-        docs: "Reads a 16-bit value from the given address within this cache.",
-        read_16() -> u16 {
-            |word: u32, addr: mem::Address| addr.index_halfword_in_word(word)
-        }
-    );
-    def_read_fn!(
-        docs: "Reads a 32-bit value from the given address within this cache.",
-        read_32() -> u32 { |word: u32, _| word }
-    );
-
-    /// Reads from the given address within this cache.
+    /// Reads a 32-bit value from the given address within this cache.
     ///
-    /// `extract` accepts a native-endian word and returns the portion of that word that should
-    /// be output by this method.
-    fn read<T>(
+    /// If a cache miss occurs, a cache line is read from the `fetch_line` argument, which is
+    /// expected to return either an array of four native-endian words, or an error, in which case
+    /// this method returns that error.
+    pub fn read(
         &mut self,
-        addr: Address,
+        addr: mem::Address,
         fetch_line: impl FnOnce(mem::Address) -> Result<[u32; 4], ()>,
-        extract: impl FnOnce(u32) -> T,
-    ) -> Result<T, ()> {
+    ) -> Result<u32, ()> {
+        let addr = Address::from(addr);
         let entry = &mut self.entries[addr.entry_idx];
 
         entry
@@ -202,64 +164,19 @@ impl Cache {
             .map(|word| {
                 // As the data contained within `word` is little-endian, we should use
                 // [`u32::to_le`] to convert to native-endian first.
-                extract(word.to_le())
+                word.to_le()
             })
     }
 
-    // Contrary to reading, we don't need to do any endianness conversions here as the data is
-    // already little-endian, and we can operate directly on that.
-
-    /// Writes an 8-bit value to the given address within this cache.
-    pub fn write_8(&mut self, addr: mem::Address, value: u8) {
-        self.write_partial(addr.into(), |mut word| {
-            word[addr.byte_idx] = value;
-
-            word
-        })
-    }
-
-    /// Writes a 16-bit value to the given address within this cache.
-    pub fn write_16(&mut self, addr: mem::Address, value: u16) {
-        self.write_partial(addr.into(), |mut word| {
-            word.as_chunks_mut::<2>().0[addr.halfword_idx] = value.to_le_bytes();
-
-            word
-        })
-    }
-
-    /// Writes a partial word to the given address within this cache.
-    fn write_partial(&mut self, addr: Address, map_word: impl FnOnce([u8; 4]) -> [u8; 4]) {
-        let entry = &mut self.entries[addr.entry_idx];
-        if self.is_isolated {
-            tracing::trace!(
-                "Invalidating cache line due to isolated partial write... (addr={})",
-                addr,
-            );
-
-            // The IDT R3000 reference manual states (p. 5-3):
-            //     As a special mechanism, with the D-cache isolated, a partial-word write will
-            //     invalidate the appropriate cache line.
-            //
-            // If we assume the I-cache essentially fulfills the role of the D-cache as well in the
-            // PSX, then an isolated partial-write automatically invalidates this cache entry.
-            entry.invalidate();
-        } else {
-            entry.write_partial(addr, |word| {
-                *word = u32::from_le_bytes(map_word(word.to_le_bytes()));
-            });
-        }
-    }
-
     /// Writes a 32-bit value to the given address within this cache.
-    pub fn write_32(&mut self, addr: mem::Address, value: u32) {
+    pub fn write(&mut self, addr: mem::Address, value: u32) {
         let addr = Address::from(addr);
         let entry = &mut self.entries[addr.entry_idx];
         entry.write(addr, value);
 
         if self.is_isolated {
-            // I don't know why, but apparently this is necessary for cache flushing to work. I
-            // thought only isolated partial writes could invalidate a line (?). But, Sony's
-            // cache-flushing code uses whole-word writes, so I guess this is necessary.
+            // As a special mechanism, isolated writes to the I-cache invalidate the corresponding
+            // entries.
             entry.invalidate();
         }
     }
@@ -284,95 +201,80 @@ mod tests {
             .map(mem::Address::from)
     }
 
-    macro_rules! def_read_cache_far_fn {
-        ($fn_name:ident, $ty:ty, $read_name:ident, $write_name:ident $(,)?) => {
-            #[test]
-            fn $fn_name() {
-                let mut cache = Cache::default();
-                for addr in gen_test_addrs() {
-                    // First, we generate a random byte. This is an attempt to see that, over many
-                    // cache accesses, many different values can be successfully written and read
-                    // back.
-                    let written: u8 = rand::random();
+    #[test]
+    fn read_far() {
+        let mut cache = Cache::default();
+        for addr in gen_test_addrs() {
+            // First, we generate a random byte. This is an attempt to see that, over many
+            // cache accesses, many different values can be successfully written and read
+            // back.
+            let written: u8 = rand::random();
 
-                    // Then, we construct a 32-bit value from mirrors of that random byte. The
-                    // purpose of this is to generate a suitable value for any of the write
-                    // functions that this macro is called with.
-                    let written: u32 = u32::from_be_bytes([written; 4]);
+            // Then, we construct a 32-bit value from mirrors of that random byte. The
+            // purpose of this is to generate a suitable value for any of the write
+            // functions that this macro is called with.
+            let written: u32 = u32::from_be_bytes([written; 4]);
 
-                    // Then, we perform the actual write. We may have to chop off a few bits.
-                    cache.$write_name(addr, written as $ty);
+            // Then, we perform the actual write. We may have to chop off a few bits.
+            cache.write(addr, written);
 
-                    // Because [`Cache`] is, by default, not isolated, the previous write was
-                    // accepted. However, the data within the cache was not actually 'updated';
-                    // rather, as this was the first time writing to that cache address, and only
-                    // one word was written, the cache doesn't yet know what the other words should
-                    // be, so it simply marked the entry as invalid. We should expect that a cache
-                    // read will request to fetch the full line from memory.
-                    let read = cache.$read_name(addr, |_| Ok([written; 4]));
+            // Because [`Cache`] is, by default, not isolated, the previous write was
+            // accepted. However, the data within the cache was not actually 'updated';
+            // rather, as this was the first time writing to that cache address, and only
+            // one word was written, the cache doesn't yet know what the other words should
+            // be, so it simply marked the entry as invalid. We should expect that a cache
+            // read will request to fetch the full line from memory.
+            let read = cache.read(addr, |_| Ok([written; 4]));
 
-                    assert_eq!(
-                        Ok(written as $ty),
-                        read,
-                        "failed to read from {:#010x} ({})",
-                        addr.init,
-                        Address::from(addr),
-                    );
-                }
-            }
-        };
+            assert_eq!(
+                Ok(written),
+                read,
+                "failed to read from {:#010x} ({})",
+                addr.init,
+                Address::from(addr),
+            );
+        }
     }
 
-    macro_rules! def_read_cache_near_fn {
-        ($fn_name:ident, $ty:ty, $read_name:ident, $write_name:ident $(,)?) => {
-            #[test]
-            fn $fn_name() {
-                let mut cache = Cache::default();
-                for addr in gen_test_addrs() {
-                    // We will attempt something very similar to that in [`def_read_cache_far_fn`],
-                    // but instead of such far-spaced addresses, we will use ones closer together---
-                    // within the same cache line, even.
+    #[test]
+    fn read_near() {
+        let mut cache = Cache::default();
+        for addr in gen_test_addrs() {
+            // We will attempt something very similar to that in [`read_far`],
+            // but instead of such far-spaced addresses, we will use ones closer together---
+            // within the same cache line, even.
 
-                    let written: u8 = rand::random();
-                    let written: u32 = u32::from_be_bytes([written; 4]);
+            let written: u8 = rand::random();
+            let written: u32 = u32::from_be_bytes([written; 4]);
 
-                    // First, we perform a normal write. The cache entry is marked as invalid.
-                    cache.$write_name(addr, written as $ty);
-                    // Then, we read. The cache line is fetched from memory, and the cache entry is
-                    // marked as valid.
-                    cache.$read_name(addr, |_| Ok([written; 4])).unwrap();
-                    // Then, we write again, but to the next word in the cache line. We will use a
-                    // different value for `written` so that we don't get a false positive as the
-                    // entire cache line was filled with `written`. In this case, inverting
-                    // `written` works.
-                    let next_addr = mem::Address::from(addr.init.wrapping_add(4));
-                    cache.$write_name(next_addr, !written as $ty);
+            // First, we perform a normal write. The cache entry is marked as invalid.
+            cache.write(addr, written);
+            // Then, we read. The cache line is fetched from memory, and the cache entry is
+            // marked as valid.
+            cache.read(addr, |_| Ok([written; 4])).unwrap();
+            // Then, we write again, but to the next word in the cache line. We will use a
+            // different value for `written` so that we don't get a false positive as the
+            // entire cache line was filled with `written`. In this case, inverting
+            // `written` works.
+            let next_addr = mem::Address::from(addr.init.wrapping_add(4));
+            cache.write(next_addr, !written);
 
-                    // Because the cache entry was marked as valid, the new write should've updated
-                    // its data. Let's see.
-                    let read = cache.$read_name(next_addr, |_| {
-                        // If the read requests to fetch the line again, then something has gone
-                        // wrong.
-                        panic!("fetched cache line twice");
-                    });
+            // Because the cache entry was marked as valid, the new write should've updated
+            // its data. Let's see.
+            let read = cache.read(next_addr, |_| {
+                // If the read requests to fetch the line again, then something has gone
+                // wrong.
+                panic!("fetched cache line twice");
+            });
 
-                    assert_eq!(
-                        // Remember: the second word is an inverted `written`.
-                        Ok(!written as $ty),
-                        read,
-                        "failed to read from {:#010x} ({})",
-                        addr.init,
-                        Address::from(addr),
-                    );
-                }
-            }
-        };
+            assert_eq!(
+                // Remember: the second word is an inverted `written`.
+                Ok(!written),
+                read,
+                "failed to read from {:#010x} ({})",
+                addr.init,
+                Address::from(addr),
+            );
+        }
     }
-
-    def_read_cache_far_fn!(read_cache_8_far, u8, read_8, write_8);
-    def_read_cache_far_fn!(read_cache_16_far, u16, read_16, write_16);
-    def_read_cache_far_fn!(read_cache_32_far, u32, read_32, write_32);
-    def_read_cache_near_fn!(read_cache_8_near, u8, read_8, write_8);
-    def_read_cache_near_fn!(read_cache_16_near, u16, read_16, write_16);
-    def_read_cache_near_fn!(read_cache_32_near, u32, read_32, write_32);
 }

@@ -477,19 +477,19 @@ impl noctane_util::bios::func::CallSource for Debugger {
             let sp = reg.gpr(29);
 
             // TODO: We should probably handle the error somehow.
-            self.core.cpu().mem_mut().read_32(sp + ((index * 4) as u32)).unwrap_or(0)
+            self.core.cpu().mem_mut().read_data_32(sp + ((index * 4) as u32)).unwrap_or(0)
         }
     }
 
     fn read_8(&mut self, addr: u32) -> u8 {
-        self.core.cpu().mem_mut().read_8(addr).unwrap_or(0)
+        self.core.cpu().mem_mut().read_data_8(addr).unwrap_or(0)
     }
 
     fn read_16(&mut self, addr: u32) -> u16 {
-        self.core.cpu().mem_mut().read_16(addr).unwrap_or(0)
+        self.core.cpu().mem_mut().read_data_16(addr).unwrap_or(0)
     }
 
     fn read_32(&mut self, addr: u32) -> u32 {
-        self.core.cpu().mem_mut().read_32(addr).unwrap_or(0)
+        self.core.cpu().mem_mut().read_data_32(addr).unwrap_or(0)
     }
 }
