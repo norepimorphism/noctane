@@ -37,10 +37,6 @@ pub struct Io<'a> {
     pub timers: &'a mut Timers,
 }
 
-pub struct Update {
-    pub dma_txfer_packet: Option<dma::TransferPacket>,
-}
-
 impl Io<'_> {
     /// Selects the appropriate I/O register entry and byte index for a given address and passes it
     /// to a callback.
@@ -316,7 +312,7 @@ gen_cpu_bus_io!(
                 ///
                 /// Sometimes, this field is not respected. This is true in the case of Expansion
                 /// Region 2 when any value other than `0x1f802000` is provided, in which case the
-                /// region is disabled.
+                /// region is entirely disabled.
                 pub base: u32,
             }
 
@@ -335,19 +331,6 @@ gen_cpu_bus_io!(
             }
 
             impl BankConfig {
-                pub fn decode(mut code: u32) -> Self {
-                    Self {
-                        write_delay: code.pop_bits(4).wrapping_add(1),
-                        read_delay: code.pop_bits(4).wrapping_add(1),
-                        periods: PeriodsConfig::decode(code.pop_bits(4)),
-                        bit_width: BitWidth::decode(code.pop_bits(1)),
-                        should_auto_inc: code.pop_bool(),
-                        unk_14: code.pop_bits(2),
-                        size_shift: code.pop_bits(5),
-                        unk_21: code.pop_bits(3),
-                    }
-                }
-
                 pub fn bios() -> Self {
                     Self {
                         // The BIOS size must be large enough on boot to at least accommodate the
@@ -357,13 +340,24 @@ gen_cpu_bus_io!(
                         ..Default::default()
                     }
                 }
+
+                pub fn decode(mut code: u32) -> Self {
+                    Self {
+                        delays: DelaysConfig::decode(code.pop_bits(8)),
+                        periods: PeriodsConfig::decode(code.pop_bits(4)),
+                        bit_width: BitWidth::decode(code.pop_bits(1)),
+                        should_auto_inc: code.pop_bool(),
+                        unk_14: code.pop_bits(2),
+                        size_shift: code.pop_bits(5),
+                        unk_21: code.pop_bits(3),
+                    }
+                }
             }
 
             /// The configuration for a CPU bus bank.
             #[derive(Clone, Debug, Default)]
             pub struct BankConfig {
-                pub write_delay: u32,
-                pub read_delay: u32,
+                pub delays: DelaysConfig,
                 pub periods: PeriodsConfig,
                 pub bit_width: BitWidth,
                 pub should_auto_inc: bool,
@@ -382,8 +376,36 @@ gen_cpu_bus_io!(
                     code.push_bool(self.should_auto_inc);
                     code.push_bits(1, self.bit_width.encode());
                     code.push_bits(4, self.periods.encode());
-                    code.push_bits(4, self.read_delay.wrapping_sub(1));
-                    code.push_bits(4, self.write_delay.wrapping_sub(1));
+                    code.push_bits(8, self.delays.encode());
+
+                    code
+                }
+            }
+
+            impl DelaysConfig {
+                pub fn decode(mut code: u32) -> Self {
+                    Self {
+                        // There must always be at least a one-cycle delay. Therefore, Sony uses 0
+                        // to represent a one-cycle delay. We will increment by one to reach the
+                        // true cycle delay.
+                        write: code.pop_bits(4).wrapping_add(1),
+                        read: code.pop_bits(4).wrapping_add(1),
+                    }
+                }
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct DelaysConfig {
+                pub write: u32,
+                pub read: u32,
+            }
+
+            impl DelaysConfig {
+                pub fn encode(self) -> u32 {
+                    let mut code = 0;
+                    // See the note in [`Self::decode`] for why we subtract here.
+                    code.push_bits(4, self.read.wrapping_sub(1));
+                    code.push_bits(4, self.write.wrapping_sub(1));
 
                     code
                 }
@@ -777,7 +799,7 @@ gen_cpu_bus_io!(
                     ack!(gpu);
                     ack!(cdrom);
                     // Acknowledging a DMA interrupt in this manner only acknowledges the master
-                    // flag and *not* the individual channel IRQ bits; those *must* be acknowledged
+                    // flag and *not* the individual channel IRQ bits; those must be acknowledged
                     // separately.
                     ack!(dma);
                     for timer in self.timers.iter_mut() {
@@ -840,32 +862,54 @@ gen_cpu_bus_io!(
                 }
 
                 pub fn decode_dicr(&mut self, mut code: u32) {
-                    // TODO
+                    // TODO: Unknown (R/W).
                     let _ = code.pop_bits(6);
+                    // Always zero.
                     code.pop_bits(9);
+                    // Force IRQ.
+                    //
+                    // If this bit is set, a DMA interrupt request is unconditionally generated.
                     self.dma.request = code.pop_bool().then_some(Request::default());
+                    // IRQ Enable for DMA0..=DMA6.
                     for chan in self.dma.chan.iter_mut() {
                         chan.is_enabled = code.pop_bool();
                     }
+                    // IRQ Master Enable for DMA0..=DMA6.
                     self.dma.is_enabled = code.pop_bool();
+                    // IRQ Flags for DMA0..=DMA6.
                     for chan in self.dma.chan.iter_mut() {
-                        chan.request = code.pop_bool().then_some(Request::default());
+                        // If this bit is set, the flag is acknowledged.
+                        if code.pop_bool() {
+                            chan.is_requesting = false;
+                        }
                     }
+                    // IRQ Master Flag.
+                    //
+                    // This field is read-only, so we don't need to decode it.
                 }
 
                 pub fn encode_dicr(&self) -> u32 {
                     let mut code = 0;
+                    // IRQ Master Flag.
                     code.push_bool(self.dma.request.is_some());
+                    // IRQ Flags for DMA0..=DMA6.
                     for chan in self.dma.chan.iter().rev() {
-                        code.push_bool(chan.request.is_some());
+                        code.push_bool(chan.is_requesting);
                     }
+                    // IRQ Master Enable for DMA0..=DMA6.
                     code.push_bool(self.dma.is_enabled);
+                    // IRQ Enable for DMA0..=DMA6.
                     for chan in self.dma.chan.iter().rev() {
                         code.push_bool(chan.is_enabled);
                     }
+                    // Force IRQ.
+                    //
+                    // I think this field is write-only as it doesn't really make sense to read it.
+                    // We'll return 0.
                     code.push_bool(false);
+                    // Always zero.
                     code.push_bits(9, 0);
-                    // TODO
+                    // TODO: Unknown (R/W).
                     code.push_bits(6, 0);
 
                     code
@@ -906,7 +950,7 @@ gen_cpu_bus_io!(
                 }
             }
 
-            /// The source of an interrupt,
+            /// The source of an interrupt.
             #[derive(Clone, Debug, Default)]
             pub struct Source {
                 /// Whether or not this interrupt source is enabled.
@@ -966,10 +1010,16 @@ gen_cpu_bus_io!(
             #[derive(Clone, Debug, Default)]
             pub struct DmaSource {
                 inner: Source,
-                pub chan: [Source; 7],
+                pub chan: [DmaChannelSource; 7],
             }
 
             impl_deref_for_src!(DmaSource);
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct DmaChannelSource {
+                pub is_enabled: bool,
+                pub is_requesting: bool,
+            }
         },
     },
     Lut {
@@ -1281,26 +1331,26 @@ gen_cpu_bus_io!(
 
             macro_rules! read_madr {
                 ($io:expr, $chan:ident $(,)?) => {
-                    $io.dma.chan.$chan.cpu_bus_base
+                    $io.dma.chan.$chan.txfer.cpu_bus_base
                 };
             }
 
             macro_rules! write_madr {
                 ($io:expr, $chan:ident, $value:expr $(,)?) => {
                     // The top byte is zeroed. This means that DMAs can only access RAM.
-                    $io.dma.chan.$chan.cpu_bus_base = $value & 0x00ff_ffff;
+                    $io.dma.chan.$chan.txfer.cpu_bus_base = $value & 0x00ff_ffff;
                 };
             }
 
             macro_rules! read_bcr {
                 ($io:expr, $chan:ident $(,)?) => {
-                    $io.dma.chan.$chan.block_cfg
+                    $io.dma.chan.$chan.txfer.sync_cfg
                 };
             }
 
             macro_rules! write_bcr {
                 ($io:expr, $chan:ident, $value:expr $(,)?) => {
-                    $io.dma.chan.$chan.block_cfg = $value;
+                    $io.dma.chan.$chan.txfer.sync_cfg = $value;
                 };
             }
 
@@ -1369,62 +1419,39 @@ gen_cpu_bus_io!(
                     code
                 }
 
-                pub fn update(&mut self, int: &mut super::int::Sources) -> Option<TransferPacket> {
+                pub fn next_transfer_packet(
+                    &mut self,
+                    int: &mut super::int::Sources,
+                ) -> Option<TransferPacket> {
                     let active_chan = Channels::find_highest_prio(self.chan.enabled());
 
                     if let Some(chan) = active_chan {
-                        let txfer = chan.txfer.unwrap_or_else(|| {
-                            // A transfer is not in progress. We will start one now.
-                            let txfer = Transfer {
-                                source: chan.source,
-                                dir: chan.dir,
-                                cpu_bus_base: chan.cpu_bus_base,
-                            };
-                            chan.txfer = Some(txfer);
+                        if let Some(txfer) = chan.txfer.current {
+                            // TODO:
+                            //
+                            // The current approach is simply to complete a transfer in one cycle,
+                            // but that is order of magnitudes faster than the PSX does it. In the
+                            // future, we should strive to split transfers into packets.
 
-                            txfer
-                        });
+                            match txfer.source {
+                                TransferSource::CpuBus => {
+                                    (chan.write)(txfer.strat);
+                                }
+                                TransferSource::External => {
+                                    (chan.read)(txfer.strat);
+                                }
+                            }
 
-                        // TODO
-                        if true {
                             // The transfer is complete.
-                            // TODO
-                            chan.txfer = None;
+                            chan.txfer.current = None;
                             // We must set both of these.
                             int.dma.request = Some(super::int::Request::default());
-                            int.dma.chan[chan.index].request = Some(super::int::Request::default());
+                            int.dma.chan[chan.index].is_requesting = true;
                         }
-
-                        None
-                    } else {
-                        None
                     }
+
+                    None
                 }
-            }
-
-            #[derive(Debug)]
-            pub struct TransferPacket {
-                pub source: TransferSource,
-                /// The direction in which data is moved during the transfer.
-                pub dir: TransferDirection,
-                /// The starting address of the transfer on the CPU bus side.
-                pub cpu_bus_base: u32,
-                /// The starting address of the transfer on the side of the external device.
-                pub extern_base: u32,
-                /// The length, in 32-bit words, of the transfer.
-                pub len: usize,
-            }
-
-            #[derive(Clone, Copy, Debug)]
-            pub enum TransferSource {
-                CpuBus,
-                External,
-            }
-
-            #[derive(Clone, Copy, Debug)]
-            pub enum TransferDirection {
-                Forward,
-                Backward,
             }
 
             impl Default for Channels {
@@ -1486,11 +1513,11 @@ gen_cpu_bus_io!(
                         ),
                         otc: Channel::new(
                             6,
-                            |params| {
-                                todo!()
+                            |_| {
+                                // TODO: I don't know what OTC is.
                             },
-                            |params| {
-                                todo!()
+                            |_| {
+                                // TODO: I don't know what OTC is.
                             },
                         ),
                     }
@@ -1549,16 +1576,16 @@ gen_cpu_bus_io!(
             }
 
             impl Channel {
-                fn new(index: usize, read: fn(ReadParameters), write: fn(WriteParameters)) -> Self {
+                fn new(
+                    index: usize,
+                    read: fn(SyncStrategy),
+                    write: fn(SyncStrategy),
+                ) -> Self {
                     Self {
                         index,
                         is_enabled: false,
                         prio: 0,
-                        source: TransferSource::External,
-                        dir: TransferDirection::Forward,
-                        cpu_bus_base: 0,
-                        block_cfg: 0,
-                        txfer: None,
+                        txfer: TransferState::default(),
                         read,
                         write,
                     }
@@ -1570,30 +1597,66 @@ gen_cpu_bus_io!(
                 pub index: usize,
                 pub is_enabled: bool,
                 pub prio: u32,
-                pub source: TransferSource,
-                pub dir: TransferDirection,
-                pub cpu_bus_base: u32,
-                pub block_cfg: u32,
-                pub txfer: Option<Transfer>,
-                pub read: fn(ReadParameters),
-                pub write: fn(WriteParameters)
+                pub txfer: TransferState,
+                pub read: fn(SyncStrategy),
+                pub write: fn(SyncStrategy),
             }
 
             impl Channel {
                 pub fn decode_chcr(&mut self, mut code: u32) {
-                    self.source = TransferSource::decode(code.pop_bits(1));
-                    self.dir = TransferDirection::decode(code.pop_bits(1));
+                    self.txfer.source = TransferSource::decode(code.pop_bits(1));
+                    self.txfer.dir = TransferDirection::decode(code.pop_bits(1));
+                    code.pop_bits(6);
                     // TODO
+                    let _ = code.pop_bool();
+                    self.txfer.sync_mode = code.pop_bits(2);
+                    code.pop_bits(5);
+                    // TODO
+                    let _ = code.pop_bits(3);
+                    code.pop_bits(1);
+                    // TODO
+                    let _ = code.pop_bits(3);
+                    code.pop_bits(1);
+                    self.txfer.current = if code.pop_bool() {
+                        Some(Transfer {
+                            source: self.txfer.source,
+                            dir: self.txfer.dir,
+                            cpu_bus_base: self.txfer.cpu_bus_base,
+                            strat: SyncStrategy::decode(
+                                self.txfer.sync_mode,
+                                self.txfer.sync_cfg,
+                            ),
+                        })
+                    } else {
+                        None
+                    };
+                    code.pop_bits(3);
+                    // TODO: Start/trigger.
+                    let _ = code.pop_bool();
                 }
 
                 pub fn encode_chcr(&self) -> u32 {
                     let mut code = 0;
-                    code.push_bits(1, self.dir.encode());
-                    code.push_bits(1, self.source.encode());
                     // TODO
+                    code.push_bits(2, self.txfer.sync_mode);
+                    // TODO
+                    code.push_bool(false);
+                    code.push_bits(6, 0);
+                    code.push_bits(1, self.txfer.dir.encode());
+                    code.push_bits(1, self.txfer.source.encode());
 
                     code
                 }
+            }
+
+            #[derive(Clone, Copy, Debug, Default)]
+            pub struct TransferState {
+                pub current: Option<Transfer>,
+                pub source: TransferSource,
+                pub dir: TransferDirection,
+                pub cpu_bus_base: u32,
+                pub sync_mode: u32,
+                pub sync_cfg: u32,
             }
 
             #[derive(Clone, Copy, Debug)]
@@ -1601,6 +1664,17 @@ gen_cpu_bus_io!(
                 pub source: TransferSource,
                 pub dir: TransferDirection,
                 pub cpu_bus_base: u32,
+                pub strat: SyncStrategy,
+            }
+
+            #[derive(Clone, Debug)]
+            pub struct TransferPacket {
+                pub source: TransferSource,
+                /// The direction in which data is moved during the transfer.
+                pub dir: TransferDirection,
+                /// The starting address of the transfer on the CPU bus side.
+                pub cpu_bus_base: u32,
+                pub strat: SyncStrategy,
             }
 
             impl TransferSource {
@@ -1611,7 +1685,16 @@ gen_cpu_bus_io!(
                         _ => unreachable!(),
                     }
                 }
+            }
 
+            #[derive(Clone, Copy, Debug, Default)]
+            pub enum TransferSource {
+                #[default]
+                CpuBus,
+                External,
+            }
+
+            impl TransferSource {
                 fn encode(self) -> u32 {
                     match self {
                         Self::External => 0,
@@ -1628,7 +1711,16 @@ gen_cpu_bus_io!(
                         _ => unreachable!(),
                     }
                 }
+            }
 
+            #[derive(Clone, Copy, Debug, Default)]
+            pub enum TransferDirection {
+                #[default]
+                Forward,
+                Backward,
+            }
+
+            impl TransferDirection {
                 fn encode(self) -> u32 {
                     match self {
                         Self::Forward => 0,
@@ -1637,68 +1729,38 @@ gen_cpu_bus_io!(
                 }
             }
 
-            pub struct ReadParameters {
-
-            }
-
-            pub struct WriteParameters {
-
-            }
-
-            macro_rules! impl_deref_for_chan {
-                ($ty:ty) => {
-                    impl std::ops::Deref for $ty {
-                        type Target = super::Channel;
-
-                        fn deref(&self) -> &Self::Target {
-                            &self.inner
-                        }
+            impl SyncStrategy {
+                pub fn decode(mode: u32, mut code: u32) -> Self {
+                    match mode {
+                        0 => Self::Wordwise {
+                            count: code.pop_bits(16) as u16,
+                        },
+                        1 => Self::Blockwise {
+                            len: code.pop_bits(16) as u16,
+                            count: code.pop_bits(16) as u16,
+                        },
+                        2 => Self::Listwise,
+                        _  => unreachable!(),
                     }
-
-                    impl std::ops::DerefMut for $ty {
-                        fn deref_mut(&mut self) -> &mut Self::Target {
-                            &mut self.inner
-                        }
-                    }
-                };
+                }
             }
 
-            use impl_deref_for_chan;
-
-            pub mod sm0 {
-                //! Sync mode 0.
-
-                #[derive(Debug)]
-                pub struct Channel {
-                    inner: super::Channel,
-                    pub word_count: u16,
-                }
-
-                super::impl_deref_for_chan!(Channel);
-            }
-
-            pub mod sm1 {
-                //! Sync mode 1.
-
-                #[derive(Debug)]
-                pub struct Channel {
-                    inner: super::Channel,
-                    pub block_size: u16,
-                    pub block_count: u16,
-                }
-
-                super::impl_deref_for_chan!(Channel);
-            }
-
-            pub mod sm2 {
-                //! Sync mode 2.
-
-                #[derive(Debug)]
-                pub struct Channel {
-                    inner: super::Channel,
-                }
-
-                super::impl_deref_for_chan!(Channel);
+            #[derive(Clone, Copy, Debug)]
+            pub enum SyncStrategy {
+                /// Sync by copying individual words.
+                Wordwise {
+                    /// The number of words to be copied.
+                    count: u16,
+                },
+                /// Sync by copying blocks of words.
+                Blockwise {
+                    /// The number of words in a block.
+                    len: u16,
+                    /// The number of blocks to be copied.
+                    count: u16,
+                },
+                /// Sync by copying a GPU command list.
+                Listwise,
             }
         },
     },
@@ -1927,10 +1989,10 @@ gen_cpu_bus_io!(
             }
 
             impl Timers {
-                pub fn update(&mut self, int: &mut super::int::Sources) {
-                    self.dotclock.update(int);
-                    self.hblank.update(int);
-                    self.sysclock.update(int);
+                pub fn increment(&mut self, int: &mut super::int::Sources) {
+                    self.dotclock.increment(int);
+                    self.hblank.increment(int);
+                    self.sysclock.increment(int);
                 }
 
                 fn get_sysclock_increment() -> u16 {
@@ -2019,7 +2081,7 @@ gen_cpu_bus_io!(
                     code
                 }
 
-                fn update(&mut self, int: &mut super::int::Sources) {
+                fn increment(&mut self, int: &mut super::int::Sources) {
                     let hit_target = self.uses_target && (self.counter >= self.target);
                     let counter_overflowed = !hit_target && (self.counter == !0);
 
@@ -2033,9 +2095,9 @@ gen_cpu_bus_io!(
 
                     let int_source = &mut int.timers[self.index];
                     // Request an interrupt, if necessary.
-                    if (int_source.is_enabled_on_target_hit && hit_target) ||
-                       (int_source.is_enabled_on_overflow && counter_overflowed)
-                    {
+                    let mut should_request = int_source.is_enabled_on_target_hit && hit_target;
+                    should_request |= int_source.is_enabled_on_overflow && counter_overflowed;
+                    if should_request {
                         int_source.request = Some(super::int::Request::default());
                     }
                 }
@@ -2106,8 +2168,21 @@ gen_cpu_bus_io!(
             Register {
                 name: 1,
                 read_32: |_, _| {
+                    use noctane_util::{BitStack as _, BitStackExt as _};
+
                     let mut code = 0;
+                    // TODO: Draw even/odd lines in interlace mode.
+                    code.push_bits(1, 0);
+                    // TODO: DMA direction.
+                    code.push_bits(2, 0);
+                    // TODO: Ready to receive DMA block.
+                    code.push_bool(true);
+                    // TODO: Ready to send VRAM to CPU.
+                    code.push_bool(true);
+                    // TODO: Ready to receive command.
+                    code.push_bool(true);
                     // TODO
+                    code.push_bits(26, 0);
 
                     code
                 },

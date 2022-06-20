@@ -144,24 +144,6 @@ impl<'b> OpenIsoItem<'b> {
                         tracing::debug!("{}\n  {}", path, file.meta.timestamp);
                     }
                 }
-
-                let mut cpu = noctane.cpu();
-                let reg = cpu.reg_mut();
-                reg.set_gpr(1, 9);
-                reg.set_gpr(2, 10);
-
-                let instr = noctane_cpu::Instr::Add(noctane_cpu::instr::r::Instr {
-                    rs: 1,
-                    rt: 2,
-                    rd: 3,
-                    shamt: 0,
-                    funct: 0,
-                });
-                cpu.execute_instr(instr);
-                for _ in 0..10 {
-                    cpu.execute_next_instr();
-                }
-                tracing::debug!("{}", noctane.cpu().reg());
             }
         });
     }

@@ -71,12 +71,6 @@ impl Core {
         })
     }
 
-    pub fn io_update(&mut self) -> noctane_cpu::bus::io::Update {
-        noctane_cpu::bus::io::Update {
-            dma_txfer_packet: None,
-        }
-    }
-
     pub fn take_vblank(&mut self) -> Option<()> {
         // 60 Hz.
         if self.last_vblank.elapsed().as_nanos() >= 16666667 {
@@ -90,7 +84,20 @@ impl Core {
 
     pub fn issue_vblank(&mut self) {
         // Request a V-blank interrupt.
-        self.int.vblank.request = Some(noctane_cpu::bus::io::int::Request::default());
+        self.int.vblank.request = Some(Default::default());
+        // TODO:
+        //
+        // This is very hacky. For some reason, Sony BIOS version '10j', at `0xbfc37ed4`, reads
+        // `I_STAT` *from a cached region* in a loop, expecting the value to change. Obviously,
+        // either there is another issue preceding this event, or the PSX has some mechanism to
+        // automatically invalidate certain I/O addresses in the I-cache. For now, the best I can do
+        // is the latter, and this is a hacky solution to bypass the one time (that I've observed,
+        // at least) that this occurs.
+        //
+        // Probably what happens is that the copy of `I_STAT` in the I-cache is automatically
+        // invalidated when an interrupt is externally requested.
+        let int_stat_addr = noctane_cpu::mem::Address::from(0x1f80_1070);
+        self.cpu_state.cache.i.entry_mut_for(int_stat_addr).invalidate();
     }
 }
 

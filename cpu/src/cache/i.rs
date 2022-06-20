@@ -107,9 +107,10 @@ impl Default for Cache {
 ///
 /// [Addresses]: mem::Address
 /// [`working`]: mem::Address::working
+#[derive(Clone, Debug)]
 pub struct Cache {
-    entries: [Entry; 256],
     is_isolated: bool,
+    entries: [Entry; 256],
 }
 
 impl fmt::Display for Cache {
@@ -261,6 +262,14 @@ impl Cache {
             // cache-flushing code uses whole-word writes, so I guess this is necessary.
             entry.invalidate();
         }
+    }
+
+    pub fn entry_for(&self, addr: mem::Address) -> &Entry {
+        &self.entries[Address::from(addr).entry_idx]
+    }
+
+    pub fn entry_mut_for(&mut self, addr: mem::Address) -> &mut Entry {
+        &mut self.entries[Address::from(addr).entry_idx]
     }
 }
 

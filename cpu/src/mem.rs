@@ -245,16 +245,24 @@ macro_rules! def_read_fn {
             let value = self.$access_name(
                 addr,
                 |this, addr| {
-                    this.cache
-                        .i
-                        .$fn_name(addr, |addr| this.bus.fetch_cache_line(addr))
+                    if this.cache.i_is_enabled {
+                        this.cache
+                            .i
+                            .$fn_name(addr, |addr| this.bus.fetch_cache_line(addr))
+                    } else {
+                        this.bus.$fn_name(addr)
+                    }
                 },
                 |this, addr| {
                     this.bus.$fn_name(addr)
                 },
-                |_, _| {
-                    // TODO
-                    Ok(0)
+                |this, addr| {
+                    // TODO: This only works for word-aligned accesses.
+                    if addr.init == (crate::cache::CTRL_ADDR as usize) {
+                        Ok(this.cache.encode_ctrl() as $ty)
+                    } else {
+                        Err(())
+                    }
                 },
             );
             if let Ok(value) = value {
@@ -275,9 +283,13 @@ macro_rules! def_write_fn {
             self.$access_name(
                 addr,
                 |this, addr| {
-                    this.cache.i.$fn_name(addr, value);
-                    if !this.cache.i.is_isolated() {
-                        // When not isolated, write-through to the CPU bus.
+                    if this.cache.i_is_enabled {
+                        this.cache.i.$fn_name(addr, value);
+                        if !this.cache.i.is_isolated() {
+                            // When not isolated, write-through to the CPU bus.
+                            this.bus.$fn_name(addr, value)?;
+                        }
+                    } else {
                         this.bus.$fn_name(addr, value)?;
                     }
 
@@ -286,8 +298,12 @@ macro_rules! def_write_fn {
                 |this, addr| {
                     this.bus.$fn_name(addr, value)
                 },
-                |_, _| {
-                    // TODO
+                |this, addr| {
+                    // TODO: This only works for word-aligned accesses.
+                    if addr.init == (crate::cache::CTRL_ADDR as usize) {
+                        this.cache.decode_ctrl(value.into());
+                    }
+
                     Ok(())
                 },
             )

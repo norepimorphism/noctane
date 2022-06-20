@@ -138,24 +138,11 @@ impl Pipeline {
         &mut self,
         mem: &mut Memory,
         reg: &mut reg::File,
-        io_update: crate::bus::io::Update,
         decode_instr: &impl Fn(u32) -> Instr,
     ) -> Executed {
         // As it turns out, we don't actually have to implement a traditional pipeline here. The
         // magic lies in the fact that the only programmer-visible effect of pipelining is the delay
         // slot, which we can handle specially.
-
-        // Before we do anything, we should bring I/O up-to-speed.
-        if mem.bus_mut().io.int.take_request().is_some() {
-            reg.raise_std_interrupt();
-        }
-
-        // Process interrupt requests (if the SR permits us to do so). This may trigger an interrupt
-        // exception; if it does, it will update the PC, which will be used throughout the rest of
-        // this function.
-        if reg.status().ie_c() {
-            self.process_interrupts(reg);
-        }
 
         if let Some(jump) = self.upcoming_jump.take() {
             // The last instruction was a jump instruction. We will proceed by executing the
@@ -178,25 +165,6 @@ impl Pipeline {
                 reg,
                 decode_instr,
             )
-        }
-    }
-
-    /// Processes through all interrupts, generating exceptions as necessary.
-    fn process_interrupts(&mut self, reg: &mut reg::File) {
-        for idx in 0..8 {
-            self.process_interrupt(reg, idx);
-        }
-    }
-
-    /// Processes the interrupt at the given index, generating an exception if necessary.
-    fn process_interrupt(&mut self, reg: &mut reg::File, index: usize) {
-        let mut cause = reg.cause();
-        if cause.is_interrupt_set(index) {
-            // Raise an interrupt exception.
-            reg.raise_exception(exc::code::INTERRUPT);
-            // Indicate that this interrupt has been processed.
-            cause.clear_interrupt(index);
-            reg.set_cause(cause);
         }
     }
 

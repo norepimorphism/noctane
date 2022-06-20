@@ -20,7 +20,7 @@ impl Default for Entry {
 }
 
 /// An I-cache entry.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Entry {
     /// Whether or not the line contained within this entry is a valid copy of the data pointed to
     /// by the tag and this entry's location in cache.

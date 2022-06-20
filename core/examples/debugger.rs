@@ -120,6 +120,7 @@ impl Debugger {
             "s"     => self.do_step(),
             "sl"    => self.do_step_lightly(),
             "ss"    => self.do_step_silently(),
+            "v"     => self.do_issue_vblank(),
             _ => Err("invalid command"),
         };
 
@@ -274,6 +275,12 @@ impl Debugger {
 
         Ok(())
     }
+
+    fn do_issue_vblank(&mut self) -> Result<(), &'static str> {
+        self.core.issue_vblank();
+
+        Ok(())
+    }
 }
 
 struct Step {
@@ -291,13 +298,12 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
-        let io_update = self.core.io_update();
         if self.core.take_vblank().is_some() {
             self.game_window.gfx_mut().render();
             self.game_window.update();
             self.core.issue_vblank();
         }
-        let execed = self.core.cpu().execute_next_instr(io_update);
+        let execed = self.core.cpu().execute_next_instr();
 
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
