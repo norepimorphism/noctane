@@ -1430,7 +1430,7 @@ gen_cpu_bus_io!(
                             // TODO:
                             //
                             // The current approach is simply to complete a transfer in one cycle,
-                            // but that is order of magnitudes faster than the PSX does it. In the
+                            // but that is orders of magnitudes faster than the PSX does it. In the
                             // future, we should strive to split transfers into packets.
 
                             match txfer.source {
@@ -2161,8 +2161,8 @@ gen_cpu_bus_io!(
                 read_32: |_, io| {
                     *io.last_gpu_result
                 },
-                write_32: |_, io, mach| {
-                    io.gpu.queue_gp0_machine_command(mach);
+                write_32: |_, io, word| {
+                    io.gpu.queue_gp0_word(word);
                 },
             },
             Register {
@@ -2187,7 +2187,7 @@ gen_cpu_bus_io!(
                     code
                 },
                 write_32: |_, io, mach| {
-                    io.gpu.queue_gp1_machine_command(mach);
+                    io.gpu.execute_gp1_machine_command(mach);
                 },
             },
         ],

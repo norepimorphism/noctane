@@ -298,13 +298,13 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
+        self.core.gpu.execute_next_gp0_command();
         if self.core.take_vblank().is_some() {
             self.game_window.gfx_mut().render();
             self.game_window.update();
             self.core.issue_vblank();
         }
         let execed = self.core.cpu().execute_next_instr();
-
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
             kind,
@@ -440,7 +440,7 @@ impl Debugger {
             }
             noctane_cpu::exc::code::BREAKPOINT => {
                 // See RM[A-21].
-                let code = (execed.fetched.op >> 6) & ((1 << 21) - 1);
+                let code = (execed.fetched.op >> 6) & ((1 << 20) - 1);
                 if let Some(call) = noctane_util::bios::func::Call::try_from_break(
                     self,
                     code,
