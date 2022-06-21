@@ -10,9 +10,11 @@ pub enum Command {
     SetDisplayEnabled(bool),
     SetDmaSource,
     SetDisplayAreaStart,
+    SetDisplayRangeX,
+    SetDisplayRangeY,
+    SetDisplayMode,
     DisableTex,
     GetGpuInfo,
-    X27,
 }
 
 impl Command {
@@ -25,25 +27,22 @@ impl Command {
             0x03 => Self::SetDisplayEnabled(mach.param != 0),
             0x04 => Self::SetDmaSource,
             0x05 => Self::SetDisplayAreaStart,
+            0x06 => Self::SetDisplayRangeX,
+            0x07 => Self::SetDisplayRangeY,
+            0x08 => Self::SetDisplayMode,
             0x09 => Self::DisableTex,
             0x0a..=0x0f => {
                 // TODO: Undocumented.
-                todo!()
+                todo!("{:#04x}", mach.opcode)
             }
             0x10..=0x1f => Self::GetGpuInfo,
             0x20 => Self::DisableTex,
-            0x21..=0x26 => {
+            0x21..=0x3f => {
                 // TODO: Undocumented.
-                todo!()
-            }
-            0x27 => Self::X27,
-            0x28..=0x3f => {
-                // TODO: Undocumented.
-                todo!()
+                todo!("{:#04x}", mach.opcode)
             }
             // SAFETY: TODO
             0x40.. => unsafe { std::hint::unreachable_unchecked() },
-            _ => todo!("Unknown opcode: {:#04x}", mach.opcode),
         }
     }
 }

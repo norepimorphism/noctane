@@ -166,10 +166,9 @@ impl Debugger {
         mut do_sym: impl FnMut(&mut Self, &'a str) -> Result<(), &'static str>,
     ) -> Result<(), &'static str> {
         let arg = args.next().ok_or("expected breakpoint")?;
-        let c = arg.chars().nth(0).expect("argument is empty");
 
-        if c.is_ascii_hexdigit() {
-            do_addr(self, arg)
+        if let Some((_, addr)) = arg.split_once("0x") {
+            do_addr(self, addr)
         } else {
             do_sym(self, arg)
         }

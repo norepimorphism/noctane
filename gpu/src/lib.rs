@@ -48,14 +48,14 @@ impl Gpu {
     pub fn execute_next_gp0_command(&mut self) {
         use cmd::gp0::Command;
 
-        if let Some(mach) = self.gp0_queue.dequeue() {
-            if let Some(ref state) = self.gp0_state {
-                if self.gp0_queue.len() >= state.arg_count {
-                    tracing::info!("GP0");
-                    self.gp0_state = None;
-                }
+        if let Some(ref state) = self.gp0_state {
+            if self.gp0_queue.len() >= state.arg_count {
+                self.gp0_state = None;
             }
+            return;
+        }
 
+        if let Some(mach) = self.gp0_queue.dequeue() {
             let mach = MachineCommand::decode(mach);
             let cmd = Command::decode(mach);
 
@@ -64,7 +64,7 @@ impl Gpu {
                     $(
                         {
                             pat: $pat:pat,
-                            arg_count: $arg_count:expr,
+                            arg_count: $arg_count:tt,
                             fn: $fn:expr $(,)?
                         }
                     ),* $(,)?
@@ -74,11 +74,9 @@ impl Gpu {
                             $pat => {
                                 macro_rules! process_arg_count {
                                     (0) => {
-                                        tracing::info!("GP0: {:?}", cmd);
-
                                         $fn()
                                     };
-                                    ($_:expr) => {
+                                    ($_:tt) => {
                                         self.gp0_state = Some(cmd::gp0::State {
                                             arg_count: $arg_count,
                                         })
@@ -88,9 +86,6 @@ impl Gpu {
                                 process_arg_count!($arg_count)
                             }
                         )*
-                        _ => {
-                            todo!()
-                        }
                     }
                 };
             }
@@ -104,10 +99,122 @@ impl Gpu {
                     },
                 },
                 {
-                    pat: Command::RenderPoly { .. },
-                    arg_count: 1,
+                    pat: Command::ClearTexCache,
+                    arg_count: 0,
                     fn: || {
-
+                        tracing::info!("Clear texture cache");
+                    },
+                },
+                {
+                    pat: Command::QuickfillRect,
+                    arg_count: 2,
+                    fn: || {
+                        tracing::info!("Quick-fill rectangle");
+                    },
+                },
+                {
+                    pat: Command::X03,
+                    arg_count: 0,
+                    fn: || {
+                        // TODO: Who knows what this does?
+                    },
+                },
+                {
+                    pat: Command::RequestInt,
+                    arg_count: 0,
+                    fn: || {
+                        tracing::info!("Request IRQ1");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedUntexturedPoly { .. },
+                    arg_count: 3,
+                    fn: || {
+                        tracing::info!("Render unshaded untextured polygon");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedTexturedPoly { .. },
+                    arg_count: 6,
+                    fn: || {
+                        tracing::info!("Render unshaded textured polygon");
+                    },
+                },
+                {
+                    pat: Command::RenderShadedUntexturedPoly { .. },
+                    arg_count: 5,
+                    fn: || {
+                        tracing::info!("Render shaded untextured polygon");
+                    },
+                },
+                {
+                    pat: Command::RenderShadedTexturedPoly { .. },
+                    arg_count: 8,
+                    fn: || {
+                        tracing::info!("Render shaded textured polygon");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedUntexturedLine { .. },
+                    arg_count: 2,
+                    fn: || {
+                        tracing::info!("Render unshaded untextured line");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedTexturedLine { .. },
+                    arg_count: 0,
+                    fn: || {
+                        tracing::info!("Render unshaded textured line");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedUntexturedPolyline { .. },
+                    arg_count: 2,
+                    fn: || {
+                        tracing::info!("Render unshaded untextured polyline");
+                    },
+                },
+                {
+                    pat: Command::RenderUnshadedTexturedPolyline { .. },
+                    arg_count: 0,
+                    fn: || {
+                        tracing::info!("Render unshaded textured polyline");
+                    },
+                },
+                {
+                    pat: Command::CopyRect,
+                    arg_count: 3,
+                    fn: || {
+                        tracing::info!("Copy rectangle");
+                    },
+                },
+                {
+                    pat: Command::MoveRectToVram,
+                    arg_count: 3,
+                    fn: || {
+                        tracing::info!("Copy rectangle to VRAM");
+                    },
+                },
+                {
+                    pat: Command::MoveRectToCpuBus,
+                    arg_count: 3,
+                    fn: || {
+                        tracing::info!("Move rectangle to CPU");
+                    },
+                },
+                {
+                    pat: Command::SetTexpage,
+                    arg_count: 0,
+                    fn: || {
+                        tracing::info!("Set texture page");
+                    },
+                },
+                {
+                    pat: Command::SetTexWindow,
+                    arg_count: 0,
+                    fn: || {
+                        tracing::info!("Set texture window");
                     },
                 },
             );
@@ -121,6 +228,6 @@ impl Gpu {
 
     pub fn execute_gp1_command(&mut self, cmd: cmd::gp1::Command) {
         // TODO
-        tracing::info!("GP1: {:?}", cmd);
+        // tracing::info!("GP1: {:?}", cmd);
     }
 }

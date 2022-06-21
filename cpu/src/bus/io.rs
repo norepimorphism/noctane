@@ -1459,55 +1459,55 @@ gen_cpu_bus_io!(
                     Self {
                         mdec_in: Channel::new(
                             0,
-                            |params| {
+                            |_| {
                                 todo!()
                             },
-                            |params| {
+                            |_| {
                                 todo!()
                             },
                         ),
                         mdec_out: Channel::new(
                             1,
-                            |params| {
+                            |_| {
                                 todo!()
                             },
-                            |params| {
+                            |_| {
                                 todo!()
                             },
                         ),
                         gpu: Channel::new(
                             2,
-                            |params| {
-                                todo!()
+                            |_| {
+                                // TODO
                             },
-                            |params| {
-                                todo!()
+                            |_| {
+                                // TODO
                             },
                         ),
                         cdrom: Channel::new(
                             3,
-                            |params| {
+                            |_| {
                                 todo!()
                             },
-                            |params| {
+                            |_| {
                                 todo!()
                             },
                         ),
                         spu: Channel::new(
                             4,
-                            |params| {
+                            |_| {
                                 todo!()
                             },
-                            |params| {
+                            |_| {
                                 todo!()
                             },
                         ),
                         pio: Channel::new(
                             5,
-                            |params| {
+                            |_| {
                                 todo!()
                             },
-                            |params| {
+                            |_| {
                                 todo!()
                             },
                         ),
@@ -2181,8 +2181,18 @@ gen_cpu_bus_io!(
                     code.push_bool(true);
                     // TODO: Ready to receive command.
                     code.push_bool(true);
+                    // TODO: DMA.
+                    code.push_bits(1, 0);
+                    // TODO: IRQ.
+                    code.push_bool(true);
+                    // TODO: Display enable.
+                    code.push_bool(false);
                     // TODO
-                    code.push_bits(26, 0);
+                    code.push_bits(12, 0);
+                    // TODO: Can draw.
+                    code.push_bool(true);
+                    // TODO
+                    code.push_bits(10, 0);
 
                     code
                 },
