@@ -1387,6 +1387,7 @@ dependencies = [
 name = "noctane-cpu"
 version = "0.1.0"
 dependencies = [
+ "bitfield",
  "const_queue",
  "indoc",
  "noctane-gpu",
