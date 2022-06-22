@@ -919,6 +919,7 @@ gen_cpu_bus_io!(
                     macro_rules! take_request {
                         ($field:ident) => {
                             if self.$field.take_request().is_some() {
+                                tracing::info!("IRQ: {}", stringify!($field));
                                 return Some(());
                             }
                         };
@@ -1423,34 +1424,14 @@ gen_cpu_bus_io!(
                     &mut self,
                     int: &mut super::int::Sources,
                 ) -> Option<TransferPacket> {
-                    let active_chan = Channels::find_highest_prio(self.chan.enabled());
+                    Channels::find_highest_prio(self.chan.enabled()).and_then(|chan| {
+                        // TODO
+                        // We must set both of these.
+                        int.dma.request = Some(super::int::Request::default());
+                        int.dma.chan[chan.index].is_requesting = true;
 
-                    if let Some(chan) = active_chan {
-                        if let Some(txfer) = chan.txfer.current {
-                            // TODO:
-                            //
-                            // The current approach is simply to complete a transfer in one cycle,
-                            // but that is orders of magnitudes faster than the PSX does it. In the
-                            // future, we should strive to split transfers into packets.
-
-                            match txfer.source {
-                                TransferSource::CpuBus => {
-                                    (chan.write)(txfer.strat);
-                                }
-                                TransferSource::External => {
-                                    (chan.read)(txfer.strat);
-                                }
-                            }
-
-                            // The transfer is complete.
-                            chan.txfer.current = None;
-                            // We must set both of these.
-                            int.dma.request = Some(super::int::Request::default());
-                            int.dma.chan[chan.index].is_requesting = true;
-                        }
-                    }
-
-                    None
+                        chan.next_transfer_packet()
+                    })
                 }
             }
 
@@ -1478,10 +1459,10 @@ gen_cpu_bus_io!(
                         gpu: Channel::new(
                             2,
                             |_| {
-                                // TODO
+                                todo!()
                             },
                             |_| {
-                                // TODO
+                                todo!()
                             },
                         ),
                         cdrom: Channel::new(
@@ -1514,10 +1495,10 @@ gen_cpu_bus_io!(
                         otc: Channel::new(
                             6,
                             |_| {
-                                // TODO: I don't know what OTC is.
+                                todo!()
                             },
                             |_| {
-                                // TODO: I don't know what OTC is.
+                                todo!()
                             },
                         ),
                     }
@@ -1603,19 +1584,47 @@ gen_cpu_bus_io!(
             }
 
             impl Channel {
+                pub fn next_transfer_packet(&mut self) -> Option<TransferPacket> {
+                    if let Some(txfer) = self.txfer.current {
+                        // TODO:
+                        //
+                        // The current approach is simply to complete a transfer in one cycle,
+                        // but that is orders of magnitudes faster than the PSX does it. In the
+                        // future, we should strive to split transfers into packets.
+
+                        match txfer.source {
+                            TransferSource::CpuBus => {
+                                (self.write)(txfer.strat);
+                            }
+                            TransferSource::External => {
+                                (self.read)(txfer.strat);
+                            }
+                        }
+
+                        // The transfer is complete.
+                        self.txfer.current = None;
+                    }
+
+                    None
+                }
+
                 pub fn decode_chcr(&mut self, mut code: u32) {
                     self.txfer.source = TransferSource::decode(code.pop_bits(1));
                     self.txfer.dir = TransferDirection::decode(code.pop_bits(1));
+                    // Always zero.
                     code.pop_bits(6);
-                    // TODO
+                    // TODO: Chopping Enable.
                     let _ = code.pop_bool();
                     self.txfer.sync_mode = code.pop_bits(2);
+                    // Always zero.
                     code.pop_bits(5);
-                    // TODO
+                    // TODO: Chopping DMA Window Size.
                     let _ = code.pop_bits(3);
+                    // Always zero.
                     code.pop_bits(1);
-                    // TODO
+                    // TODO: Chopping CPU Window Size.
                     let _ = code.pop_bits(3);
+                    // Always zero.
                     code.pop_bits(1);
                     self.txfer.current = if code.pop_bool() {
                         Some(Transfer {
@@ -1638,9 +1647,26 @@ gen_cpu_bus_io!(
                 pub fn encode_chcr(&self) -> u32 {
                     let mut code = 0;
                     // TODO
-                    code.push_bits(2, self.txfer.sync_mode);
-                    // TODO
+                    // TODO: Start/Trigger.
                     code.push_bool(false);
+                    // Always zero.
+                    code.push_bits(3, 0);
+                    // TODO: Start/Busy.
+                    code.push_bool(false);
+                    // Always zero.
+                    code.push_bits(1, 0);
+                    // TODO: Chopping CPU Window Size.
+                    code.push_bits(3, 0);
+                    // Always zero.
+                    code.push_bits(1, 0);
+                    // TODO: Chopping DMA Window Size.
+                    code.push_bits(3, 0);
+                    // Always zero.
+                    code.push_bits(5, 0);
+                    code.push_bits(2, self.txfer.sync_mode);
+                    // TODO: Chopping Enable.
+                    code.push_bool(false);
+                    // Always zero.
                     code.push_bits(6, 0);
                     code.push_bits(1, self.txfer.dir.encode());
                     code.push_bits(1, self.txfer.source.encode());

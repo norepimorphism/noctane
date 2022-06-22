@@ -10,7 +10,6 @@ impl MachineCommand {
         Self {
             param: code.pop_bits(24),
             opcode: code as u8,
-
         }
     }
 }

@@ -204,14 +204,9 @@ impl File {
     pub fn prid(&self) -> Prid {
         // Unlike the other control registers, the PRId is read-only (RM[3-4]). As such, its
         // value is hardcoded here, and there is no setter method.
-
         let mut this = Prid(0);
-
-        // R3000As supposedly have the 'Imp' value set to 3 (RM[3-4]).
-        this.set_imp(3);
-        // I have no idea what Sony set this to. If you know, please file an issue to the
-        // Noctane GitHub!
-        this.set_rev(0xaa);
+        this.set_imp(0);
+        this.set_rev(0x02);
 
         this
     }

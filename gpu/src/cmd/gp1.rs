@@ -2,6 +2,18 @@
 
 use super::MachineCommand;
 
+impl crate::Gpu {
+    pub fn execute_gp1_machine_command(&mut self, mach: u32) {
+        let mach = MachineCommand::decode(mach);
+        self.execute_gp1_command(Command::decode(mach));
+    }
+
+    pub fn execute_gp1_command(&mut self, cmd: Command) {
+        // TODO
+        // tracing::info!("GP1: {:?}", cmd);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Command {
     ResetGpu,
