@@ -1328,6 +1328,8 @@ gen_cpu_bus_io!(
         module: {
             //! DMA configuration.
 
+            use std::fmt;
+
             use noctane_util::{BitStack as _, BitStackExt as _};
 
             macro_rules! read_madr {
@@ -1424,13 +1426,8 @@ gen_cpu_bus_io!(
                     &mut self,
                     int: &mut super::int::Sources,
                 ) -> Option<TransferPacket> {
-                    Channels::find_highest_prio(self.chan.enabled()).and_then(|chan| {
-                        // TODO
-                        // We must set both of these.
-                        int.dma.request = Some(super::int::Request::default());
-                        int.dma.chan[chan.index].is_requesting = true;
-
-                        chan.next_transfer_packet()
+                    Channels::find_highest_prio(self.chan.in_transfer()).and_then(|chan| {
+                        chan.next_transfer_packet(int)
                     })
                 }
             }
@@ -1440,7 +1437,19 @@ gen_cpu_bus_io!(
                     Self {
                         mdec_in: Channel::new(
                             0,
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1449,7 +1458,19 @@ gen_cpu_bus_io!(
                         ),
                         mdec_out: Channel::new(
                             1,
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1458,16 +1479,40 @@ gen_cpu_bus_io!(
                         ),
                         gpu: Channel::new(
                             2,
-                            |_| {
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
+                            |txfer| {
+                                tracing::info!("Sending GPU command list...");
                             },
                         ),
                         cdrom: Channel::new(
                             3,
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1476,7 +1521,19 @@ gen_cpu_bus_io!(
                         ),
                         spu: Channel::new(
                             4,
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1485,7 +1542,19 @@ gen_cpu_bus_io!(
                         ),
                         pio: Channel::new(
                             5,
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1494,7 +1563,22 @@ gen_cpu_bus_io!(
                         ),
                         otc: Channel::new(
                             6,
+                            |txfer, count| {
+                                tracing::info!("Init. OT of length {}...", count);
+                                for _ in 0..count {
+                                    // TODO: Setup OT.
+                                }
+                            },
+                            |_, _, _| {
+                                todo!()
+                            },
                             |_| {
+                                todo!()
+                            },
+                            |_, _| {
+                                todo!()
+                            },
+                            |_, _, _| {
                                 todo!()
                             },
                             |_| {
@@ -1517,7 +1601,7 @@ gen_cpu_bus_io!(
             }
 
             impl Channels {
-                fn enabled<'a>(
+                fn in_transfer<'a>(
                     &'a mut self,
                 ) -> impl 'a + Iterator<Item = &'a mut Channel> {
                     [
@@ -1530,23 +1614,23 @@ gen_cpu_bus_io!(
                         &mut self.otc,
                     ]
                     .into_iter()
-                    .filter(|chan| chan.is_enabled)
+                    .filter(|chan| chan.is_enabled && chan.txfer.current.is_some())
                 }
             }
 
             impl Channels {
                 fn find_highest_prio<'a>(
-                    mut enabled: impl 'a + Iterator<Item = &'a mut Channel>,
+                    mut in_transfer: impl 'a + Iterator<Item = &'a mut Channel>,
                 ) -> Option<&'a mut Channel> {
-                    let Some(mut best_chan) = enabled.next() else {
+                    let Some(mut best_chan) = in_transfer.next() else {
                         return None;
                     };
 
-                    while let Some(chan) = enabled.next() {
+                    while let Some(chan) = in_transfer.next() {
                         // We use `<=` because, if two channels are of equal priority, then the
                         // channel with the higher number (i.e. OTC is highest) is selected. Because
-                        // of [`Self::enabled`], we are guaranteed to be iterating from the least to
-                        // highest numbered channels.
+                        // of [`Self::in_transfer`], we are guaranteed to be iterating from the
+                        // least to highest numbered channels.
                         if chan.prio <= best_chan.prio {
                             best_chan = chan;
                         }
@@ -1559,32 +1643,58 @@ gen_cpu_bus_io!(
             impl Channel {
                 fn new(
                     index: usize,
-                    read: fn(SyncStrategy),
-                    write: fn(SyncStrategy),
+                    read_words: fn(&TransferState, u16),
+                    read_blocks: fn(&TransferState, u16, u16),
+                    read_list: fn(&TransferState),
+                    write_words: fn(&TransferState, u16),
+                    write_blocks: fn(&TransferState, u16, u16),
+                    write_list: fn(&TransferState),
                 ) -> Self {
                     Self {
                         index,
                         is_enabled: false,
                         prio: 0,
                         txfer: TransferState::default(),
-                        read,
-                        write,
+                        read_words,
+                        read_blocks,
+                        read_list,
+                        write_words,
+                        write_blocks,
+                        write_list,
                     }
                 }
             }
 
-            #[derive(Debug)]
+            impl fmt::Debug for Channel {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f
+                        .debug_struct("Channel")
+                        .field("index", &self.index)
+                        .field("is_enabled", &self.is_enabled)
+                        .field("prio", &self.prio)
+                        .field("txfer", &self.txfer)
+                        .finish()
+                }
+            }
+
             pub struct Channel {
                 pub index: usize,
                 pub is_enabled: bool,
                 pub prio: u32,
                 pub txfer: TransferState,
-                pub read: fn(SyncStrategy),
-                pub write: fn(SyncStrategy),
+                pub read_words: fn(&TransferState, u16),
+                pub read_blocks: fn(&TransferState, u16, u16),
+                pub read_list: fn(&TransferState),
+                pub write_words: fn(&TransferState, u16),
+                pub write_blocks: fn(&TransferState, u16, u16),
+                pub write_list: fn(&TransferState),
             }
 
             impl Channel {
-                pub fn next_transfer_packet(&mut self) -> Option<TransferPacket> {
+                pub fn next_transfer_packet(
+                    &mut self,
+                    int: &mut super::int::Sources,
+                ) -> Option<TransferPacket> {
                     if let Some(txfer) = self.txfer.current {
                         // TODO:
                         //
@@ -1593,16 +1703,42 @@ gen_cpu_bus_io!(
                         // future, we should strive to split transfers into packets.
 
                         match txfer.source {
-                            TransferSource::CpuBus => {
-                                (self.write)(txfer.strat);
-                            }
                             TransferSource::External => {
-                                (self.read)(txfer.strat);
+                                match txfer.strat {
+                                    SyncStrategy::Wordwise { count } => {
+                                        (self.read_words)(&self.txfer, count);
+                                    }
+                                    SyncStrategy::Blockwise { len, count } => {
+                                        (self.read_blocks)(&self.txfer, len, count);
+                                    }
+                                    SyncStrategy::Listwise => {
+                                        (self.read_list)(&self.txfer);
+                                    }
+                                }
+                            }
+                            TransferSource::CpuBus => {
+                                match txfer.strat {
+                                    SyncStrategy::Wordwise { count } => {
+                                        (self.write_words)(&self.txfer, count);
+                                    }
+                                    SyncStrategy::Blockwise { len, count } => {
+                                        (self.write_blocks)(&self.txfer, len, count);
+                                    }
+                                    SyncStrategy::Listwise => {
+                                        (self.write_list)(&self.txfer);
+                                    }
+                                }
                             }
                         }
 
                         // The transfer is complete.
                         self.txfer.current = None;
+
+                        if int.dma.chan[self.index].is_enabled {
+                            // We must set both of these.
+                            int.dma.request = Some(super::int::Request::default());
+                            int.dma.chan[self.index].is_requesting = true;
+                        }
                     }
 
                     None
@@ -1626,28 +1762,33 @@ gen_cpu_bus_io!(
                     let _ = code.pop_bits(3);
                     // Always zero.
                     code.pop_bits(1);
-                    self.txfer.current = if code.pop_bool() {
-                        Some(Transfer {
-                            source: self.txfer.source,
-                            dir: self.txfer.dir,
-                            cpu_bus_base: self.txfer.cpu_bus_base,
-                            strat: SyncStrategy::decode(
-                                self.txfer.sync_mode,
-                                self.txfer.sync_cfg,
-                            ),
-                        })
+                    // Start/Busy.
+                    if code.pop_bool() {
+                        if self.txfer.current.is_none() {
+                            self.txfer.current = Some(self.txfer.generate());
+                        }
                     } else {
-                        None
+                        self.txfer.current = None;
                     };
+                    // Always zero.
                     code.pop_bits(3);
-                    // TODO: Start/trigger.
-                    let _ = code.pop_bool();
+                    // Start/trigger.
+                    if code.pop_bool() {
+                        self.is_enabled = true;
+                    }
+                    // TODO
+                    let _ = code.pop_bits(2);
+                    // Always zero.
+                    code.pop_bits(1);
                 }
 
                 pub fn encode_chcr(&self) -> u32 {
                     let mut code = 0;
                     // TODO
-                    // TODO: Start/Trigger.
+                    // Start/Trigger.
+                    //
+                    // This is cleared when a transfer starts, but setting it starts a transfer, so
+                    // it is effectively always 0.
                     code.push_bool(false);
                     // Always zero.
                     code.push_bits(3, 0);
@@ -1683,6 +1824,25 @@ gen_cpu_bus_io!(
                 pub cpu_bus_base: u32,
                 pub sync_mode: u32,
                 pub sync_cfg: u32,
+            }
+
+            impl TransferState {
+                pub fn start(&mut self) {
+                    let current = self.generate();
+                    self.current = Some(current);
+                }
+
+                pub fn generate(&self) -> Transfer {
+                    Transfer {
+                        source: self.source,
+                        dir: self.dir,
+                        cpu_bus_base: self.cpu_bus_base,
+                        strat: SyncStrategy::decode(
+                            self.sync_mode,
+                            self.sync_cfg,
+                        ),
+                    }
+                }
             }
 
             #[derive(Clone, Copy, Debug)]
@@ -2193,14 +2353,14 @@ gen_cpu_bus_io!(
             },
             Register {
                 name: 1,
-                read_32: |_, _| {
+                read_32: |_, io| {
                     use noctane_util::{BitStack as _, BitStackExt as _};
 
                     let mut code = 0;
                     // TODO: Draw even/odd lines in interlace mode.
                     code.push_bits(1, 0);
                     // TODO: DMA direction.
-                    code.push_bits(2, 0);
+                    code.push_bits(2, 2);
                     // TODO: Ready to receive DMA block.
                     code.push_bool(true);
                     // TODO: Ready to send VRAM to CPU.
@@ -2208,14 +2368,34 @@ gen_cpu_bus_io!(
                     // TODO: Ready to receive command.
                     code.push_bool(true);
                     // TODO: DMA.
-                    code.push_bits(1, 0);
+                    code.push_bits(1, 1);
                     // TODO: IRQ.
                     code.push_bool(true);
-                    // TODO: Display enable.
+                    // Display Enable.
+                    code.push_bool(!io.gpu.display.is_enabled);
+                    // TODO: Vertical Interlace.
                     code.push_bool(false);
-                    // TODO
-                    code.push_bits(12, 0);
-                    // TODO: Can draw.
+                    // TODO: Display Area Color Depth.
+                    code.push_bits(1, 0);
+                    // TODO: Video Mode.
+                    code.push_bits(1, 0);
+                    // TODO: Vertical Resolution.
+                    code.push_bits(1, 0);
+                    // TODO: Horizontal Resolution 1.
+                    code.push_bits(2, 0);
+                    // TODO: Horizontal Resolution 2.
+                    code.push_bits(1, 0);
+                    // TODO: Texture Disable.
+                    code.push_bool(false);
+                    // TODO: Reverseflag.
+                    code.push_bool(false);
+                    // TODO: Interlace Field.
+                    code.push_bits(1, 0);
+                    // TODO: Draw Pixels.
+                    code.push_bits(1, 0);
+                    // TODO: Set Mask-bit when drawing pixels.
+                    code.push_bool(false);
+                    // TODO: Drawing to display area.
                     code.push_bool(true);
                     // TODO
                     code.push_bits(10, 0);

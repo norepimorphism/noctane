@@ -5,7 +5,6 @@ use std::fmt;
 use noctane_util::BitStack as _;
 use ringbuffer::{
     RingBuffer as _,
-    RingBufferExt as _,
     RingBufferRead as _,
     RingBufferWrite as _,
 };
@@ -38,7 +37,6 @@ impl Gpu {
         if let Some(state) = self.gp0_state.as_mut() {
             if self.gp0_queue.len() >= state.min_arg_count {
                 let color = state.color;
-                tracing::info!("Color: {:?}", color);
                 let execute = state.execute;
                 self.gp0_state = None;
 
@@ -105,14 +103,33 @@ impl Gpu {
                 },
                 {
                     name: QuickfillRect,
-                    fn: |_: &mut Gpu, _: Color| {
+                    fn: |_: &mut Gpu, color: Color| {
                         // TODO
+                        tracing::info!("Color: {:?}", color);
                     },
                 },
                 {
                     name: X03,
                     fn: |_: &mut Gpu, _: Color| {
                         todo!()
+                    },
+                },
+                {
+                    name: MoveRectToVram,
+                    min_arg_count: 2,
+                    fn: |this: &mut Gpu, _: Color| {
+                        // TODO
+                        this.gp0_queue.dequeue().unwrap();
+                        this.gp0_queue.dequeue().unwrap();
+                    },
+                },
+                {
+                    name: MoveRectToCpuBus,
+                    min_arg_count: 2,
+                    fn: |this: &mut Gpu, _: Color| {
+                        // TODO
+                        this.gp0_queue.dequeue().unwrap();
+                        this.gp0_queue.dequeue().unwrap();
                     },
                 },
                 {
