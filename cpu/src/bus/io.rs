@@ -21,7 +21,7 @@ pub struct Io<'a> {
     pub dma: &'a mut dma::Config,
     /// The Graphics Processing Unit (GPU).
     pub gpu: &'a mut Gpu,
-    /// The state of interrupt sources.
+    /// Interrupt sources.
     pub int: &'a mut int::Sources,
     /// The last result of a GPU command (GP0 or GP1).
     pub last_gpu_result: &'a mut u32,
@@ -157,12 +157,22 @@ impl Io<'_> {
 /// explicitly defined for a register, and the remaining functions for other bit widths are
 /// automagically implemented.
 struct Register {
+    /// The name of this register.
+    ///
+    /// Conventionally, this is uppercase and snake-case with abbreviations understandable in
+    /// context, e.g., `REG_NAME`.
     name: &'static str,
+    /// Reads 8 bits from this register.
     read_8: fn(&Self, &Io, Address) -> u8,
+    /// Reads 16 bits from this register.
     read_16: fn(&Self, &Io, Address) -> u16,
+    /// Reads 32 bits from this register.
     read_32: fn(&Self, &Io) -> u32,
+    /// Writes 8 bits to this register.
     write_8: fn(&Self, &mut Io, Address, u8),
+    /// Writes 16 bits to this register.
     write_16: fn(&Self, &mut Io, Address, u16),
+    /// Writes 32 bits to this register.
     write_32: fn(&Self, &mut Io, u32),
 }
 
@@ -173,7 +183,13 @@ struct Register {
 /// the index of the byte represented by this [`LutEntry`] into the register it points to, and is
 /// intended as the basis for the `addr` input to [`Register`] functions.
 struct LutEntry {
+    /// The index of the [`REGISTER`] entry that this LUT entry points to.
     reg_idx: usize,
+    /// The index, rebased to the start of the register that this entry points to, of the byte to be
+    /// accessed.
+    ///
+    /// This may be 0, 1, 2, or 3. All are valid for 8-bit accesses, but only 0 and 2 are valid for
+    /// 16-bit accesses, and only 0 is valid for 32-bit accesses.
     byte_idx: usize,
 }
 
@@ -295,12 +311,21 @@ gen_cpu_bus_io!(
             /// The configurations for banks accessible to the CPU bus.
             #[derive(Clone, Debug)]
             pub struct Config {
+                /// The configuration for Expansion Region 1.
                 pub exp_1: RebaseableBankConfig,
+                /// The configuration for Expansion Region 2.
                 pub exp_2: RebaseableBankConfig,
+                /// The configuration for Expansion Region 3.
                 pub exp_3: BankConfig,
+                /// The configuration for the Basic Input/Output System (BIOS) bank.
                 pub bios: BankConfig,
+                // TODO: Is this correct?
+                /// The configuration for SPU RAM.
                 pub spu: BankConfig,
+                // TODO: Is this correct?
+                /// The configuration for CD-ROM RAM.
                 pub cdrom: BankConfig,
+                // TODO: Document this. What is it used for?
                 pub common: BankConfig,
             }
 
@@ -331,6 +356,7 @@ gen_cpu_bus_io!(
             }
 
             impl BankConfig {
+                /// The appropriate default configuration for a BIOS bank.
                 pub fn bios() -> Self {
                     Self {
                         // The BIOS size must be large enough on boot to at least accommodate the
@@ -341,6 +367,7 @@ gen_cpu_bus_io!(
                     }
                 }
 
+                /// Decodes this configuration from an I/O register.
                 pub fn decode(mut code: u32) -> Self {
                     Self {
                         delays: DelaysConfig::decode(code.pop_bits(8)),
@@ -357,17 +384,26 @@ gen_cpu_bus_io!(
             /// The configuration for a CPU bus bank.
             #[derive(Clone, Debug, Default)]
             pub struct BankConfig {
+                /// The configuration for access delays.
                 pub delays: DelaysConfig,
+                /// The configuration for access periods.
                 pub periods: PeriodsConfig,
+                // TODO: This field is currently not respected.
+                /// The bit-width of this bank's data bus.
                 pub bit_width: BitWidth,
+                // TODO
                 pub should_auto_inc: bool,
+                // TODO
                 pub unk_14: u32,
+                // TODO
                 pub size_shift: u32,
+                // TODO
                 pub unk_21: u32,
                 // TODO
             }
 
             impl BankConfig {
+                /// Encodes this configuration into an I/O register.
                 pub fn encode(&self) -> u32 {
                     let mut code = 0;
                     code.push_bits(3, self.unk_21);
@@ -383,6 +419,7 @@ gen_cpu_bus_io!(
             }
 
             impl DelaysConfig {
+                /// Decodes a configuration from an I/O register.
                 pub fn decode(mut code: u32) -> Self {
                     Self {
                         // There must always be at least a one-cycle delay. Therefore, Sony uses 0
@@ -394,13 +431,17 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// The configuration for access delays.
             #[derive(Clone, Copy, Debug, Default)]
             pub struct DelaysConfig {
+                /// The number of delay cycles after a write.
                 pub write: u32,
+                /// The number of delay cycles after a read.
                 pub read: u32,
             }
 
             impl DelaysConfig {
+                /// Encodes this configuration into an I/O register.
                 pub fn encode(self) -> u32 {
                     let mut code = 0;
                     // See the note in [`Self::decode`] for why we subtract here.
@@ -412,6 +453,7 @@ gen_cpu_bus_io!(
             }
 
             impl PeriodsConfig {
+                /// Decodes a configuration from an I/O register.
                 pub fn decode(mut code: u32) -> Self {
                     Self {
                         recovery_is_enabled:    code.pop_bool(),
@@ -424,13 +466,22 @@ gen_cpu_bus_io!(
 
             #[derive(Clone, Copy, Debug, Default)]
             pub struct PeriodsConfig {
+                // TODO: What is this?
+                /// Whether or not the recovery period is enabled.
                 pub recovery_is_enabled: bool,
+                // TODO: What is this?
+                /// Whether or not the hold period is enabled.
                 pub hold_is_enabled: bool,
+                // TODO: What is this?
+                /// Whether or not the floating period is enabled.
                 pub floating_is_enabled: bool,
+                // TODO: What is this?
+                /// Whether or not the pre-strobe period is enabled.
                 pub pre_strobe_is_enabled: bool,
             }
 
             impl PeriodsConfig {
+                /// Encodes this configuration into an I/O register.
                 pub fn encode(self) -> u32 {
                     let mut code = 0;
                     code.push_bool(self.pre_strobe_is_enabled);
@@ -443,7 +494,7 @@ gen_cpu_bus_io!(
             }
 
             impl BitWidth {
-                ///
+                /// Decodes a bit-width from an I/O register.
                 ///
                 /// # Panics
                 ///
@@ -457,14 +508,18 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// The bit-width of a data bus.
             #[derive(Clone, Copy, Debug, Default)]
             pub enum BitWidth {
+                /// The data bus is 8 bits wide.
                 #[default]
                 Eight,
+                /// The data bus is 16 bits wide.
                 Sixteen,
             }
 
             impl BitWidth {
+                /// Encodes this bit-width into an I/O register.
                 pub fn encode(self) -> u32 {
                     match self {
                         Self::Eight     => 0,
@@ -599,11 +654,12 @@ gen_cpu_bus_io!(
             },
         ],
         module: {
-            //! RAM configuration.
+            //! Main CPU RAM configuration.
 
             use noctane_util::{BitStack as _, BitStackExt as _};
 
             impl Config {
+                /// Decodes a configuration from an I/O register.
                 pub fn decode(mut code: u32) -> Self {
                     Self {
                         unk_0: code.pop_bits(3),
@@ -618,19 +674,30 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// The configuration for main CPU RAM.
             #[derive(Debug, Default)]
             pub struct Config {
+                // TODO
                 pub unk_0: u32,
+                // TODO
                 pub unk_3: u32,
+                // TODO
                 pub unk_4: u32,
+                /// Whether or not a one-cycle delay should be incurred on a simultaneous code and
+                /// data fetch.
                 pub should_delay_on_simult_read: bool,
+                // TODO
                 pub unk_8: u32,
+                /// The kind of layout that main CPU RAM should assume.
                 pub layout_kind: LayoutKind,
+                // TODO
                 pub unk_12: u32,
+                // TODO
                 pub unk_16: u32,
             }
 
             impl Config {
+                /// Encodes this configuration into an I/O register.
                 pub fn encode(&self) -> u32 {
                     let mut code = 0;
                     code.push_bits(16, self.unk_16);
@@ -647,7 +714,7 @@ gen_cpu_bus_io!(
             }
 
             impl LayoutKind {
-                ///
+                /// Decodes a layout from an I/O register.
                 ///
                 /// # Panics
                 ///
@@ -667,20 +734,30 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// A kind of RAM layout.
             #[derive(Clone, Copy, Debug, Default)]
             pub enum LayoutKind {
+                // TODO
                 #[default]
                 _1M,
+                // TODO
                 _4M,
+                // TODO
                 _1MPlus1MHighZ,
+                // TODO
                 _4MPlus4MHighZ,
+                // TODO
                 _2M,
+                // TODO
                 _8M0,
+                // TODO
                 _2MPlus2MHighZ,
+                // TODO
                 _8M1,
             }
 
             impl LayoutKind {
+                /// Encodes this layout into an I/O register.
                 pub fn encode(self) -> u32 {
                     match self {
                         Self::_1M               => 0,
@@ -694,6 +771,7 @@ gen_cpu_bus_io!(
                     }
                 }
 
+                /// Generates a [`Layout`].
                 pub fn gen_layout(self) -> Layout {
                     match self {
                         Self::_1M                   => Layout::new(1, 0),
@@ -708,6 +786,10 @@ gen_cpu_bus_io!(
             }
 
             impl Layout {
+                /// Creates a new `Layout`.
+                ///
+                /// This function is merely for convenience and is equivalent to constructing this
+                /// type with a struct-field expression.
                 pub const fn new(data_mb: u32, high_z_mb: u32) -> Self {
                     Self {
                         data_mb,
@@ -716,9 +798,16 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// A RAM layout.
+            ///
+            /// This defines how much of main CPU RAM should be accessible.
             #[derive(Clone, Copy, Debug)]
             pub struct Layout {
+                /// The size, in megabytes, of accessible data.
                 pub data_mb: u32,
+                /// The number, in megabytes, of `0xff`s following the data region.
+                ///
+                /// This 'high Z' region does not generate address exceptions.
                 pub high_z_mb: u32,
             }
         },
@@ -768,9 +857,33 @@ gen_cpu_bus_io!(
         ],
         module: {
             //! Interrupt configuration.
+            //!
+            //! Almost all CPUs can receive notifications from external devices when an event has
+            //! occurred; the PSX CPU is no different. This mechanism is interrupts.
+            //!
+            //! # Sources
+            //!
+            //! There are 9 kind of interrupt sources. Each source is capable of generating
+            //! interrupt requests to be processed by the CPU, and requests from different sources
+            //! may even be concurrently pending. These sources are:
+            //! - Vertical blanks (V-blanks). These requests are generated by the GPU in the
+            //!   vertical blanking period after a frame is presented. PSX software commonly awaits
+            //!   V-blanks to begin rendering for the next frame.
+            //! - The GPU.
+            //! - The CD-ROM drive.
+            //! - DMA. These requests are generated when a DMA transfer has completed.
+            //! - Timers. These requests may be generated either when a timer overflows, or when a
+            //!   timer's counter reaches a specified target value. As there are three timers in the
+            //!   PSX, there are three timer interrupt sources.
+            //! - Peripherals&mdash;specifically, joypads (i.e. controllers) and the serial port
+            //!   (SIO).
+            //! - The SPU.
+            //! - A lightpen. I don't actually know what these are, but the NO$ documentation claims
+            //!   they exist.
 
             use noctane_util::{BitStack as _, BitStackExt as _};
 
+            /// Sources of interrupt requests.
             #[derive(Clone, Debug, Default)]
             pub struct Sources {
                 pub vblank: Source,
@@ -785,6 +898,7 @@ gen_cpu_bus_io!(
             }
 
             impl Sources {
+                /// Decodes a `STAT` register.
                 pub fn decode_stat(&mut self, mut code: u32) {
                     macro_rules! ack {
                         ($field:ident) => {
@@ -813,6 +927,7 @@ gen_cpu_bus_io!(
                     ack!(lightpen);
                 }
 
+                /// Encodes a `STAT` register.
                 pub fn encode_stat(&self) -> u32 {
                     let mut code = 0;
                     code.push_bool(self.lightpen.request.is_some());
@@ -830,6 +945,7 @@ gen_cpu_bus_io!(
                     code
                 }
 
+                /// Decodes a `MASK` register.
                 pub fn decode_mask(&mut self, mut code: u32) {
                     self.vblank.is_enabled      = code.pop_bool();
                     self.gpu.is_enabled         = code.pop_bool();
@@ -844,6 +960,7 @@ gen_cpu_bus_io!(
                     self.lightpen.is_enabled    = code.pop_bool();
                 }
 
+                /// Encodes a `MASK` register.
                 pub fn encode_mask(&self) -> u32 {
                     let mut code = 0;
                     code.push_bool(self.lightpen.is_enabled);
@@ -861,6 +978,7 @@ gen_cpu_bus_io!(
                     code
                 }
 
+                /// Decodes a `DICR` register.
                 pub fn decode_dicr(&mut self, mut code: u32) {
                     // TODO: Unknown (R/W).
                     let _ = code.pop_bits(6);
@@ -888,6 +1006,7 @@ gen_cpu_bus_io!(
                     // This field is read-only, so we don't need to decode it.
                 }
 
+                /// Encodes a `DICR` register.
                 pub fn encode_dicr(&self) -> u32 {
                     let mut code = 0;
                     // IRQ Master Flag.
@@ -915,6 +1034,10 @@ gen_cpu_bus_io!(
                     code
                 }
 
+                /// Retrieves the next pending interrupt request.
+                ///
+                /// If no interrupt requests are pending, or the sources from which those requests
+                /// originated are disabled, this method returns `None`.
                 pub fn take_request(&mut self) -> Option<()> {
                     macro_rules! take_request {
                         ($field:ident) => {
@@ -956,10 +1079,12 @@ gen_cpu_bus_io!(
             pub struct Source {
                 /// Whether or not this interrupt source is enabled.
                 pub is_enabled: bool,
+                /// The next interrupt request from this source, if one is pending.
                 pub request: Option<Request>,
             }
 
             impl Source {
+                /// Retrieves the next pending interrupt request.
                 pub fn take_request(&mut self) -> Option<()> {
                     if self.is_enabled {
                         if let Some(req) = self.request.as_mut() {
@@ -975,6 +1100,7 @@ gen_cpu_bus_io!(
                 }
             }
 
+            /// An interrupt request.
             #[derive(Clone, Debug, Default)]
             pub struct Request {
                 /// Whether or not this interrupt request was served by the CPU.
@@ -999,15 +1125,20 @@ gen_cpu_bus_io!(
                 };
             }
 
+            /// The interrupt source for a timer.
             #[derive(Clone, Debug, Default)]
             pub struct TimerSource {
                 inner: Source,
+                /// Whether or not this source generates a request when its timer's counter reaches
+                /// the target value.
                 pub is_enabled_on_target_hit: bool,
+                /// Whether or not this source generates a request when its timer overflows.
                 pub is_enabled_on_overflow: bool,
             }
 
             impl_deref_for_src!(TimerSource);
 
+            /// The interrupt source for all DMA channels.
             #[derive(Clone, Debug, Default)]
             pub struct DmaSource {
                 inner: Source,
@@ -1016,9 +1147,12 @@ gen_cpu_bus_io!(
 
             impl_deref_for_src!(DmaSource);
 
+            /// The interrupt source for a DMA channel.
             #[derive(Clone, Copy, Debug, Default)]
             pub struct DmaChannelSource {
+                /// Whether or not this source is enabled.
                 pub is_enabled: bool,
+                /// Whether or not an interrupt request from this channel is pending.
                 pub is_requesting: bool,
             }
         },
@@ -1327,6 +1461,33 @@ gen_cpu_bus_io!(
         ],
         module: {
             //! DMA configuration.
+            //!
+            //! Like interrupts, almost all CPUs have these. The way I see it, DMAs solve two
+            //! problems:
+            //! - Copying data between the CPU and external devices using only load and store
+            //!   instructions to and from I/O registers is painfully slow compared to what can be
+            //!   achieved with dedicated circuitry.
+            //! - It is sometimes the only way for a CPU is access the memory of external devices,
+            //!   i.e., if I/O registers aren't available.
+            //!
+            //! # Channels
+            //!
+            //! In the PSX, there are 7 DMA channels. They are:
+            //! - MDEC (in).
+            //! - MDEC (out).
+            //! - GPU.
+            //! - CD-ROM.
+            //! - SPU.
+            //! - PIO.
+            //! - OTC.
+            //!
+            //! # Sync Strategies
+            //!
+            //! There are three different strategies for performing a transfer. Some channels
+            //! support just one, and others support two. They are:
+            //! - Copy everything instantaneously.
+            //! - Break the data to be transferred into blocks and copy one block at a time.
+            //! - Send a pointer to a linked list that the external device can traverse.
 
             use std::fmt;
 
