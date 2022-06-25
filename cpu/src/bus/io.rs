@@ -1654,15 +1654,51 @@ gen_cpu_bus_io!(
                             |_| {
                                 todo!()
                             },
-                            |_| {
-                                todo!()
+                            |mut params| {
+                                tracing::info!("Sending GPU block sequence...");
+                                let start_addr = params.txfer.cpu_bus_base;
+                                // TODO: Don't cast here.
+                                let start_idx = (start_addr / 4) as usize;
+
+                                // TODO: Respect transfer direction.
+                                for block_idx in (0..params.count)
+                                    .into_iter()
+                                    .map(|i| {
+                                        // TODO: Don't cast here.
+                                        start_idx + (i as usize)
+                                    })
+                                {
+                                    for word_idx in (0..params.len)
+                                        .into_iter()
+                                        .map(|i| {
+                                            // TODO: Don't cast here.
+                                            block_idx + (i as usize)
+                                        })
+                                    {
+                                        if let Some(word) = params.ram.get(word_idx).copied() {
+                                            let _ = params.gpu.queue_gp0_word(word);
+                                        } else {
+                                            todo!()
+                                        }
+                                    }
+                                    while !params.gpu.gp0_queue_is_empty() {
+                                        params.gpu.execute_next_gp0_command();
+                                    }
+                                }
                             },
                             |mut params| {
                                 tracing::info!("Sending GPU command list...");
                                 let mut next_entry_addr = params.txfer.cpu_bus_base;
 
+                                // TODO: Respect transfer direction.
                                 while next_entry_addr != 0xffffff {
+                                    // TODO: Don't immediately execute.
+                                    while !params.gpu.gp0_queue_is_empty() {
+                                        params.gpu.execute_next_gp0_command();
+                                    }
+
                                     let entry_addr = next_entry_addr;
+                                    // TODO: Don't cast here.
                                     let entry_idx = (entry_addr / 4) as usize;
                                     tracing::debug!(
                                         "List entry: {:010x} ({})",
@@ -1676,13 +1712,13 @@ gen_cpu_bus_io!(
                                         .copied()
                                     {
                                         next_entry_addr = entry_header.pop_bits(24);
-                                        let cmd_count = entry_header;
+                                        // TODO: Probably shouldn't cast here, but what's the chance
+                                        // we're running on an 8-bit or 16-bit system?
+                                        let cmd_count = entry_header as usize;
 
                                         for cmd_idx in (entry_idx.wrapping_add(1)..)
                                             .into_iter()
-                                            // TODO: Probably shouldn't cast here, but what's the
-                                            // chance we're running on an 8-bit or 16-bit system?
-                                            .take(cmd_count as usize)
+                                            .take(cmd_count)
                                         {
                                             if let Some(cmd) = params.ram.get(cmd_idx).copied() {
                                                 if params.gpu.queue_gp0_word(cmd).is_err() {
@@ -1690,8 +1726,6 @@ gen_cpu_bus_io!(
                                                     tracing::debug!("Queue is full");
                                                     todo!()
                                                 }
-                                                // TODO: Don't immediately execute.
-                                                params.gpu.execute_next_gp0_command();
                                             } else {
                                                 // Error!
                                                 todo!()
@@ -1782,8 +1816,8 @@ gen_cpu_bus_io!(
 
                                     let entry_idx = (entry_addr / 4) as usize;
                                     if let Some(entry_header) = params.ram.get_mut(entry_idx) {
-                                        entry_header.push_bits(24, next_entry_addr);
                                         entry_header.push_bits(8, 0);
+                                        entry_header.push_bits(24, next_entry_addr);
                                     } else {
                                         todo!()
                                     }
@@ -2057,8 +2091,7 @@ gen_cpu_bus_io!(
 
                 pub fn encode_chcr(&self) -> u32 {
                     let mut code = 0;
-                    // TODO
-                    // Start/Trigger.
+                    // TODO: Start/Trigger.
                     //
                     // This is cleared when a transfer starts, but setting it starts a transfer, so
                     // it is effectively always 0.
@@ -2639,8 +2672,8 @@ gen_cpu_bus_io!(
                     code.push_bool(true);
                     // TODO: Ready to send VRAM to CPU.
                     code.push_bool(true);
-                    // TODO: Ready to receive command.
-                    code.push_bool(true);
+                    // Ready to receive command.
+                    code.push_bool(!io.gpu.gp0_queue_is_full());
                     // TODO: DMA.
                     code.push_bits(1, 1);
                     // TODO: IRQ.

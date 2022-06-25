@@ -741,10 +741,11 @@ macro_rules! def_instr_and_op_kind {
                 impl State {
                     /// Creates a new `State`.
                     pub fn read(_: &reg::File, opers: Operands) -> Self {
-                        // If we don't even use the [`reg::File`] that was passed to us, then what's the point
-                        // of it being in the function signature? The reason is due to macro repetition
-                        // generalizing the function signature of `_::State::read` methods; it's not really
-                        // enough of an issue for me to care enough to fix it.
+                        // If we don't even use the [`reg::File`] that was passed to us, then what's
+                        // the point of it being in the function signature? The reason is due to
+                        // macro repetition generalizing the function signature of `_::State::read`
+                        // methods; it's not really enough of an issue for me to care enough to fix
+                        // it.
                         Self {
                             target: opers.target,
                         }

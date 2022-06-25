@@ -2,7 +2,7 @@
 
 pub mod cmd;
 
-use ringbuffer::{ConstGenericRingBuffer, RingBufferExt as _};
+use ringbuffer::{ConstGenericRingBuffer, RingBuffer as _, RingBufferExt as _};
 
 pub use cmd::MachineCommand;
 
@@ -43,6 +43,14 @@ impl Gpu {
         self.clear_gp0_queue();
         self.display.is_enabled = false;
         // TODO
+    }
+
+    pub fn gp0_queue_is_empty(&self) -> bool {
+        self.gp0_queue.is_empty()
+    }
+
+    pub fn gp0_queue_is_full(&self) -> bool {
+        self.gp0_queue.is_full()
     }
 
     pub fn clear_gp0_queue(&mut self) {

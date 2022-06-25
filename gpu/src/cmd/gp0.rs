@@ -109,21 +109,18 @@ impl Gpu {
                 },
                 {
                     name: QuickfillRect,
-                    fn: |_: &mut Gpu, color: u32| {
+                    fn: |this: &mut Gpu, color: u32| {
                         // TODO
+                        let color = Color::decode(color);
                         tracing::info!("Color: {:?}", color);
+                        this.gp0_queue.dequeue().unwrap();
+                        this.gp0_queue.dequeue().unwrap();
                     },
                 },
                 {
                     name: X03,
                     fn: |_: &mut Gpu, _: u32| {
                         // TODO: Undocumented.
-                    },
-                },
-                {
-                    name: X03,
-                    fn: |_: &mut Gpu, _: u32| {
-                        todo!()
                     },
                 },
                 {
@@ -170,6 +167,12 @@ impl Gpu {
                 },
                 {
                     name: SetDrawingOffset,
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO
+                    },
+                },
+                {
+                    name: SetMask,
                     fn: |_: &mut Gpu, _: u32| {
                         // TODO
                     },
@@ -235,6 +238,7 @@ pub enum CommandKind {
     SetDrawingAreaTopLeft,
     SetDrawingAreaBottomRight,
     SetDrawingOffset,
+    SetMask,
 }
 
 impl Color {
@@ -378,6 +382,7 @@ impl CommandKind {
             0xe3 => Self::SetDrawingAreaTopLeft,
             0xe4 => Self::SetDrawingAreaBottomRight,
             0xe5 => Self::SetDrawingOffset,
+            0xe6 => Self::SetMask,
             0xe7..=0xef => Self::Nop,
             _ => todo!("Unknown opcode: {:#04x}", opcode),
         }

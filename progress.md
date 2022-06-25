@@ -1,16 +1,26 @@
 # Progress Log
 
-# 6/19/2022
+## 6/25/2022
+
+Noctane is now at 9,200 lines of code. (There are approximately 12,100 including blank and comment lines).
+
+The GPU is now quasi- in-development. Command lists seem to be working.
+
+My original estimate was that Noctane would approach 15,000 lines of code by the time I'd consider releasing a 1.0 version. However, given that over 9,000 lines of code have already been written, and virtually no GPU rendering code has been implemented yet, I expect that number to likely approach 20,000.
+
+I was hoping to 'crank out' this emulator in a few months, but it seems it may be more long-term than I anticipated. Development will likely continue to slow down over time as the project expands.
+
+## 6/19/2022
 
 Noctane is now at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines).
 
 The DMA and SPU registers are mostly implemented or stubbed-out now.
 
-# 6/13/2022
+## 6/13/2022
 
 Timers and SPU voice registers are now mostly implemented. I am currently implementing DMAs, which should be a bit of a challenging task.
 
-# 6/11/2022
+## 6/11/2022
 
 Documentation for the `noctane-cpu` crate is now mostly complete. I am very happy with how it looks.
 
@@ -22,7 +32,7 @@ The following items should be completed in the next few days:
 
 GPU development is on hold for the moment until Noctane is capable of reaching GPU-related code in the BIOS.
 
-# 6/9/2022
+## 6/9/2022
 
 Noctane is now at 6,700 lines of code. (There are approximatly 8,600 including blank and comment lines.)
 
