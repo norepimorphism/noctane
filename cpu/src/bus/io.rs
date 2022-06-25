@@ -1583,12 +1583,14 @@ gen_cpu_bus_io!(
                     code
                 }
 
-                pub fn next_transfer_packet(
-                    &mut self,
-                    int: &mut super::int::Sources,
+                pub fn next_transfer_packet<'int, 'ext>(
+                    &'int mut self,
+                    int: &'ext mut super::int::Sources,
+                    ram: &'ext mut crate::bus::Ram,
+                    gpu: &'ext mut noctane_gpu::Gpu,
                 ) -> Option<TransferPacket> {
                     Channels::find_highest_prio(self.chan.in_transfer()).and_then(|chan| {
-                        chan.next_transfer_packet(int)
+                        chan.next_transfer_packet(int, ram, gpu)
                     })
                 }
             }
@@ -1598,19 +1600,19 @@ gen_cpu_bus_io!(
                     Self {
                         mdec_in: Channel::new(
                             0,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
+                                todo!()
+                            },
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1619,19 +1621,19 @@ gen_cpu_bus_io!(
                         ),
                         mdec_out: Channel::new(
                             1,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
+                                todo!()
+                            },
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1640,40 +1642,83 @@ gen_cpu_bus_io!(
                         ),
                         gpu: Channel::new(
                             2,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
-                            |txfer| {
+                            |_| {
+                                todo!()
+                            },
+                            |mut params| {
                                 tracing::info!("Sending GPU command list...");
+                                let mut next_entry_addr = params.txfer.cpu_bus_base;
+
+                                while next_entry_addr != 0xffffff {
+                                    let entry_addr = next_entry_addr;
+                                    let entry_idx = (entry_addr / 4) as usize;
+                                    tracing::debug!(
+                                        "List entry: {:010x} ({})",
+                                        entry_addr,
+                                        entry_idx,
+                                    );
+
+                                    if let Some(mut entry_header) = params
+                                        .ram
+                                        .get(entry_idx)
+                                        .copied()
+                                    {
+                                        next_entry_addr = entry_header.pop_bits(24);
+                                        let cmd_count = entry_header;
+
+                                        for cmd_idx in (entry_idx.wrapping_add(1)..)
+                                            .into_iter()
+                                            // TODO: Probably shouldn't cast here, but what's the
+                                            // chance we're running on an 8-bit or 16-bit system?
+                                            .take(cmd_count as usize)
+                                        {
+                                            if let Some(cmd) = params.ram.get(cmd_idx).copied() {
+                                                if params.gpu.queue_gp0_word(cmd).is_err() {
+                                                    // The queue is full. We'll stop here.
+                                                    tracing::debug!("Queue is full");
+                                                    todo!()
+                                                }
+                                                // TODO: Don't immediately execute.
+                                                params.gpu.execute_next_gp0_command();
+                                            } else {
+                                                // Error!
+                                                todo!()
+                                            }
+                                        }
+                                    } else {
+                                        // Error!
+                                        todo!()
+                                    }
+                                }
                             },
                         ),
                         cdrom: Channel::new(
                             3,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
+                                todo!()
+                            },
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1682,19 +1727,19 @@ gen_cpu_bus_io!(
                         ),
                         spu: Channel::new(
                             4,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
+                                todo!()
+                            },
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1703,19 +1748,19 @@ gen_cpu_bus_io!(
                         ),
                         pio: Channel::new(
                             5,
-                            |_, _| {
-                                todo!()
-                            },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
+                                todo!()
+                            },
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1724,22 +1769,36 @@ gen_cpu_bus_io!(
                         ),
                         otc: Channel::new(
                             6,
-                            |txfer, count| {
-                                tracing::info!("Init. OT of length {}...", count);
-                                for _ in 0..count {
-                                    // TODO: Setup OT.
+                            |mut params| {
+                                tracing::info!("Init. OT of length {}...", params.count);
+                                let mut next_entry_addr = params.txfer.cpu_bus_base;
+                                for i in 1..=(params.count) {
+                                    let entry_addr = next_entry_addr;
+                                    next_entry_addr = if i == params.count {
+                                        0xffffff
+                                    } else {
+                                        entry_addr.wrapping_sub(4)
+                                    };
+
+                                    let entry_idx = (entry_addr / 4) as usize;
+                                    if let Some(entry_header) = params.ram.get_mut(entry_idx) {
+                                        entry_header.push_bits(24, next_entry_addr);
+                                        entry_header.push_bits(8, 0);
+                                    } else {
+                                        todo!()
+                                    }
                                 }
                             },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
                                 todo!()
                             },
-                            |_, _| {
+                            |_| {
                                 todo!()
                             },
-                            |_, _, _| {
+                            |_| {
                                 todo!()
                             },
                             |_| {
@@ -1801,15 +1860,57 @@ gen_cpu_bus_io!(
                 }
             }
 
+            macro_rules! impl_deref_for_txfer_params {
+                ($ty:ident) => {
+                    impl<'int, 'ext> std::ops::Deref for $ty<'int, 'ext> {
+                        type Target = TransferParameters<'int, 'ext>;
+
+                        fn deref(&self) -> &Self::Target {
+                            &self.inner
+                        }
+                    }
+
+                    impl<'int, 'ext> std::ops::DerefMut for $ty<'int, 'ext> {
+                        fn deref_mut(&mut self) -> &mut Self::Target {
+                            &mut self.inner
+                        }
+                    }
+                };
+            }
+
+            pub struct TransferWordsParameters<'int, 'ext> {
+                inner: TransferParameters<'int, 'ext>,
+                pub count: u16,
+            }
+            impl_deref_for_txfer_params!(TransferWordsParameters);
+
+            pub struct TransferBlockParameters<'int, 'ext> {
+                inner: TransferParameters<'int, 'ext>,
+                pub len: u16,
+                pub count: u16,
+            }
+            impl_deref_for_txfer_params!(TransferBlockParameters);
+
+            pub struct TransferListParameters<'int, 'ext> {
+                inner: TransferParameters<'int, 'ext>,
+            }
+            impl_deref_for_txfer_params!(TransferListParameters);
+
+            pub struct TransferParameters<'int, 'ext> {
+                pub txfer: &'int Transfer,
+                pub ram: &'ext mut crate::bus::Ram,
+                pub gpu: &'ext mut noctane_gpu::Gpu,
+            }
+
             impl Channel {
                 fn new(
                     index: usize,
-                    read_words: fn(&TransferState, u16),
-                    read_blocks: fn(&TransferState, u16, u16),
-                    read_list: fn(&TransferState),
-                    write_words: fn(&TransferState, u16),
-                    write_blocks: fn(&TransferState, u16, u16),
-                    write_list: fn(&TransferState),
+                    read_words: fn(TransferWordsParameters),
+                    read_block: fn(TransferBlockParameters),
+                    read_list: fn(TransferListParameters),
+                    write_words: fn(TransferWordsParameters),
+                    write_block: fn(TransferBlockParameters),
+                    write_list: fn(TransferListParameters),
                 ) -> Self {
                     Self {
                         index,
@@ -1817,10 +1918,10 @@ gen_cpu_bus_io!(
                         prio: 0,
                         txfer: TransferState::default(),
                         read_words,
-                        read_blocks,
+                        read_block,
                         read_list,
                         write_words,
-                        write_blocks,
+                        write_block,
                         write_list,
                     }
                 }
@@ -1843,52 +1944,63 @@ gen_cpu_bus_io!(
                 pub is_enabled: bool,
                 pub prio: u32,
                 pub txfer: TransferState,
-                pub read_words: fn(&TransferState, u16),
-                pub read_blocks: fn(&TransferState, u16, u16),
-                pub read_list: fn(&TransferState),
-                pub write_words: fn(&TransferState, u16),
-                pub write_blocks: fn(&TransferState, u16, u16),
-                pub write_list: fn(&TransferState),
+                pub read_words: fn(TransferWordsParameters),
+                pub read_block: fn(TransferBlockParameters),
+                pub read_list: fn(TransferListParameters),
+                pub write_words: fn(TransferWordsParameters),
+                pub write_block: fn(TransferBlockParameters),
+                pub write_list: fn(TransferListParameters),
             }
 
             impl Channel {
-                pub fn next_transfer_packet(
-                    &mut self,
-                    int: &mut super::int::Sources,
+                pub fn next_transfer_packet<'int, 'ext>(
+                    &'int mut self,
+                    int: &'ext mut super::int::Sources,
+                    ram: &'ext mut crate::bus::Ram,
+                    gpu: &'ext mut noctane_gpu::Gpu,
                 ) -> Option<TransferPacket> {
-                    if let Some(txfer) = self.txfer.current {
+                    if let Some(txfer) = self.txfer.current.as_ref() {
                         // TODO:
                         //
                         // The current approach is simply to complete a transfer in one cycle,
                         // but that is orders of magnitudes faster than the PSX does it. In the
                         // future, we should strive to split transfers into packets.
 
-                        match txfer.source {
-                            TransferSource::External => {
-                                match txfer.strat {
-                                    SyncStrategy::Wordwise { count } => {
-                                        (self.read_words)(&self.txfer, count);
-                                    }
-                                    SyncStrategy::Blockwise { len, count } => {
-                                        (self.read_blocks)(&self.txfer, len, count);
-                                    }
-                                    SyncStrategy::Listwise => {
-                                        (self.read_list)(&self.txfer);
-                                    }
-                                }
+                        let params = TransferParameters {
+                            txfer,
+                            ram,
+                            gpu,
+                        };
+                        match txfer.strat {
+                            SyncStrategy::Wordwise { count } => {
+                                let func = match txfer.source {
+                                    TransferSource::External => self.read_words,
+                                    TransferSource::CpuBus => self.write_words,
+                                };
+                                (func)(TransferWordsParameters {
+                                    inner: params,
+                                    count,
+                                });
                             }
-                            TransferSource::CpuBus => {
-                                match txfer.strat {
-                                    SyncStrategy::Wordwise { count } => {
-                                        (self.write_words)(&self.txfer, count);
-                                    }
-                                    SyncStrategy::Blockwise { len, count } => {
-                                        (self.write_blocks)(&self.txfer, len, count);
-                                    }
-                                    SyncStrategy::Listwise => {
-                                        (self.write_list)(&self.txfer);
-                                    }
-                                }
+                            SyncStrategy::Blockwise { len, count } => {
+                                let func = match txfer.source {
+                                    TransferSource::External => self.read_block,
+                                    TransferSource::CpuBus => self.write_block,
+                                };
+                                (func)(TransferBlockParameters {
+                                    inner: params,
+                                    len,
+                                    count,
+                                });
+                            }
+                            SyncStrategy::Listwise => {
+                                let func = match txfer.source {
+                                    TransferSource::External => self.read_list,
+                                    TransferSource::CpuBus => self.write_list,
+                                };
+                                (func)(TransferListParameters {
+                                    inner: params,
+                                });
                             }
                         }
 
@@ -2087,6 +2199,7 @@ gen_cpu_bus_io!(
                             count: code.pop_bits(16) as u16,
                         },
                         2 => Self::Listwise,
+                        3 => todo!(),
                         _  => unreachable!(),
                     }
                 }
@@ -2509,7 +2622,7 @@ gen_cpu_bus_io!(
                     *io.last_gpu_result
                 },
                 write_32: |_, io, word| {
-                    io.gpu.queue_gp0_word(word);
+                    let _ = io.gpu.queue_gp0_word(word);
                 },
             },
             Register {

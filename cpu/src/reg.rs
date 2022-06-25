@@ -296,6 +296,12 @@ pub mod cpr {
         pub cu3, set_cu3: 31;
     }
 
+    impl Status {
+        pub fn interrupt_is_allowed(&self, index: usize) -> bool {
+            ((self.im() >> index) & 1) == 1
+        }
+    }
+
     impl From<Exception> for Cause {
         fn from(exc: Exception) -> Self {
             let mut this = Self(0);
@@ -318,7 +324,7 @@ pub mod cpr {
 
     impl Cause {
         /// Determines if the interrupt at the given index is set.
-        pub fn is_interrupt_set(&self, index: usize) -> bool {
+        pub fn interrupt_is_set(&self, index: usize) -> bool {
             ((self.ip() >> index) & 1) == 1
         }
 

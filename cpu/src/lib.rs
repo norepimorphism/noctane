@@ -250,7 +250,11 @@ impl<'s, 'b> Cpu<'s, 'b> {
     fn advance_dmas(&mut self) {
         let bus = self.mem.bus_mut();
         // TODO
-        let _ = bus.io.dma.next_transfer_packet(&mut bus.io.int);
+        let _ = bus.io.dma.next_transfer_packet(
+            &mut bus.io.int,
+            &mut bus.ram,
+            &mut bus.io.gpu,
+        );
     }
 
     fn increment_timers(&mut self) {
@@ -277,8 +281,9 @@ impl<'s, 'b> Cpu<'s, 'b> {
 
     /// Processes the interrupt at the given index, generating an exception if necessary.
     fn process_interrupt(&mut self, index: usize) {
+        let status = self.reg.status();
         let mut cause = self.reg.cause();
-        if cause.is_interrupt_set(index) {
+        if status.interrupt_is_allowed(index) && cause.interrupt_is_set(index) {
             // Raise an interrupt exception.
             self.reg.raise_exception(exc::code::INTERRUPT);
             // Indicate that this interrupt has been processed.

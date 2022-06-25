@@ -14,8 +14,8 @@ use super::MachineCommand;
 
 pub struct State {
     pub min_arg_count: usize,
-    pub color: Color,
-    pub execute: fn(&mut Gpu, Color),
+    pub param: u32,
+    pub execute: fn(&mut Gpu, u32),
 }
 
 impl fmt::Debug for State {
@@ -27,21 +27,27 @@ impl fmt::Debug for State {
 }
 
 impl Gpu {
-    pub fn queue_gp0_word(&mut self, word: u32) {
-        // TODO: Some commands don't use queue space.
-        self.gp0_queue.push(word);
-        tracing::warn!("{:08x}", word);
+    pub fn queue_gp0_word(&mut self, word: u32) -> Result<(), ()> {
+        if self.gp0_queue.is_full() {
+            Err(())
+        } else {
+            // TODO: Some commands don't use queue space.
+            self.gp0_queue.push(word);
+            tracing::warn!("{:08x}", word);
+
+            Ok(())
+        }
     }
 
     pub fn execute_next_gp0_command(&mut self) {
         if let Some(state) = self.gp0_state.as_mut() {
             if self.gp0_queue.len() >= state.min_arg_count {
-                let color = state.color;
+                let param = state.param;
                 let execute = state.execute;
                 self.gp0_state = None;
 
                 // We now have enough arguments to execute the command.
-                (execute)(self, color);
+                (execute)(self, param);
             }
         } else if let Some(mach) = self.gp0_queue.dequeue() {
             let mach = MachineCommand::decode(mach);
@@ -67,13 +73,13 @@ impl Gpu {
                                     () => {
                                         // If there aren't any arguments, we can skip some steps and
                                         // execute the command immediately.
-                                        $fn(self, cmd.color)
+                                        $fn(self, cmd.param)
                                     };
                                     ($count:expr) => {
                                         {
                                             self.gp0_state = Some(State {
                                                 min_arg_count: $count,
-                                                color: cmd.color,
+                                                param: cmd.param,
                                                 execute: $fn,
                                             });
                                         }
@@ -91,33 +97,39 @@ impl Gpu {
             process_gp0_command!(
                 {
                     name: Nop,
-                    fn: |_: &mut Gpu, _: Color| {
+                    fn: |_: &mut Gpu, _: u32| {
                         // Do nothing.
                     },
                 },
                 {
                     name: ClearTexCache,
-                    fn: |_: &mut Gpu, _: Color| {
+                    fn: |_: &mut Gpu, _: u32| {
                         // TODO
                     },
                 },
                 {
                     name: QuickfillRect,
-                    fn: |_: &mut Gpu, color: Color| {
+                    fn: |_: &mut Gpu, color: u32| {
                         // TODO
                         tracing::info!("Color: {:?}", color);
                     },
                 },
                 {
                     name: X03,
-                    fn: |_: &mut Gpu, _: Color| {
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO: Undocumented.
+                    },
+                },
+                {
+                    name: X03,
+                    fn: |_: &mut Gpu, _: u32| {
                         todo!()
                     },
                 },
                 {
                     name: MoveRectToVram,
                     min_arg_count: 2,
-                    fn: |this: &mut Gpu, _: Color| {
+                    fn: |this: &mut Gpu, _: u32| {
                         // TODO
                         this.gp0_queue.dequeue().unwrap();
                         this.gp0_queue.dequeue().unwrap();
@@ -126,7 +138,7 @@ impl Gpu {
                 {
                     name: MoveRectToCpuBus,
                     min_arg_count: 2,
-                    fn: |this: &mut Gpu, _: Color| {
+                    fn: |this: &mut Gpu, _: u32| {
                         // TODO
                         this.gp0_queue.dequeue().unwrap();
                         this.gp0_queue.dequeue().unwrap();
@@ -134,7 +146,31 @@ impl Gpu {
                 },
                 {
                     name: SetTexpage,
-                    fn: |_: &mut Gpu, _: Color| {
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO
+                    },
+                },
+                {
+                    name: SetTexWindow,
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO
+                    },
+                },
+                {
+                    name: SetDrawingAreaTopLeft,
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO
+                    },
+                },
+                {
+                    name: SetDrawingAreaBottomRight,
+                    fn: |_: &mut Gpu, _: u32| {
+                        // TODO
+                    },
+                },
+                {
+                    name: SetDrawingOffset,
+                    fn: |_: &mut Gpu, _: u32| {
                         // TODO
                     },
                 },
@@ -145,7 +181,7 @@ impl Gpu {
 
 pub struct Command {
     pub kind: CommandKind,
-    pub color: Color,
+    pub param: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -196,6 +232,19 @@ pub enum CommandKind {
     MoveRectToCpuBus,
     SetTexpage,
     SetTexWindow,
+    SetDrawingAreaTopLeft,
+    SetDrawingAreaBottomRight,
+    SetDrawingOffset,
+}
+
+impl Color {
+    pub fn decode(mut code: u32) -> Self {
+        Self {
+            red: code.pop_bits(8) as u8,
+            green: code.pop_bits(8) as u8,
+            blue: code.pop_bits(8) as u8,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -209,17 +258,7 @@ impl Command {
     pub fn decode(mach: MachineCommand) -> Self {
         Self {
             kind: CommandKind::decode(mach.opcode),
-            color: Color::decode(mach.param),
-        }
-    }
-}
-
-impl Color {
-    pub fn decode(mut code: u32) -> Self {
-        Self {
-            red: code.pop_bits(8) as u8,
-            green: code.pop_bits(8) as u8,
-            blue: code.pop_bits(8) as u8,
+            param: mach.param,
         }
     }
 }
@@ -336,6 +375,9 @@ impl CommandKind {
             0xe0 => Self::Nop,
             0xe1 => Self::SetTexpage,
             0xe2 => Self::SetTexWindow,
+            0xe3 => Self::SetDrawingAreaTopLeft,
+            0xe4 => Self::SetDrawingAreaBottomRight,
+            0xe5 => Self::SetDrawingOffset,
             0xe7..=0xef => Self::Nop,
             _ => todo!("Unknown opcode: {:#04x}", opcode),
         }
