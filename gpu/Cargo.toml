@@ -8,6 +8,8 @@ license = "MPL-2.0"
 
 [dependencies]
 bitfield = "0.13"
+minifb = "0.23"
 noctane-util = { path = "../util" }
 ringbuffer = "0.8"
 tracing = "0.1"
+wgpu = "0.12"

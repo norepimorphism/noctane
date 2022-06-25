@@ -11,6 +11,7 @@ name = "cpu"
 harness = false
 
 [dependencies]
+minifb = "0.23"
 noctane-cpu = { path = "../cpu" }
 noctane-gpu = { path = "../gpu" }
 noctane-util = { path = "../util" }
@@ -19,3 +20,5 @@ tracing-subscriber = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"
+pollster = "0.2"
+wgpu-types = "0.12"

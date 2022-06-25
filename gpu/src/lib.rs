@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 pub mod cmd;
+pub mod gfx;
 
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer as _, RingBufferExt as _};
 
@@ -18,11 +19,12 @@ pub struct Extent2d {
     pub height: u16,
 }
 
-impl Default for Gpu {
-    fn default() -> Self {
+impl Gpu {
+    pub fn new(gfx: gfx::Renderer) -> Self {
         Self {
             display: Display::default(),
             dma_request: None,
+            gfx,
             gp0_state: None,
             gp0_queue: ConstGenericRingBuffer::new(),
         }
@@ -34,6 +36,7 @@ impl Default for Gpu {
 pub struct Gpu {
     pub display: Display,
     pub dma_request: Option<DmaRequest>,
+    pub gfx: gfx::Renderer,
     gp0_state: Option<cmd::gp0::State>,
     gp0_queue: ConstGenericRingBuffer<u32, 16>,
 }

@@ -13,7 +13,14 @@ fn main() {
         .expect("expected ROM filepath");
     let bios = std::fs::read(bios_filepath).expect("failed to read ROM");
 
-    let mut core = noctane::Core::default();
+    let game_window = noctane_util::game::create_window(640, 480);
+    let mut core = noctane::Core::new(unsafe {
+        pollster::block_on(noctane_gpu::gfx::Renderer::new(
+            &game_window,
+            wgpu_types::Backends::all(),
+        ))
+        .expect("failed to create renderer")
+    });
 
     // Fill BIOS with the ROM image.
     for (idx, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
@@ -22,7 +29,7 @@ fn main() {
         core.banks.bios[idx] = u32::from_le_bytes(*instr);
     }
 
-    Debugger::new(core).run();
+    Debugger::new(core, game_window).run();
 }
 
 fn setup_tracing() {
@@ -41,11 +48,11 @@ fn setup_tracing() {
 }
 
 impl Debugger {
-    fn new(core: noctane::Core) -> Self {
+    fn new(core: noctane::Core, game_window: minifb::Window) -> Self {
         Self {
             core,
             addr_breakpoints: HashSet::new(),
-            game_window: noctane_util::game::Window::new(640, 480),
+            game_window,
             sym_breakpoints: HashSet::new(),
             stdout: String::new(),
         }
@@ -55,7 +62,7 @@ impl Debugger {
 struct Debugger {
     core: noctane::Core,
     addr_breakpoints: HashSet<u32>,
-    game_window: noctane_util::game::Window,
+    game_window: minifb::Window,
     sym_breakpoints: HashSet<String>,
     stdout: String,
 }
@@ -299,7 +306,7 @@ impl Debugger {
     fn step(&mut self) -> Step {
         self.core.gpu.execute_next_gp0_command();
         if self.core.take_vblank().is_some() {
-            self.game_window.gfx_mut().render();
+            self.core.gpu.gfx.render();
             self.game_window.update();
             self.core.issue_vblank();
         }

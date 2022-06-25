@@ -124,6 +124,19 @@ impl Gpu {
                     },
                 },
                 {
+                    name: RenderUnshadedUntexturedOpaqueQuad,
+                    min_arg_count: 4,
+                    fn: |this: &mut Gpu, _: u32| {
+                        // TODO
+                        let verts = [
+                            this.gp0_queue.dequeue().unwrap(),
+                            this.gp0_queue.dequeue().unwrap(),
+                            this.gp0_queue.dequeue().unwrap(),
+                            this.gp0_queue.dequeue().unwrap(),
+                        ];
+                    },
+                },
+                {
                     name: MoveRectToVram,
                     min_arg_count: 2,
                     fn: |this: &mut Gpu, _: u32| {

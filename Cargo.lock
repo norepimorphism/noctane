@@ -1365,11 +1365,14 @@ name = "noctane"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "minifb",
  "noctane-cpu",
  "noctane-gpu",
  "noctane-util",
+ "pollster",
  "tracing",
  "tracing-subscriber",
+ "wgpu-types",
 ]
 
 [[package]]
@@ -1402,9 +1405,11 @@ name = "noctane-gpu"
 version = "0.1.0"
 dependencies = [
  "bitfield",
+ "minifb",
  "noctane-util",
  "ringbuffer",
  "tracing",
+ "wgpu",
 ]
 
 [[package]]
@@ -1449,7 +1454,6 @@ dependencies = [
  "anyhow",
  "futures",
  "minifb",
- "wgpu",
 ]
 
 [[package]]
@@ -1683,6 +1687,12 @@ checksum = "521fa9638fa597e1dc53e9412a4f9cefb01187ee1f7413076f9e6749e2885ba9"
 dependencies = [
  "plotters-backend",
 ]
+
+[[package]]
+name = "pollster"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
 
 [[package]]
 name = "ppv-lite86"

@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use anyhow::anyhow;
-use futures::executor::block_on;
 // This is usually a bad idea, but we use *so many* WGPU imports that it would be inconvenient
 // otherwise.
 use wgpu::*;
+
+#[derive(Debug)]
+pub enum Error {
+    NoCompatibleAdapterFound,
+    NoCompatibleDeviceFound,
+}
+
+pub struct Vertex {
+    pos: [f32; 3],
+}
 
 /// A WebGPU-backed 3D renderer.
 #[derive(Debug)]
@@ -13,38 +21,47 @@ pub struct Renderer {
     pipeline: RenderPipeline,
     queue: Queue,
     surface: Surface,
+    vertex_buffer: Buffer,
 }
 
 impl Renderer {
     /// Creates a new `Renderer`.
-    pub fn new(
+    ///
+    /// # Safety
+    pub async unsafe fn new(
         window: &minifb::Window,
         backends: Backends,
-    ) -> anyhow::Result<Self> {
-        let (adapter, surface) = Self::create_adapter_and_surface(window, backends)?;
-        let (device, queue) = Self::create_device_and_queue(&adapter)?;
+    ) -> Result<Self, Error> {
+        let (adapter, surface) = Self::create_adapter_and_surface(window, backends).await?;
+        let (device, queue) = Self::create_device_and_queue(&adapter).await?;
 
-        let bind_group_layout = Self::create_bind_group_layout(&device);
         let surface_format = surface
             .get_preferred_format(&adapter)
             .expect("surface is incompatible with the adapter");
         Self::configure_surface(window, &device, &surface, surface_format);
-        let pipeline = Self::create_pipeline(&device, &[&bind_group_layout], surface_format);
+        let bind_group_layout = Self::create_bind_group_layout(&device);
+        let pipeline = Self::create_pipeline(
+            &device,
+            &[&bind_group_layout],
+            surface_format,
+        );
+        let vertex_buffer = Self::create_vertex_buffer(&device);
 
         Ok(Self {
             device,
             pipeline,
             queue,
             surface,
+            vertex_buffer,
         })
     }
 
     /// Creates handles to the graphics backend as well as the surface upon which rendering will
     /// take place.
-    fn create_adapter_and_surface(
+    async fn create_adapter_and_surface(
         window: &minifb::Window,
         backends: Backends,
-    ) -> anyhow::Result<(Adapter, Surface)> {
+    ) -> Result<(Adapter, Surface), Error> {
         let instance = Instance::new(backends);
 
         // SAFETY: [`Instance::create_surface`] requires that the window is valid and will live for
@@ -53,12 +70,26 @@ impl Renderer {
         // until the end of [`Ui::run`].
         let surface = unsafe { instance.create_surface(window) };
 
-        block_on(instance.request_adapter(&RequestAdapterOptions {
+        instance.request_adapter(&RequestAdapterOptions {
             compatible_surface: Some(&surface),
             ..Default::default()
-        }))
-        .ok_or_else(|| anyhow!("Failed to find a compatible adapter"))
+        })
+        .await
+        .ok_or_else(|| Error::NoCompatibleAdapterFound)
         .map(|adapter| (adapter, surface))
+    }
+
+    /// Creates handles to the logical graphics device as well as the command buffer queue.
+    async fn create_device_and_queue(adapter: &Adapter) -> Result<(Device, Queue), Error> {
+        adapter.request_device(
+            &DeviceDescriptor {
+                limits: adapter.limits(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .map_err(|e| Error::NoCompatibleDeviceFound)
     }
 
     fn configure_surface(
@@ -84,26 +115,6 @@ impl Renderer {
         );
     }
 
-    /// Creates handles to the logical graphics device as well as the command buffer queue.
-    fn create_device_and_queue(adapter: &Adapter) -> anyhow::Result<(Device, Queue)> {
-        block_on(adapter.request_device(
-            &DeviceDescriptor {
-                limits: adapter.limits(),
-                ..Default::default()
-            },
-            None,
-        ))
-        .map_err(|e| anyhow::Error::from(e).context("Failed to find a compatible device"))
-    }
-
-    fn create_texture_size(size: (u32, u32)) -> Extent3d {
-        Extent3d {
-            width: size.0,
-            height: size.1,
-            depth_or_array_layers: 1,
-        }
-    }
-
     fn create_pipeline(
         device: &Device,
         bind_group_layouts: &[&BindGroupLayout],
@@ -115,10 +126,17 @@ impl Renderer {
             vertex: VertexState {
                 module: &Self::create_vertex_shader(device),
                 entry_point: "main",
-                buffers: &[],
+                buffers: &[VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
+                    step_mode: VertexStepMode::Vertex,
+                    attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                }],
             },
             fragment: None,
-            primitive: PrimitiveState::default(),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: MultisampleState::default(),
             multiview: None,
@@ -138,6 +156,16 @@ impl Renderer {
 
     fn create_vertex_shader(device: &Device) -> ShaderModule {
         device.create_shader_module(&include_wgsl!("gfx/vertex.wgsl"))
+    }
+
+    fn create_vertex_buffer(device: &Device) -> Buffer {
+        device.create_buffer(&BufferDescriptor {
+            label: None,
+            // TODO
+            size: (std::mem::size_of::<Vertex>() as BufferAddress) * 512,
+            usage: BufferUsages::VERTEX,
+            mapped_at_creation: true,
+        })
     }
 
     fn create_texture(device: &Device, size: Extent3d) -> Texture {
@@ -203,8 +231,7 @@ impl Renderer {
     }
 
     fn create_command_encoder(&self) -> CommandEncoder {
-        self.device
-            .create_command_encoder(&CommandEncoderDescriptor::default())
+        self.device.create_command_encoder(&CommandEncoderDescriptor::default())
     }
 
     fn create_texture_view(texture: &Texture) -> TextureView {
@@ -213,10 +240,10 @@ impl Renderer {
 
     fn do_render_pass(&self, encoder: &mut CommandEncoder, view: &TextureView) {
         let mut pass = Self::create_render_pass(encoder, view);
-
-        // pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(&self.pipeline);
         // pass.set_bind_group(0, &self.bind_group, &[]);
-        // pass.draw(0..3, 0..1);
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.draw(0..3, 0..1);
     }
 
     fn create_render_pass<'a>(

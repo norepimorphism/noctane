@@ -5,15 +5,15 @@ use std::time::Instant;
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 
-impl Default for Core {
-    fn default() -> Self {
+impl Core {
+    pub fn new(gfx: noctane_gpu::gfx::Renderer) -> Self {
         Self {
             banks: Default::default(),
             bus_cfg: Default::default(),
             cpu_state: Default::default(),
             dma_cfg: Default::default(),
             int: Default::default(),
-            gpu: Default::default(),
+            gpu: Gpu::new(gfx),
             last_gpu_result: 0,
             last_vblank: Instant::now(),
             post: Default::default(),
