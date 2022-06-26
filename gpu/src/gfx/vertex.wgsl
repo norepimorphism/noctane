@@ -1,9 +1,15 @@
+fn scale_coord(coord: i32) -> f32 {
+    return f32(coord + 1024) / 2048.0;
+}
+
 [[stage(vertex)]]
 fn main(
-    [[builtin(vertex_index)]] index: u32,
+    [[location(0)]] pos: vec2<i32>,
 ) -> [[builtin(position)]] vec4<f32> {
-    // TODO
-    let x = f32(1 - i32(index)) * 0.5;
-    let y = f32((i32(index & 1u) * 2) - 1) * 0.5;
-    return vec4<f32>(x, y, 0.0, 1.0);
+    return vec4<f32>(
+        scale_coord(pos.x),
+        scale_coord(pos.y),
+        0.0,
+        1.0,
+    );
 }

@@ -89,7 +89,12 @@ impl Gpu {
                                 process_min_arg_count!($($min_arg_count)?)
                             }
                         )*
-                        _ => todo!(),
+                        _ => {
+                            // TODO
+                            loop {
+                                std::thread::yield_now();
+                            }
+                        }
                     }
                 };
             }
@@ -128,12 +133,27 @@ impl Gpu {
                     min_arg_count: 4,
                     fn: |this: &mut Gpu, _: u32| {
                         // TODO
+
+                        use crate::gfx::Vertex;
+
                         let verts = [
-                            this.gp0_queue.dequeue().unwrap(),
-                            this.gp0_queue.dequeue().unwrap(),
-                            this.gp0_queue.dequeue().unwrap(),
-                            this.gp0_queue.dequeue().unwrap(),
+                            Vertex::decode(this.gp0_queue.dequeue().unwrap()),
+                            Vertex::decode(this.gp0_queue.dequeue().unwrap()),
+                            Vertex::decode(this.gp0_queue.dequeue().unwrap()),
+                            Vertex::decode(this.gp0_queue.dequeue().unwrap()),
                         ];
+                        tracing::error!("RECT: {:#?}", verts);
+
+                        this.gfx.draw_triangle([
+                            verts[0],
+                            verts[1],
+                            verts[2],
+                        ]);
+                        this.gfx.draw_triangle([
+                            verts[1],
+                            verts[2],
+                            verts[3],
+                        ]);
                     },
                 },
                 {

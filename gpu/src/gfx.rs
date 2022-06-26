@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use noctane_util::BitStack as _;
 // This is usually a bad idea, but we use *so many* WGPU imports that it would be inconvenient
 // otherwise.
-use wgpu::*;
+use wgpu::{*, util::DeviceExt as _};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,24 +11,43 @@ pub enum Error {
     NoCompatibleDeviceFound,
 }
 
-pub struct Vertex {
-    pos: [f32; 3],
+impl Vertex {
+    pub fn decode(mut code: u32) -> Self {
+        let x = code.pop_bits(11) as i16;
+        code.pop_bits(5);
+        let y = code.pop_bits(11) as i16;
+
+        Self {
+            pos: [x, y],
+        }
+    }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct Vertex {
+    pos: [i16; 2],
+}
+
+unsafe impl bytemuck::Pod for Vertex {}
+unsafe impl bytemuck::Zeroable for Vertex {}
 
 /// A WebGPU-backed 3D renderer.
 #[derive(Debug)]
 pub struct Renderer {
+    bind_group: BindGroup,
     device: Device,
     pipeline: RenderPipeline,
     queue: Queue,
     surface: Surface,
-    vertex_buffer: Buffer,
+    vertices: Vec<Vertex>,
 }
 
 impl Renderer {
     /// Creates a new `Renderer`.
     ///
     /// # Safety
+    ///
+    /// `window` must live for as long as the returned renderer.
     pub async unsafe fn new(
         window: &minifb::Window,
         backends: Backends,
@@ -40,19 +60,20 @@ impl Renderer {
             .expect("surface is incompatible with the adapter");
         Self::configure_surface(window, &device, &surface, surface_format);
         let bind_group_layout = Self::create_bind_group_layout(&device);
+        let bind_group = Self::create_bind_group(&device, &bind_group_layout);
         let pipeline = Self::create_pipeline(
             &device,
-            &[&bind_group_layout],
+            &[],
             surface_format,
         );
-        let vertex_buffer = Self::create_vertex_buffer(&device);
 
         Ok(Self {
+            bind_group,
             device,
             pipeline,
             queue,
             surface,
-            vertex_buffer,
+            vertices: Vec::new(),
         })
     }
 
@@ -84,12 +105,13 @@ impl Renderer {
         adapter.request_device(
             &DeviceDescriptor {
                 limits: adapter.limits(),
+                features: Features::POLYGON_MODE_LINE,
                 ..Default::default()
             },
             None,
         )
         .await
-        .map_err(|e| Error::NoCompatibleDeviceFound)
+        .map_err(|_| Error::NoCompatibleDeviceFound)
     }
 
     fn configure_surface(
@@ -129,12 +151,21 @@ impl Renderer {
                 buffers: &[VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
                     step_mode: VertexStepMode::Vertex,
-                    attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                    attributes: &vertex_attr_array![0 => Sint16x2],
                 }],
             },
-            fragment: None,
+            fragment: Some(FragmentState {
+                module: &Self::create_fragment_shader(device),
+                entry_point: "main",
+                targets: &[wgpu::ColorTargetState {
+                    format: texture_format,
+                    blend: None,
+                    write_mask: ColorWrites::ALL,
+                }],
+            }),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
+                polygon_mode: PolygonMode::Line,
                 ..Default::default()
             },
             depth_stencil: None,
@@ -158,14 +189,8 @@ impl Renderer {
         device.create_shader_module(&include_wgsl!("gfx/vertex.wgsl"))
     }
 
-    fn create_vertex_buffer(device: &Device) -> Buffer {
-        device.create_buffer(&BufferDescriptor {
-            label: None,
-            // TODO
-            size: (std::mem::size_of::<Vertex>() as BufferAddress) * 512,
-            usage: BufferUsages::VERTEX,
-            mapped_at_creation: true,
-        })
+    fn create_fragment_shader(device: &Device) -> ShaderModule {
+        device.create_shader_module(&include_wgsl!("gfx/fragment.wgsl"))
     }
 
     fn create_texture(device: &Device, size: Extent3d) -> Texture {
@@ -190,7 +215,6 @@ impl Renderer {
     fn create_bind_group(
         device: &Device,
         layout: &BindGroupLayout,
-        texture_view: &TextureView,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: None,
@@ -220,11 +244,16 @@ impl Renderer {
         }
     }
 
+    pub fn draw_triangle(&mut self, vertices: [Vertex; 3]) {
+        self.vertices.extend(vertices);
+    }
+
     pub fn render(&self) {
         let frame = self.surface.get_current_texture().unwrap();
 
         let mut encoder = self.create_command_encoder();
-        self.do_render_pass(&mut encoder, &Self::create_texture_view(&frame.texture));
+        let vertex_buffer = self.create_vertex_buffer();
+        self.do_render_pass(&mut encoder, &vertex_buffer, &Self::create_texture_view(&frame.texture));
         self.queue.submit(Some(encoder.finish()));
 
         frame.present();
@@ -238,35 +267,41 @@ impl Renderer {
         texture.create_view(&TextureViewDescriptor::default())
     }
 
-    fn do_render_pass(&self, encoder: &mut CommandEncoder, view: &TextureView) {
+    fn do_render_pass(
+        &self,
+        encoder: &mut CommandEncoder,
+        vertex_buffer: &Buffer,
+        view: &TextureView,
+    ) {
         let mut pass = Self::create_render_pass(encoder, view);
         pass.set_pipeline(&self.pipeline);
-        // pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.draw(0..3, 0..1);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..(self.vertices.len() as u32), 0..1);
     }
 
     fn create_render_pass<'a>(
         encoder: &'a mut CommandEncoder,
         view: &'a TextureView,
     ) -> RenderPass<'a> {
-        const CLEAR_COLOR: Color = Color {
-            r: 0.2,
-            g: 0.1,
-            b: 0.5,
-            a: 1.0,
-        };
-
         encoder.begin_render_pass(&RenderPassDescriptor {
             color_attachments: &[RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(CLEAR_COLOR),
+                    load: LoadOp::Clear(Color::BLACK),
                     store: true,
                 },
             }],
             ..Default::default()
+        })
+    }
+
+    fn create_vertex_buffer(&self) -> Buffer {
+        self.device.create_buffer_init(&util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&self.vertices),
+            usage: BufferUsages::VERTEX,
         })
     }
 }
