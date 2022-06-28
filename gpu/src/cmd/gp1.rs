@@ -22,7 +22,7 @@ impl crate::Gpu {
                 self.clear_gp0_queue();
             }
             Command::AckInterrupt => {
-                todo!()
+                // TODO
             }
             Command::SetDisplayEnabled(value) => {
                 self.display.is_enabled = value;

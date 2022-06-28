@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! The PSX Graphics Processing Unit (GPU).
+//!
+//! This module implements GPU-related types and functions, which are considered to encompass the
+//! following:
+//! - GPU command decoding and execution
+//! - Rendering
+
 pub mod cmd;
 pub mod gfx;
 
@@ -25,6 +32,7 @@ impl Gpu {
             display: Display::default(),
             dma_request: None,
             gfx,
+            gp0_strat: cmd::gp0::QueueStrategy::PushWord,
             gp0_state: None,
             gp0_queue: ConstGenericRingBuffer::new(),
         }
@@ -37,6 +45,7 @@ pub struct Gpu {
     pub display: Display,
     pub dma_request: Option<DmaRequest>,
     pub gfx: gfx::Renderer,
+    gp0_strat: cmd::gp0::QueueStrategy,
     gp0_state: Option<cmd::gp0::State>,
     gp0_queue: ConstGenericRingBuffer<u32, 16>,
 }

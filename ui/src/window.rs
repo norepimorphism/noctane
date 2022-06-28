@@ -19,7 +19,7 @@ impl<'b> Windows<'b> {
                 }
                 .create_window(boing)?,
             )?,
-            game: noctane_util::game::Window::new(640, 480),
+            game: noctane_util::game::create_window(640, 480),
             log: log::Window::new(
                 Descriptor {
                     title: "Log",
@@ -52,7 +52,7 @@ impl<'b> Windows<'b> {
 
 pub struct Windows<'b> {
     pub about: about::Window<'b>,
-    pub game: noctane_util::game::Window,
+    pub game: minifb::Window,
     pub log: log::Window<'b>,
     pub main: main::Window<'b>,
     pub prefs: prefs::Window<'b>,

@@ -13,19 +13,19 @@ pub enum Error {
 
 impl Vertex {
     pub fn decode(mut code: u32) -> Self {
-        let x = code.pop_bits(11) as i16;
+        let x = code.pop_bits(11) as u16;
         code.pop_bits(5);
-        let y = code.pop_bits(11) as i16;
+        let y = code.pop_bits(11) as u16;
 
-        Self {
-            pos: [x, y],
-        }
+        Self { x, y }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[repr(C, align(2))]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
-    pos: [i16; 2],
+    pub x: u16,
+    pub y: u16,
 }
 
 unsafe impl bytemuck::Pod for Vertex {}
@@ -151,7 +151,7 @@ impl Renderer {
                 buffers: &[VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
                     step_mode: VertexStepMode::Vertex,
-                    attributes: &vertex_attr_array![0 => Sint16x2],
+                    attributes: &vertex_attr_array![0 => Uint16x2],
                 }],
             },
             fragment: Some(FragmentState {
@@ -193,18 +193,6 @@ impl Renderer {
         device.create_shader_module(&include_wgsl!("gfx/fragment.wgsl"))
     }
 
-    fn create_texture(device: &Device, size: Extent3d) -> Texture {
-        device.create_texture(&TextureDescriptor {
-            label: None,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D3,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-        })
-    }
-
     fn create_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -223,32 +211,24 @@ impl Renderer {
         })
     }
 
-    // pub fn update_texture(&mut self, data: &[u8]) {
-    //     self.queue.write_texture(
-    //         self.texture.as_image_copy(),
-    //         data,
-    //         self.image_data_layout(),
-    //         self.texture_size,
-    //     );
-    // }
-
-    fn image_data_layout_for_tex_size(size: Extent3d) -> ImageDataLayout {
-        use std::num::NonZeroU32;
-
-        const WORD_SIZE: u32 = std::mem::size_of::<u32>() as u32;
-
-        ImageDataLayout {
-            offset: 0,
-            bytes_per_row: NonZeroU32::new(WORD_SIZE * size.width),
-            rows_per_image: NonZeroU32::new(size.height),
-        }
+    pub fn draw_quad(&mut self, vertices: [Vertex; 4]) {
+        self.draw_triangle([
+            vertices[0],
+            vertices[1],
+            vertices[2],
+        ]);
+        self.draw_triangle([
+            vertices[1],
+            vertices[2],
+            vertices[3],
+        ]);
     }
 
     pub fn draw_triangle(&mut self, vertices: [Vertex; 3]) {
         self.vertices.extend(vertices);
     }
 
-    pub fn render(&self) {
+    pub fn render(&mut self) {
         let frame = self.surface.get_current_texture().unwrap();
 
         let mut encoder = self.create_command_encoder();
@@ -257,6 +237,8 @@ impl Renderer {
         self.queue.submit(Some(encoder.finish()));
 
         frame.present();
+
+        self.vertices.clear();
     }
 
     fn create_command_encoder(&self) -> CommandEncoder {

@@ -223,13 +223,14 @@ impl Debugger {
             let step = self.step();
             handle_step(self, &step);
 
-            let should_break_on_addr = self.addr_breakpoints
-                .get(&step.execed.fetched.addr)
-                .is_some();
-            if  step.should_break || should_break_on_addr {
-                Self::print_break(&step.execed);
-                return Ok(());
-            }
+            // let should_break_on_addr = self.addr_breakpoints
+            //     .get(&step.execed.fetched.addr)
+            //     .is_some();
+
+            // if step.should_break || should_break_on_addr {
+            //     Self::print_break(&step.execed);
+            //     return Ok(());
+            // }
         }
     }
 
