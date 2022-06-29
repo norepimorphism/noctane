@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use noctane_util::BitStack as _;
+use raw_window_handle::HasRawWindowHandle;
 // This is usually a bad idea, but we use *so many* WGPU imports that it would be inconvenient
 // otherwise.
 use wgpu::{*, util::DeviceExt as _};
@@ -36,9 +37,11 @@ unsafe impl bytemuck::Zeroable for Vertex {}
 pub struct Renderer {
     bind_group: BindGroup,
     device: Device,
+    just_rendered: bool,
     pipeline: RenderPipeline,
     queue: Queue,
     surface: Surface,
+    surface_format: TextureFormat,
     vertices: Vec<Vertex>,
 }
 
@@ -49,7 +52,7 @@ impl Renderer {
     ///
     /// `window` must live for as long as the returned renderer.
     pub async unsafe fn new(
-        window: &minifb::Window,
+        window: &impl HasRawWindowHandle,
         backends: Backends,
     ) -> Result<Self, Error> {
         let (adapter, surface) = Self::create_adapter_and_surface(window, backends).await?;
@@ -58,7 +61,6 @@ impl Renderer {
         let surface_format = surface
             .get_preferred_format(&adapter)
             .expect("surface is incompatible with the adapter");
-        Self::configure_surface(window, &device, &surface, surface_format);
         let bind_group_layout = Self::create_bind_group_layout(&device);
         let bind_group = Self::create_bind_group(&device, &bind_group_layout);
         let pipeline = Self::create_pipeline(
@@ -70,9 +72,11 @@ impl Renderer {
         Ok(Self {
             bind_group,
             device,
+            just_rendered: false,
             pipeline,
             queue,
             surface,
+            surface_format,
             vertices: Vec::new(),
         })
     }
@@ -80,7 +84,7 @@ impl Renderer {
     /// Creates handles to the graphics backend as well as the surface upon which rendering will
     /// take place.
     async fn create_adapter_and_surface(
-        window: &minifb::Window,
+        window: &impl HasRawWindowHandle,
         backends: Backends,
     ) -> Result<(Adapter, Surface), Error> {
         let instance = Instance::new(backends);
@@ -114,24 +118,18 @@ impl Renderer {
         .map_err(|_| Error::NoCompatibleDeviceFound)
     }
 
-    fn configure_surface(
-        window: &minifb::Window,
-        device: &Device,
-        surface: &Surface,
-        format: TextureFormat,
-    ) {
-        let (width, height) = window.get_size();
-        surface.configure(
-            device,
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.surface.configure(
+            &self.device,
             &SurfaceConfiguration {
                 usage: {
                     TextureUsages::TEXTURE_BINDING
                         | TextureUsages::COPY_DST
                         | TextureUsages::RENDER_ATTACHMENT
                 },
-                format,
-                width: width as u32,
-                height: height as u32,
+                format: self.surface_format,
+                width,
+                height,
                 present_mode: PresentMode::Fifo,
             },
         );
@@ -225,6 +223,10 @@ impl Renderer {
     }
 
     pub fn draw_triangle(&mut self, vertices: [Vertex; 3]) {
+        if self.just_rendered {
+            self.vertices.clear();
+            self.just_rendered = false;
+        }
         self.vertices.extend(vertices);
     }
 
@@ -238,7 +240,7 @@ impl Renderer {
 
         frame.present();
 
-        self.vertices.clear();
+        self.just_rendered = true;
     }
 
     fn create_command_encoder(&self) -> CommandEncoder {

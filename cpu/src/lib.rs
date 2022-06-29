@@ -123,7 +123,7 @@ impl State {
     ///
     /// This method is very cheap, so don't shy away from calling it before executing every next
     /// instruction if necessary.
-    pub fn connect_bus<'s, 'b>(&'s mut self, bus: crate::Bus<'b>) -> Cpu<'s, 'b> {
+    pub fn connect_bus<'s, 'b>(&'s mut self, bus: Bus<'b>) -> Cpu<'s, 'b> {
         Cpu {
             pipeline: &mut self.pipeline,
             reg: &mut self.reg,

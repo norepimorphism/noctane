@@ -7,10 +7,9 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-bitfield = "0.13"
 bytemuck = "1.9"
-minifb = "0.23"
 noctane-util = { path = "../util" }
+raw-window-handle = { version = "0.4", features = ["alloc"] }
 ringbuffer = "0.8"
 tracing = "0.1"
 wgpu = "0.12"

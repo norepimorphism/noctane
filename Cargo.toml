@@ -12,7 +12,7 @@ members = [
 ]
 
 [profile.release]
-lto = "yes"
+lto = true
 
 [profile.release-with-debug]
 inherits = "release"
