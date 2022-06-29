@@ -12,6 +12,7 @@ impl Core {
             bus_cfg: Default::default(),
             cpu_state: Default::default(),
             dma_cfg: Default::default(),
+            instrs_since_last_vblank: 0,
             int: Default::default(),
             gpu: Gpu::new(gfx),
             last_gpu_result: 0,
@@ -30,6 +31,7 @@ pub struct Core {
     pub bus_cfg: noctane_cpu::bus::io::bus::Config,
     pub cpu_state: noctane_cpu::State,
     pub dma_cfg: noctane_cpu::bus::io::dma::Config,
+    pub instrs_since_last_vblank: usize,
     pub int: noctane_cpu::bus::io::int::Sources,
     pub gpu: Gpu,
     pub last_gpu_result: u32,
@@ -72,6 +74,12 @@ impl Core {
     }
 
     pub fn take_vblank(&mut self) -> Option<()> {
+        // Greatly reduce the number of syscalls produced.
+        if (self.instrs_since_last_vblank < 250_000) || ((self.instrs_since_last_vblank % 10_000) > 0) {
+            return None;
+        }
+        self.instrs_since_last_vblank = 0;
+
         // 60 Hz.
         if self.last_vblank.elapsed().as_nanos() >= 16666667 {
             self.last_vblank = Instant::now();

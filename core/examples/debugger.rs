@@ -386,37 +386,35 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
-        let execed = {
-            if self.core.take_vblank().is_some() {
-                let render = &*self.render;
-                // Request a render operation.
-                let mut render_state = render.state.lock().unwrap();
-                *render_state = RenderState::Requested;
-                // The GUI thread locks `render_state` and sees that a render has been requested. At
-                // that point, the GUI thread will request a redraw, release the lock, re-acquire
-                // the lock (due to *winit* event handling), and, once in the redraw event, will set
-                // `render_state` to [`RenderState::InProgress`]. Finally, the lock is released
-                // again, and this thread continues.
-                let mut render_state = render.cvar.wait_while(
-                    render_state,
-                    |state| matches!(state, RenderState::Requested),
-                )
-                .unwrap();
-                // Perform the render operation.
-                self.core.gpu.gfx.render();
-                // The GUI thread is waiting for `render_state` to change, so we must now notify it.
-                *render_state = RenderState::Complete;
-                render.cvar.notify_one();
+        if self.core.take_vblank().is_some() {
+            let render = &*self.render;
+            // Request a render operation.
+            let mut render_state = render.state.lock().unwrap();
+            *render_state = RenderState::Requested;
+            // The GUI thread locks `render_state` and sees that a render has been requested. At
+            // that point, the GUI thread will request a redraw, release the lock, re-acquire
+            // the lock (due to *winit* event handling), and, once in the redraw event, will set
+            // `render_state` to [`RenderState::InProgress`]. Finally, the lock is released
+            // again, and this thread continues.
+            let mut render_state = render.cvar.wait_while(
+                render_state,
+                |state| matches!(state, RenderState::Requested),
+            )
+            .unwrap();
+            // Perform the render operation.
+            self.core.gpu.gfx.render();
+            // The GUI thread is waiting for `render_state` to change, so we must now notify it.
+            *render_state = RenderState::Complete;
+            render.cvar.notify_one();
 
-                self.core.issue_vblank();
+            self.core.issue_vblank();
 
-                // Release the `render_state` lock, allowing the GUI thread to acquire it and
-                // observe that the render is complete.
-            }
-            self.core.gpu.execute_next_gp0_command();
-
-            self.core.cpu().execute_next_instr()
-        };
+            // Release the `render_state` lock, allowing the GUI thread to acquire it and
+            // observe that the render is complete.
+        }
+        self.core.gpu.execute_next_gp0_command();
+        let execed = self.core.cpu().execute_next_instr();
+        self.core.instrs_since_last_vblank += 1;
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
             kind,
