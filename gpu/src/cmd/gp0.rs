@@ -8,8 +8,9 @@ use ringbuffer::{
     RingBufferRead as _,
     RingBufferWrite as _,
 };
+use stackvec::StackVec;
 
-use crate::Gpu;
+use crate::{gfx::Vertex, Gpu};
 use super::MachineCommand;
 
 #[derive(Clone, Debug)]
@@ -21,10 +22,12 @@ pub enum QueueStrategy {
 }
 
 pub struct State {
-    pub min_arg_count: usize,
+    pub arg_count: usize,
     pub param: u32,
-    pub execute: fn(&mut Gpu, u32),
+    pub execute: fn(&mut Gpu, u32, Arguments),
 }
+
+pub type Arguments = StackVec<[u32; 15]>;
 
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -72,13 +75,18 @@ impl Gpu {
 
     pub fn execute_next_gp0_command(&mut self) {
         if let Some(state) = self.gp0_state.as_mut() {
-            if self.gp0_queue.len() >= state.min_arg_count {
+            if self.gp0_queue.len() >= state.arg_count {
+                // We now have enough arguments to execute the command.
+
                 let param = state.param;
+                let args = self.gp0_queue
+                    .drain()
+                    .take(state.arg_count)
+                    .collect::<Arguments>();
                 let execute = state.execute;
                 self.gp0_state = None;
 
-                // We now have enough arguments to execute the command.
-                (execute)(self, param);
+                (execute)(self, param, args);
             }
         } else if let Some(mach) = self.gp0_queue.dequeue() {
             let mach = MachineCommand::decode(mach);
@@ -91,7 +99,7 @@ impl Gpu {
                         {
                             name: $name:tt,
                             $(
-                                min_arg_count: $min_arg_count:expr,
+                                arg_count: $arg_count:expr,
                             )?
                             fn: $fn:expr $(,)?
                         }
@@ -100,16 +108,16 @@ impl Gpu {
                     match cmd.kind {
                         $(
                             CommandKind::$name => {
-                                macro_rules! process_min_arg_count {
+                                macro_rules! process_arg_count {
                                     () => {
                                         // If there aren't any arguments, we can skip some steps and
                                         // execute the command immediately.
-                                        $fn(self, cmd.param)
+                                        $fn(self, cmd.param, Arguments::new())
                                     };
                                     ($count:expr) => {
                                         {
                                             self.gp0_state = Some(State {
-                                                min_arg_count: $count,
+                                                arg_count: $count,
                                                 param: cmd.param,
                                                 execute: $fn,
                                             });
@@ -117,7 +125,7 @@ impl Gpu {
                                     };
                                 }
 
-                                process_min_arg_count!($($min_arg_count)?)
+                                process_arg_count!($($arg_count)?)
                             }
                         )*
                         _ => {
@@ -130,80 +138,91 @@ impl Gpu {
             process_gp0_command!(
                 {
                     name: Nop,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // Do nothing.
                     },
                 },
                 {
                     name: ClearTexCache,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: QuickfillRect,
-                    fn: |this: &mut Gpu, color: u32| {
+                    arg_count: 2,
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
-                        let color = Color::decode(color);
-                        tracing::info!("Color: {:?}", color);
-                        this.gp0_queue.dequeue().unwrap();
-                        this.gp0_queue.dequeue().unwrap();
                     },
                 },
                 {
                     name: X03,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO: Undocumented.
                     },
                 },
                 {
                     name: RenderUnshadedUntexturedOpaqueQuad,
-                    min_arg_count: 4,
-                    fn: |this: &mut Gpu, _: u32| {
-                        let verts = this.decode_polygon::<4, false>();
-                        this.gfx.draw_quad(verts);
+                    arg_count: 4,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_polygon::<4, false, false>(args));
+                    },
+                },
+                {
+                    name: RenderUnshadedBlendedOpaqueQuad,
+                    arg_count: 8,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_polygon::<4, false, true>(args));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueTriangle,
-                    min_arg_count: 5,
-                    fn: |this: &mut Gpu, _: u32| {
-                        let verts = this.decode_polygon::<3, true>();
-                        this.gfx.draw_triangle(verts);
+                    arg_count: 5,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_triangle(Self::decode_polygon::<3, true, false>(args));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueQuad,
-                    min_arg_count: 7,
-                    fn: |this: &mut Gpu, _: u32| {
-                        let verts = this.decode_polygon::<4, true>();
-                        this.gfx.draw_quad(verts);
+                    arg_count: 7,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_polygon::<4, true, false>(args));
                     },
                 },
                 {
                     name: RenderUntexturedOpaqueRect,
-                    min_arg_count: 2,
-                    fn: |this: &mut Gpu, _: u32| {
-                        let verts = this.decode_rect::<false>();
-                        this.gfx.draw_quad(verts);
+                    arg_count: 2,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_rect::<false>(args));
                     },
                 },
                 {
                     name: RenderBlendedOpaqueRect,
-                    min_arg_count: 3,
-                    fn: |this: &mut Gpu, _: u32| {
-                        let verts = this.decode_rect::<true>();
-                        this.gfx.draw_quad(verts);
+                    arg_count: 3,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_rect::<true>(args));
+                    },
+                },
+                {
+                    name: RenderUntexturedOpaqueBigSquare,
+                    arg_count: 1,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_big_square::<false>(args));
+                    },
+                },
+                {
+                    name: RenderBlendedTranslucentSmallSquare,
+                    arg_count: 2,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_small_square::<true>(args));
                     },
                 },
                 {
                     name: MoveRectToVram,
-                    min_arg_count: 2,
-                    fn: |this: &mut Gpu, _: u32| {
-                        // TODO
-                        let _ = this.gp0_queue.dequeue().unwrap();
+                    arg_count: 2,
+                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
                         let (width, height) = {
-                            let mut size = this.gp0_queue.dequeue().unwrap();
+                            let mut size = args[1];
 
                             (size.pop_bits(16), size)
                         };
@@ -214,46 +233,44 @@ impl Gpu {
                 },
                 {
                     name: MoveRectToCpuBus,
-                    min_arg_count: 2,
-                    fn: |this: &mut Gpu, _: u32| {
+                    arg_count: 2,
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
-                        this.gp0_queue.dequeue().unwrap();
-                        this.gp0_queue.dequeue().unwrap();
                     },
                 },
                 {
                     name: SetTexpage,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: SetTexWindow,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: SetDrawingAreaTopLeft,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: SetDrawingAreaBottomRight,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: SetDrawingOffset,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
                 {
                     name: SetMask,
-                    fn: |_: &mut Gpu, _: u32| {
+                    fn: |_: &mut Gpu, _: u32, _: Arguments| {
                         // TODO
                     },
                 },
@@ -268,33 +285,43 @@ pub enum Opacity {
 }
 
 impl Gpu {
-    fn decode_polygon<const N: usize, const IS_SHADED: bool>(
-        &mut self,
-    ) -> [crate::gfx::Vertex; N] {
-        let mut is_initial = true;
+    fn decode_polygon<const N: usize, const IS_SHADED: bool, const IS_TEXTURED: bool>(
+        args: Arguments,
+    ) -> [Vertex; N] {
+        let mut skip = 0;
+        if IS_SHADED {
+            skip += 1;
+        }
+        if IS_TEXTURED {
+            skip += 1;
+        }
+        let mut vert_idx = 0;
         [(); N].map(|_| {
-            if IS_SHADED {
-                if is_initial {
-                    is_initial = false;
-                } else {
-                    // TODO: Shading color.
-                    let _ = self.gp0_queue.dequeue().unwrap();
-                }
-            }
-            let vert = crate::gfx::Vertex::decode(self.gp0_queue.dequeue().unwrap());
+            let vert = Vertex::decode(args[vert_idx]);
+            // Skip the shading argument.
+            vert_idx += 1 + skip;
 
             vert
         })
     }
 
-    fn decode_rect<const IS_TEXTURED: bool>(&mut self) -> [crate::gfx::Vertex; 4] {
-        let top_left = crate::gfx::Vertex::decode(self.gp0_queue.dequeue().unwrap());
-        if IS_TEXTURED {
-            // TODO: Texture coordinate and palette.
-            let _ = self.gp0_queue.dequeue().unwrap();
-        }
-        let size = crate::gfx::Vertex::decode(self.gp0_queue.dequeue().unwrap());
+    fn decode_dot<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+        Self::create_rect(Vertex::decode(args[0]), Vertex::new(1, 1))
+    }
 
+    fn decode_small_square<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+        Self::create_rect(Vertex::decode(args[0]), Vertex::new(8, 8))
+    }
+
+    fn decode_big_square<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+        Self::create_rect(Vertex::decode(args[0]), Vertex::new(16, 16))
+    }
+
+    fn decode_rect<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+        Self::create_rect(Vertex::decode(args[0]), Vertex::decode(args[2]))
+    }
+
+    const fn create_rect(top_left: Vertex, size: Vertex) -> [Vertex; 4] {
         let mut bottom_left = top_left;
         bottom_left.y += size.y;
         let mut top_right = top_left;
@@ -372,16 +399,28 @@ pub enum CommandKind {
     RenderShadedRawTranslucentLinestrip,
     RenderShadedRawTranslucentQuad,
     RenderUntexturedOpaqueDot,
+    RenderUntexturedOpaqueSmallSquare,
+    RenderUntexturedOpaqueBigSquare,
     RenderUntexturedOpaqueRect,
     RenderUntexturedTranslucentDot,
+    RenderUntexturedTranslucentSmallSquare,
+    RenderUntexturedTranslucentBigSquare,
     RenderUntexturedTranslucentRect,
     RenderBlendedOpaqueDot,
+    RenderBlendedOpaqueSmallSquare,
+    RenderBlendedOpaqueBigSquare,
     RenderBlendedOpaqueRect,
     RenderBlendedTranslucentDot,
+    RenderBlendedTranslucentSmallSquare,
+    RenderBlendedTranslucentBigSquare,
     RenderBlendedTranslucentRect,
     RenderRawOpaqueDot,
+    RenderRawOpaqueSmallSquare,
+    RenderRawOpaqueBigSquare,
     RenderRawOpaqueRect,
     RenderRawTranslucentDot,
+    RenderRawTranslucentSmallSquare,
+    RenderRawTranslucentBigSquare,
     RenderRawTranslucentRect,
     CopyRect,
     MoveRectToVram,
@@ -518,6 +557,22 @@ impl CommandKind {
             0x67        => Self::RenderRawTranslucentRect,
             0x68 | 0x69 => Self::RenderUntexturedOpaqueDot,
             0x6a | 0x6b => Self::RenderUntexturedTranslucentDot,
+            0x6c        => Self::RenderBlendedOpaqueDot,
+            0x6d        => Self::RenderRawOpaqueDot,
+            0x6e        => Self::RenderBlendedTranslucentDot,
+            0x6f        => Self::RenderRawTranslucentDot,
+            0x70 | 0x71 => Self::RenderUntexturedOpaqueSmallSquare,
+            0x72 | 0x73 => Self::RenderUntexturedTranslucentSmallSquare,
+            0x74        => Self::RenderBlendedOpaqueSmallSquare,
+            0x75        => Self::RenderRawOpaqueSmallSquare,
+            0x76        => Self::RenderBlendedTranslucentSmallSquare,
+            0x77        => Self::RenderRawTranslucentSmallSquare,
+            0x78 | 0x79 => Self::RenderUntexturedOpaqueBigSquare,
+            0x7a | 0x7b => Self::RenderUntexturedTranslucentBigSquare,
+            0x7c        => Self::RenderBlendedOpaqueBigSquare,
+            0x7d        => Self::RenderRawOpaqueBigSquare,
+            0x7e        => Self::RenderBlendedTranslucentBigSquare,
+            0x7f        => Self::RenderRawTranslucentBigSquare,
             0x80..=0x9f => Self::CopyRect,
             0xa0..=0xbf => Self::MoveRectToVram,
             0xc0..=0xdf => Self::MoveRectToCpuBus,

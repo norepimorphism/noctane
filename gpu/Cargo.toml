@@ -11,5 +11,6 @@ bytemuck = "1.9"
 noctane-util = { path = "../util" }
 raw-window-handle = { version = "0.4", features = ["alloc"] }
 ringbuffer = "0.8"
+stackvec = "0.2"
 tracing = "0.1"
 wgpu = "0.12"

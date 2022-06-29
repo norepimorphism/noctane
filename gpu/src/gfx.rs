@@ -20,6 +20,10 @@ impl Vertex {
 
         Self { x, y }
     }
+
+    pub fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
+    }
 }
 
 #[repr(C, align(2))]

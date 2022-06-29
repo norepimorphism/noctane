@@ -1604,6 +1604,7 @@ dependencies = [
  "noctane-util",
  "raw-window-handle 0.4.3",
  "ringbuffer",
+ "stackvec",
  "tracing",
  "wgpu",
 ]
@@ -2396,6 +2397,12 @@ dependencies = [
  "bitflags",
  "num-traits",
 ]
+
+[[package]]
+name = "stackvec"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a28337dadadf1f595e7472e02ed7e27cbc790828b10336f144b5790d21152c16"
 
 [[package]]
 name = "strsim"

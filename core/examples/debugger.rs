@@ -2,7 +2,7 @@
 
 #![feature(let_else, slice_as_chunks)]
 
-use std::{collections::HashSet, io::Write as _, sync::{Arc, Condvar, Mutex, MutexGuard}};
+use std::{collections::HashSet, io::Write as _, sync::{Arc, Condvar, Mutex}};
 
 struct Render {
     state: Mutex<RenderState>,
