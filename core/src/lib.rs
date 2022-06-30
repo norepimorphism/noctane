@@ -75,7 +75,7 @@ impl Core {
 
     pub fn take_vblank(&mut self) -> Option<()> {
         // Greatly reduce the number of syscalls produced.
-        if (self.instrs_since_last_vblank < 250_000) || ((self.instrs_since_last_vblank % 10_000) > 0) {
+        if (self.instrs_since_last_vblank < 50_000) || ((self.instrs_since_last_vblank % 5_000) > 0) {
             return None;
         }
         self.instrs_since_last_vblank = 0;
