@@ -1,15 +1,32 @@
 // SPDX-License-Identifier: MPL-2.0
 
+//! Noctane's WebGPU-backed 2D renderer.
+//!
+//! Due to the PSX's ability to allow DMA transfers from VRAM, it was necessary to split rendering
+//! into two stages. First, polygons are drawn to an internal texture, and then the texture is drawn
+//! to the underlying surface; if a DMA transfer from VRAM is requested, pending polygons are drawn
+//! to the internal texture prematurely and it is consulted.
+
 use noctane_util::BitStack as _;
 use raw_window_handle::HasRawWindowHandle;
 // This is usually a bad idea, but we use *so many* WGPU imports that it would be inconvenient
 // otherwise.
 use wgpu::{*, util::DeviceExt as _};
 
+const VRAM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+
 #[derive(Debug)]
 pub enum Error {
     NoCompatibleAdapterFound,
     NoCompatibleDeviceFound,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default)]
+pub enum TextureId {
+    #[default]
+    Void,
+    Vram,
 }
 
 impl Vertex {
@@ -18,35 +35,40 @@ impl Vertex {
         code.pop_bits(5);
         let y = code.pop_bits(11) as u16;
 
-        Self { x, y }
+        Self { x, y, tex_id: 0, tex_x: 0, tex_y: 0 }
     }
 
-    pub fn new(x: u16, y: u16) -> Self {
-        Self { x, y }
+    pub fn new(x: u16, y: u16, tex_id: TextureId, tex_x: u16, tex_y: u16) -> Self {
+        Self { x, y, tex_id: tex_id as u32, tex_x, tex_y }
     }
 }
 
-#[repr(C, align(2))]
+#[repr(C, align(4))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
     pub x: u16,
     pub y: u16,
+    pub tex_id: u32,
+    pub tex_x: u16,
+    pub tex_y: u16,
 }
 
 unsafe impl bytemuck::Pod for Vertex {}
 unsafe impl bytemuck::Zeroable for Vertex {}
 
-/// A WebGPU-backed 3D renderer.
+/// Noctane's WebGPU-backed 2D renderer.
 #[derive(Debug)]
 pub struct Renderer {
-    bind_group: BindGroup,
     device: Device,
     just_rendered: bool,
-    pipeline: RenderPipeline,
     queue: Queue,
     surface: Surface,
+    surface_bind_group: BindGroup,
     surface_format: TextureFormat,
+    surface_pipeline: RenderPipeline,
     vertices: Vec<Vertex>,
+    vram: Texture,
+    vram_pipeline: RenderPipeline,
 }
 
 impl Renderer {
@@ -65,23 +87,32 @@ impl Renderer {
         let surface_format = surface
             .get_preferred_format(&adapter)
             .expect("surface is incompatible with the adapter");
-        let bind_group_layout = Self::create_bind_group_layout(&device);
-        let bind_group = Self::create_bind_group(&device, &bind_group_layout);
-        let pipeline = Self::create_pipeline(
+
+        let vram = Self::create_vram(&device);
+        let vram_pipeline = Self::create_vram_pipeline(&device);
+        let surface_bind_group_layout = Self::create_surface_bind_group_layout(&device);
+        let surface_pipeline = Self::create_surface_pipeline(
             &device,
-            &[],
             surface_format,
+            &surface_bind_group_layout,
+        );
+        let surface_bind_group = Self::create_surface_bind_group(
+            &device,
+            &surface_bind_group_layout,
+            &vram,
         );
 
         Ok(Self {
-            bind_group,
             device,
             just_rendered: false,
-            pipeline,
             queue,
             surface,
+            surface_bind_group,
             surface_format,
+            surface_pipeline,
             vertices: Vec::new(),
+            vram,
+            vram_pipeline,
         })
     }
 
@@ -122,42 +153,114 @@ impl Renderer {
         .map_err(|_| Error::NoCompatibleDeviceFound)
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.surface.configure(
-            &self.device,
-            &SurfaceConfiguration {
-                usage: {
-                    TextureUsages::TEXTURE_BINDING
-                        | TextureUsages::COPY_DST
-                        | TextureUsages::RENDER_ATTACHMENT
-                },
-                format: self.surface_format,
-                width,
-                height,
-                present_mode: PresentMode::Fifo,
+    fn create_vram(device: &Device) -> Texture {
+        device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: 1024,
+                height: 512,
+                depth_or_array_layers: 1,
             },
-        );
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: VRAM_TEXTURE_FORMAT,
+            usage: {
+                TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::COPY_DST
+            },
+        })
+    }
+}
+
+macro_rules! create_shader_module {
+    ($device:expr, $path:literal $(,)?) => {
+        $device.create_shader_module(&include_wgsl!($path))
+    };
+}
+
+impl Renderer {
+    fn create_vram_pipeline(device: &Device) -> RenderPipeline {
+        Self::create_pipeline(
+            &device,
+            VRAM_TEXTURE_FORMAT,
+            PolygonMode::Line,
+            &[],
+            &[VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
+                step_mode: VertexStepMode::Vertex,
+                attributes: &vertex_attr_array![
+                    0 => Uint16x2,
+                    1 => Uint32,
+                    2 => Uint16x2,
+                ],
+            }],
+            &create_shader_module!(device, "gfx/vram/vertex.wgsl"),
+            &create_shader_module!(device, "gfx/vram/fragment.wgsl"),
+        )
+    }
+
+    fn create_surface_bind_group_layout(device: &Device) -> BindGroupLayout {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    fn create_surface_pipeline(
+        device: &Device,
+        format: TextureFormat,
+        bind_group_layout: &BindGroupLayout,
+    ) -> RenderPipeline {
+        Self::create_pipeline(
+            &device,
+            format,
+            PolygonMode::Fill,
+            &[&bind_group_layout],
+            &[],
+            &create_shader_module!(device, "gfx/surface/vertex.wgsl"),
+            &create_shader_module!(device, "gfx/surface/fragment.wgsl"),
+        )
     }
 
     fn create_pipeline(
         device: &Device,
-        bind_group_layouts: &[&BindGroupLayout],
         texture_format: TextureFormat,
+        polygon_mode: PolygonMode,
+        bind_group_layouts: &[&BindGroupLayout],
+        vertex_buffers: &[VertexBufferLayout],
+        vertex_shader: &ShaderModule,
+        fragment_shader: &ShaderModule,
     ) -> RenderPipeline {
         device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             layout: Some(&Self::create_pipeline_layout(device, bind_group_layouts)),
             vertex: VertexState {
-                module: &Self::create_vertex_shader(device),
+                module: vertex_shader,
                 entry_point: "main",
-                buffers: &[VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
-                    step_mode: VertexStepMode::Vertex,
-                    attributes: &vertex_attr_array![0 => Uint16x2],
-                }],
+                buffers: vertex_buffers,
             },
             fragment: Some(FragmentState {
-                module: &Self::create_fragment_shader(device),
+                module: fragment_shader,
                 entry_point: "main",
                 targets: &[wgpu::ColorTargetState {
                     format: texture_format,
@@ -167,7 +270,7 @@ impl Renderer {
             }),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
-                polygon_mode: PolygonMode::Line,
+                polygon_mode,
                 ..Default::default()
             },
             depth_stencil: None,
@@ -187,30 +290,59 @@ impl Renderer {
         })
     }
 
-    fn create_vertex_shader(device: &Device) -> ShaderModule {
-        device.create_shader_module(&include_wgsl!("gfx/vertex.wgsl"))
-    }
-
-    fn create_fragment_shader(device: &Device) -> ShaderModule {
-        device.create_shader_module(&include_wgsl!("gfx/fragment.wgsl"))
-    }
-
-    fn create_bind_group_layout(device: &Device) -> BindGroupLayout {
-        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[],
-        })
-    }
-
-    fn create_bind_group(
+    fn create_surface_bind_group(
         device: &Device,
         layout: &BindGroupLayout,
+        vram: &Texture,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: None,
-            entries: &[],
             layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&Self::create_texture_view(vram)),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&Self::create_vram_sampler(device)),
+                },
+            ],
         })
+    }
+
+    fn create_vram_sampler(device: &Device) -> Sampler {
+        device.create_sampler(&SamplerDescriptor {
+            label: None,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            lod_min_clamp: 1.0,
+            lod_max_clamp: 1.0,
+            compare: None,
+            anisotropy_clamp: None,
+            border_color: None,
+        })
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.surface.configure(
+            &self.device,
+            &SurfaceConfiguration {
+                usage: {
+                    TextureUsages::TEXTURE_BINDING
+                        | TextureUsages::RENDER_ATTACHMENT
+                        | TextureUsages::COPY_DST
+                },
+                format: self.surface_format,
+                width,
+                height,
+                present_mode: PresentMode::Fifo,
+            },
+        );
     }
 
     pub fn draw_quad(&mut self, vertices: [Vertex; 4]) {
@@ -234,12 +366,43 @@ impl Renderer {
         self.vertices.extend(vertices);
     }
 
+    pub fn blit(&mut self, top_left: Vertex, size: Vertex, data: &[u8]) {
+        self.queue.write_texture(
+            ImageCopyTexture {
+                texture: &self.vram,
+                mip_level: 0,
+                origin: Origin3d {
+                    x: u32::from(top_left.x),
+                    y: u32::from(top_left.y),
+                    z: 0,
+                },
+                aspect: TextureAspect::All,
+            },
+            data,
+            ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(
+                    (std::mem::size_of::<u32>() as u32) * u32::from(size.x)
+                ),
+                rows_per_image: None,
+            },
+            Extent3d {
+                width: u32::from(size.x),
+                height: u32::from(size.y),
+                depth_or_array_layers: 1,
+            },
+        )
+    }
+
     pub fn render(&mut self) {
+        let vram_view = Self::create_texture_view(&self.vram);
         let frame = self.surface.get_current_texture().unwrap();
 
         let mut encoder = self.create_command_encoder();
         let vertex_buffer = self.create_vertex_buffer();
-        self.do_render_pass(&mut encoder, &vertex_buffer, &Self::create_texture_view(&frame.texture));
+        // Draw to VRAM.
+        self.do_vram_render_pass(&mut encoder, &vertex_buffer, &vram_view);
+        self.do_surface_render_pass(&mut encoder, &Self::create_texture_view(&frame.texture));
         self.queue.submit(Some(encoder.finish()));
 
         frame.present();
@@ -247,25 +410,43 @@ impl Renderer {
         self.just_rendered = true;
     }
 
-    fn create_command_encoder(&self) -> CommandEncoder {
-        self.device.create_command_encoder(&CommandEncoderDescriptor::default())
-    }
-
     fn create_texture_view(texture: &Texture) -> TextureView {
         texture.create_view(&TextureViewDescriptor::default())
     }
 
-    fn do_render_pass(
+    fn create_command_encoder(&self) -> CommandEncoder {
+        self.device.create_command_encoder(&CommandEncoderDescriptor::default())
+    }
+
+    fn create_vertex_buffer(&self) -> Buffer {
+        self.device.create_buffer_init(&util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&self.vertices),
+            usage: BufferUsages::VERTEX,
+        })
+    }
+
+    fn do_vram_render_pass(
         &self,
         encoder: &mut CommandEncoder,
         vertex_buffer: &Buffer,
         view: &TextureView,
     ) {
         let mut pass = Self::create_render_pass(encoder, view);
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_pipeline(&self.vram_pipeline);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..(self.vertices.len() as u32), 0..1);
+    }
+
+    fn do_surface_render_pass(
+        &self,
+        encoder: &mut CommandEncoder,
+        view: &TextureView,
+    ) {
+        let mut pass = Self::create_render_pass(encoder, view);
+        pass.set_pipeline(&self.surface_pipeline);
+        pass.set_bind_group(0, &self.surface_bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     fn create_render_pass<'a>(
@@ -282,14 +463,6 @@ impl Renderer {
                 },
             }],
             ..Default::default()
-        })
-    }
-
-    fn create_vertex_buffer(&self) -> Buffer {
-        self.device.create_buffer_init(&util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&self.vertices),
-            usage: BufferUsages::VERTEX,
         })
     }
 }

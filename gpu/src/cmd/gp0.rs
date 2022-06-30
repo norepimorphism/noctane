@@ -18,6 +18,9 @@ pub enum QueueStrategy {
     PushWord,
     BlitPixels {
         rem_pixels: u32,
+        top_left: Vertex,
+        size: Vertex,
+        data: Vec<u8>,
     },
 }
 
@@ -38,23 +41,46 @@ impl fmt::Debug for State {
 }
 
 impl Gpu {
-    pub fn queue_gp0_word(&mut self, word: u32) -> Result<(), ()> {
+    pub fn queue_gp0_word(&mut self, mut word: u32) -> Result<(), ()> {
         match self.gp0_strat {
             QueueStrategy::PushWord => {
                 self.push_gp0_word(word)
             }
-            QueueStrategy::BlitPixels { ref mut rem_pixels } => {
+            QueueStrategy::BlitPixels {
+                ref mut rem_pixels,
+                top_left,
+                size,
+                ref mut data,
+            } => {
+                let pixel_1 = Self::convert_rgb5_to_rgba8(word.pop_bits(16) as u16);
+                let pixel_0 = Self::convert_rgb5_to_rgba8(word as u16);
+                data.extend(pixel_0);
+                data.extend(pixel_1);
+
                 // There are two pixels in a word.
                 *rem_pixels = rem_pixels.saturating_sub(2);
+
                 if *rem_pixels == 0 {
+                    self.gfx.blit(top_left, size, data);
                     self.gp0_strat = QueueStrategy::PushWord;
                 }
-
-                self.blit_pixels(word);
 
                 Ok(())
             }
         }
+    }
+
+    fn convert_rgb5_to_rgba8(mut halfword: u16) -> [u8; 4] {
+        let b = halfword.pop_bits(5);
+        let g = halfword.pop_bits(5);
+        let r = halfword.pop_bits(5);
+
+        [
+            r as u8,
+            g as u8,
+            b as u8,
+            u8::MAX,
+        ]
     }
 
     fn push_gp0_word(&mut self, word: u32) -> Result<(), ()> {
@@ -67,10 +93,6 @@ impl Gpu {
 
             Ok(())
         }
-    }
-
-    fn blit_pixels(&mut self, word: u32) {
-        // TODO
     }
 
     pub fn execute_next_gp0_command(&mut self) {
@@ -221,14 +243,19 @@ impl Gpu {
                     name: MoveRectToVram,
                     arg_count: 2,
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        let (width, height) = {
-                            let mut size = args[1];
+                        let top_left = Vertex::decode(args[0]);
+                        let size = Vertex::decode(args[1]);
+                        this.gfx.draw_quad(Self::create_rect(top_left, size));
 
-                            (size.pop_bits(16), size)
+                        let pixel_count = u32::from(size.x) * u32::from(size.y);
+                        this.gp0_strat = QueueStrategy::BlitPixels {
+                            rem_pixels: pixel_count,
+                            top_left,
+                            size,
+                            data: Vec::with_capacity(
+                                std::mem::size_of::<u16>() * (pixel_count as usize)
+                            ),
                         };
-
-                        let pixel_count = width * height;
-                        this.gp0_strat = QueueStrategy::BlitPixels { rem_pixels: pixel_count };
                     },
                 },
                 {
