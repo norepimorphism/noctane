@@ -7,6 +7,8 @@
 //! - GPU command decoding and execution
 //! - Rendering
 
+#![feature(is_some_with)]
+
 pub mod cmd;
 pub mod gfx;
 

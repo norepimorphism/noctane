@@ -88,7 +88,6 @@ unsafe impl bytemuck::Zeroable for Vertex {}
 pub struct Renderer {
     device: Device,
     just_rendered: bool,
-    pre_vram: Texture,
     queue: Queue,
     surface: Surface,
     surface_bind_group: BindGroup,
@@ -112,7 +111,6 @@ impl Renderer {
     ) -> Result<Self, Error> {
         let (adapter, surface) = Self::create_adapter_and_surface(window, backends).await?;
         let (device, queue) = Self::create_device_and_queue(&adapter).await?;
-        let pre_vram = Self::create_vram(&device);
         let vram = Self::create_vram(&device);
 
         let vram_bind_group_layout = Self::create_vram_bind_group_layout(&device);
@@ -128,12 +126,9 @@ impl Renderer {
         );
 
         let sampler = Self::create_sampler(&device);
-        let pre_vram_view = Self::create_texture_view(&pre_vram);
         let vram_bind_group = Self::create_vram_bind_group(
             &device,
             &vram_bind_group_layout,
-            &pre_vram_view,
-            &sampler,
         );
         let vram_view = Self::create_texture_view(&vram);
         let surface_bind_group = Self::create_surface_bind_group(
@@ -146,7 +141,6 @@ impl Renderer {
         Ok(Self {
             device,
             just_rendered: false,
-            pre_vram,
             queue,
             surface,
             surface_bind_group,
@@ -228,24 +222,7 @@ impl Renderer {
     fn create_vram_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("VRAM bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
+            entries: &[],
         })
     }
 
@@ -380,22 +357,11 @@ impl Renderer {
     fn create_vram_bind_group(
         device: &Device,
         layout: &BindGroupLayout,
-        pre_vram_view: &TextureView,
-        pre_vram_sampler: &Sampler,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("VRAM bind group"),
             layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(pre_vram_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(pre_vram_sampler),
-                },
-            ],
+            entries: &[],
         })
     }
 
@@ -460,9 +426,14 @@ impl Renderer {
     }
 
     pub fn blit(&mut self, top_left: Vertex, size: Vertex, data: &[u8]) {
+        let bytes_per_row = std::num::NonZeroU32::new(
+            (std::mem::size_of::<u32>() as u32) * u32::from(size.x)
+        );
+        assert!(bytes_per_row.is_some_and(|value| ((data.len() as u32) % value.get()) == 0));
+
         self.queue.write_texture(
             ImageCopyTexture {
-                texture: &self.pre_vram,
+                texture: &self.vram,
                 mip_level: 0,
                 origin: Origin3d {
                     x: u32::from(top_left.x),
@@ -474,9 +445,7 @@ impl Renderer {
             data,
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(
-                    (std::mem::size_of::<u32>() as u32) * u32::from(size.x)
-                ),
+                bytes_per_row,
                 rows_per_image: None,
             },
             Extent3d {
@@ -525,7 +494,14 @@ impl Renderer {
         vertex_buffer: &Buffer,
         view: &TextureView,
     ) {
-        let mut pass = Self::create_render_pass(encoder, view);
+        let mut pass = Self::create_render_pass(
+            encoder,
+            view,
+            Operations {
+                load: LoadOp::Load,
+                store: true,
+            },
+        );
         pass.set_pipeline(&self.vram_pipeline);
         pass.set_bind_group(0, &self.vram_bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -537,7 +513,14 @@ impl Renderer {
         encoder: &mut CommandEncoder,
         view: &TextureView,
     ) {
-        let mut pass = Self::create_render_pass(encoder, view);
+        let mut pass = Self::create_render_pass(
+            encoder,
+            view,
+            Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: true,
+            },
+        );
         pass.set_pipeline(&self.surface_pipeline);
         pass.set_bind_group(0, &self.surface_bind_group, &[]);
         pass.draw(0..3, 0..1);
@@ -546,15 +529,13 @@ impl Renderer {
     fn create_render_pass<'a>(
         encoder: &'a mut CommandEncoder,
         view: &'a TextureView,
+        ops: Operations<Color>,
     ) -> RenderPass<'a> {
         encoder.begin_render_pass(&RenderPassDescriptor {
             color_attachments: &[RenderPassColorAttachment {
                 view,
                 resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(Color::BLACK),
-                    store: true,
-                },
+                ops,
             }],
             ..Default::default()
         })

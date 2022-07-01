@@ -1655,19 +1655,19 @@ gen_cpu_bus_io!(
                                 todo!()
                             },
                             |mut params| {
-                                tracing::info!("Sending GPU block sequence...");
+                                tracing::info!("Sending GPU block sequence ({})...", params.count);
                                 let start_addr = params.txfer.cpu_bus_base;
                                 // TODO: Don't cast here.
                                 let start_idx = (start_addr / 4) as usize;
 
+                                let block_len = params.len;
+
                                 // TODO: Respect transfer direction.
                                 for block_idx in (0..params.count)
                                     .into_iter()
-                                    .map(|i| {
-                                        // TODO: Don't cast here.
-                                        start_idx + (i as usize)
-                                    })
+                                    .map(|i| start_idx + ((i * block_len) as usize))
                                 {
+                                    tracing::info!("Block {}", block_idx);
                                     for word_idx in (0..params.len)
                                         .into_iter()
                                         .map(|i| {
@@ -1676,13 +1676,11 @@ gen_cpu_bus_io!(
                                         })
                                     {
                                         if let Some(word) = params.ram.get(word_idx).copied() {
+                                            tracing::info!("Word {}: {:#010x}", word_idx, word);
                                             let _ = params.gpu.queue_gp0_word(word);
                                         } else {
                                             todo!()
                                         }
-                                    }
-                                    while !params.gpu.gp0_queue_is_empty() {
-                                        params.gpu.execute_next_gp0_command();
                                     }
                                 }
                             },

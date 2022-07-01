@@ -41,7 +41,7 @@ impl fmt::Debug for State {
 }
 
 impl Gpu {
-    pub fn queue_gp0_word(&mut self, mut word: u32) -> Result<(), ()> {
+    pub fn queue_gp0_word(&mut self, word: u32) -> Result<(), ()> {
         match self.gp0_strat {
             QueueStrategy::PushWord => {
                 self.push_gp0_word(word)
@@ -52,10 +52,14 @@ impl Gpu {
                 size,
                 ref mut data,
             } => {
-                let pixel_1 = Self::convert_rgb5_to_rgba8(word.pop_bits(16) as u16);
-                let pixel_0 = Self::convert_rgb5_to_rgba8(word as u16);
-                data.extend(pixel_0);
-                data.extend(pixel_1);
+                let bytes = word.to_be_bytes();
+                let pixels = [
+                    u16::from_be_bytes([bytes[0], bytes[1]]),
+                    u16::from_be_bytes([bytes[1], bytes[2]]),
+                ]
+                .map(Self::convert_rgb5_to_rgba8);
+                data.extend(pixels[0]);
+                data.extend(pixels[1]);
 
                 // There are two pixels in a word.
                 *rem_pixels = rem_pixels.saturating_sub(2);
@@ -71,9 +75,11 @@ impl Gpu {
     }
 
     fn convert_rgb5_to_rgba8(mut halfword: u16) -> [u8; 4] {
-        let b = halfword.pop_bits(5);
-        let g = halfword.pop_bits(5);
-        let r = halfword.pop_bits(5);
+        let mut pop_component = || halfword.pop_bits(5) << 3;
+
+        let r = pop_component();
+        let g = pop_component();
+        let b = pop_component();
 
         [
             r as u8,
@@ -245,9 +251,6 @@ impl Gpu {
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
                         let top_left = Vertex::decode(args[0]);
                         let size = Vertex::decode(args[1]);
-                        let rect = Self::create_rect(top_left, size).map(VertexBufferEntry::vram);
-                        this.gfx.draw_quad(rect);
-
                         let pixel_count = u32::from(size.x) * u32::from(size.y);
                         this.gp0_strat = QueueStrategy::BlitPixels {
                             rem_pixels: pixel_count,
@@ -403,8 +406,8 @@ impl Gpu {
     fn create_textured_entry(vert: Vertex) -> VertexBufferEntry {
         VertexBufferEntry::constant(
             vert,
-            // TODO: Use red for now.
-            [!0, 0, 0, !0],
+            // TODO: Use black for now.
+            [0, 0, 0, !0],
         )
     }
 }
