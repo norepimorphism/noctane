@@ -23,23 +23,28 @@ pub enum Error {
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default)]
-enum TextureId {
+enum SampleStrategy {
     #[default]
-    Void = 0,
+    Constant = 0,
     Vram = 1,
 }
 
 impl VertexBufferEntry {
-    pub fn void(vert: Vertex) -> Self {
-        Self::_new(vert, TextureId::Void)
+    pub fn constant(vert: Vertex, color: [u8; 4]) -> Self {
+        Self::_new(vert, SampleStrategy::Constant, color)
     }
 
     pub fn vram(vert: Vertex) -> Self {
-        Self::_new(vert, TextureId::Vram)
+        Self::_new(
+            vert,
+            SampleStrategy::Vram,
+            // Doesn't matter.
+            [0; 4],
+        )
     }
 
-    fn _new(vert: Vertex, tex_id: TextureId) -> Self {
-        Self { vert, tex_id: tex_id as u32 }
+    fn _new(vert: Vertex, sample_strat: SampleStrategy, color: [u8; 4]) -> Self {
+        Self { vert, sample_strat: sample_strat as u32, color }
     }
 }
 
@@ -47,7 +52,8 @@ impl VertexBufferEntry {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VertexBufferEntry {
     pub vert: Vertex,
-    pub tex_id: u32,
+    pub sample_strat: u32,
+    pub color: [u8; 4],
 }
 
 unsafe impl bytemuck::Pod for VertexBufferEntry {}
@@ -250,7 +256,7 @@ impl Renderer {
         Self::create_pipeline(
             &device,
             VRAM_TEXTURE_FORMAT,
-            PolygonMode::Line,
+            PolygonMode::Fill,
             &[bind_group_layout],
             &[VertexBufferLayout {
                 array_stride: std::mem::size_of::<VertexBufferEntry>() as BufferAddress,
@@ -258,6 +264,7 @@ impl Renderer {
                 attributes: &vertex_attr_array![
                     0 => Uint16x2,
                     1 => Uint32,
+                    2 => Uint32,
                 ],
             }],
             &create_shader_module!(device, "gfx/vram/vertex.wgsl"),

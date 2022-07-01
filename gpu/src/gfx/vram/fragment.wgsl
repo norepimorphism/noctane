@@ -6,9 +6,10 @@ var pre_vram_sampler: sampler;
 [[stage(fragment)]]
 fn main(
     [[location(0)]] pos: vec2<f32>,
-    [[location(1)]] id: u32,
+    [[location(1)]] sample_strat: u32,
+    [[location(2)]] color: u32,
 ) -> [[location(0)]] vec4<f32> {
-    switch(id) {
+    switch(sample_strat) {
         // VRAM.
         case 1: {
             return vec4<f32>(
@@ -17,9 +18,13 @@ fn main(
                 1.0,
             );
         }
-        // Void.
+        // Constant.
         default: {
-            return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+            return vec4<f32>(
+                unpack4x8unorm(color).rgb,
+                // Ignore the alpha channel.
+                1.0,
+            );
         }
     }
 }

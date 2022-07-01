@@ -186,57 +186,57 @@ impl Gpu {
                 {
                     name: RenderUnshadedUntexturedOpaqueQuad,
                     arg_count: 4,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_polygon::<4, false, false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_untextured_polygon_entries::<4, false>(param, args));
                     },
                 },
                 {
                     name: RenderUnshadedBlendedOpaqueQuad,
                     arg_count: 8,
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_polygon::<4, false, true>(args));
+                        this.gfx.draw_quad(Self::decode_textured_polygon_entries::<4, false>(args));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueTriangle,
                     arg_count: 5,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_triangle(Self::decode_polygon::<3, true, false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_triangle(Self::decode_untextured_polygon_entries::<3, true>(param, args));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueQuad,
                     arg_count: 7,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_polygon::<4, true, false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::decode_untextured_polygon_entries::<4, true>(param, args));
                     },
                 },
                 {
                     name: RenderUntexturedOpaqueRect,
                     arg_count: 2,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_rect::<false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::create_untextured_entries(Self::decode_rect(args), param));
                     },
                 },
                 {
                     name: RenderBlendedOpaqueRect,
                     arg_count: 3,
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_rect::<true>(args));
+                        this.gfx.draw_quad(Self::create_textured_entries(Self::decode_rect(args)));
                     },
                 },
                 {
                     name: RenderUntexturedOpaqueBigSquare,
                     arg_count: 1,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_big_square::<false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(Self::create_untextured_entries(Self::decode_big_square(args), param));
                     },
                 },
                 {
                     name: RenderBlendedTranslucentSmallSquare,
                     arg_count: 2,
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_small_square::<true>(args));
+                        this.gfx.draw_quad(Self::create_textured_entries(Self::decode_small_square(args)));
                     },
                 },
                 {
@@ -245,8 +245,7 @@ impl Gpu {
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
                         let top_left = Vertex::decode(args[0]);
                         let size = Vertex::decode(args[1]);
-                        let rect = Self::create_rect(top_left, size)
-                            .map(VertexBufferEntry::vram);
+                        let rect = Self::create_rect(top_left, size).map(VertexBufferEntry::vram);
                         this.gfx.draw_quad(rect);
 
                         let pixel_count = u32::from(size.x) * u32::from(size.y);
@@ -314,9 +313,32 @@ pub enum Opacity {
 }
 
 impl Gpu {
-    fn decode_polygon<const N: usize, const IS_SHADED: bool, const IS_TEXTURED: bool>(
+    fn decode_untextured_polygon_entries<const N: usize, const IS_SHADED: bool>(
+        param: u32,
         args: Arguments,
     ) -> [VertexBufferEntry; N] {
+        Self::decode_polygon_entries::<N, IS_SHADED, false, _>(
+            args,
+            |vert| Self::create_untextured_entry(vert, param),
+        )
+    }
+
+    fn decode_textured_polygon_entries<const N: usize, const IS_SHADED: bool>(
+        args: Arguments,
+    ) -> [VertexBufferEntry; N] {
+        Self::decode_polygon_entries::<N, IS_SHADED, true, _>(
+            args,
+            |vert| Self::create_textured_entry(vert),
+        )
+    }
+
+    fn decode_polygon_entries<const N: usize, const IS_SHADED: bool, const IS_TEXTURED: bool, F>(
+        args: Arguments,
+        create_entry: F,
+    ) -> [VertexBufferEntry; N]
+    where
+        F: Fn(Vertex) -> VertexBufferEntry,
+    {
         let mut skip = 0;
         if IS_SHADED {
             skip += 1;
@@ -325,33 +347,29 @@ impl Gpu {
             skip += 1;
         }
         let mut vert_idx = 0;
+
         [(); N].map(|_| {
-            let vert = VertexBufferEntry::void(Vertex::decode(args[vert_idx]));
-            // Skip the shading argument.
+            let entry = create_entry(Vertex::decode(args[vert_idx]));
             vert_idx += 1 + skip;
 
-            vert
+            entry
         })
     }
 
-    fn decode_dot<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
+    fn decode_dot(args: Arguments) -> [Vertex; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(1, 1))
-            .map(VertexBufferEntry::void)
     }
 
-    fn decode_small_square<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
+    fn decode_small_square(args: Arguments) -> [Vertex; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(8, 8))
-            .map(VertexBufferEntry::void)
     }
 
-    fn decode_big_square<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
+    fn decode_big_square(args: Arguments) -> [Vertex; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(16, 16))
-            .map(VertexBufferEntry::void)
     }
 
-    fn decode_rect<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
+    fn decode_rect(args: Arguments) -> [Vertex; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::decode(args[2]))
-            .map(VertexBufferEntry::void)
     }
 
     const fn create_rect(top_left: Vertex, size: Vertex) -> [Vertex; 4] {
@@ -368,6 +386,26 @@ impl Gpu {
             top_right,
             bottom_right,
         ]
+    }
+
+    fn create_untextured_entries<const N: usize>(verts: [Vertex; N], param: u32) -> [VertexBufferEntry; N] {
+        verts.map(|vert| Self::create_untextured_entry(vert, param))
+    }
+
+    fn create_textured_entries<const N: usize>(verts: [Vertex; N]) -> [VertexBufferEntry; N] {
+        verts.map(Self::create_textured_entry)
+    }
+
+    fn create_untextured_entry(vert: Vertex, param: u32) -> VertexBufferEntry {
+        VertexBufferEntry::constant(vert, param.to_le_bytes())
+    }
+
+    fn create_textured_entry(vert: Vertex) -> VertexBufferEntry {
+        VertexBufferEntry::constant(
+            vert,
+            // TODO: Use red for now.
+            [!0, 0, 0, !0],
+        )
     }
 }
 

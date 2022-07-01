@@ -15,6 +15,12 @@ struct Output {
         interpolate(flat),
     ]]
     tex_id: u32;
+    [[
+        location(2),
+        // The color of the invoking vertex is used for all fragments within this triangle.
+        interpolate(flat),
+    ]]
+    color: u32;
 };
 
 fn make_tex_coord(coord: u32, max: f32) -> f32 {
@@ -27,9 +33,11 @@ fn main(
     // Y range: [0, 512).
     [[location(0)]] pos: vec2<u32>,
     [[location(1)]] tex_id: u32,
+    [[location(2)]] color: u32,
 ) -> Output {
     var out: Output;
 
+    out.color = color;
     out.tex_id = tex_id;
     out.pre_vram_pos = vec2<f32>(
         // [0, 1024) -> [0.0, 1.0].
