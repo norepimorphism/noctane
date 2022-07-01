@@ -23,11 +23,35 @@ pub enum Error {
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default)]
-pub enum TextureId {
+enum TextureId {
     #[default]
-    Void,
-    Vram,
+    Void = 0,
+    Vram = 1,
 }
+
+impl VertexBufferEntry {
+    pub fn void(vert: Vertex) -> Self {
+        Self::_new(vert, TextureId::Void)
+    }
+
+    pub fn vram(vert: Vertex) -> Self {
+        Self::_new(vert, TextureId::Vram)
+    }
+
+    fn _new(vert: Vertex, tex_id: TextureId) -> Self {
+        Self { vert, tex_id: tex_id as u32 }
+    }
+}
+
+#[repr(C, align(4))]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VertexBufferEntry {
+    pub vert: Vertex,
+    pub tex_id: u32,
+}
+
+unsafe impl bytemuck::Pod for VertexBufferEntry {}
+unsafe impl bytemuck::Zeroable for VertexBufferEntry {}
 
 impl Vertex {
     pub fn decode(mut code: u32) -> Self {
@@ -35,22 +59,19 @@ impl Vertex {
         code.pop_bits(5);
         let y = code.pop_bits(11) as u16;
 
-        Self { x, y, tex_id: 0, tex_x: 0, tex_y: 0 }
+        Self { x, y }
     }
 
-    pub fn new(x: u16, y: u16, tex_id: TextureId, tex_x: u16, tex_y: u16) -> Self {
-        Self { x, y, tex_id: tex_id as u32, tex_x, tex_y }
+    pub fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
     }
 }
 
-#[repr(C, align(4))]
+#[repr(C, align(2))]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
     pub x: u16,
     pub y: u16,
-    pub tex_id: u32,
-    pub tex_x: u16,
-    pub tex_y: u16,
 }
 
 unsafe impl bytemuck::Pod for Vertex {}
@@ -61,13 +82,15 @@ unsafe impl bytemuck::Zeroable for Vertex {}
 pub struct Renderer {
     device: Device,
     just_rendered: bool,
+    pre_vram: Texture,
     queue: Queue,
     surface: Surface,
     surface_bind_group: BindGroup,
     surface_format: TextureFormat,
     surface_pipeline: RenderPipeline,
-    vertices: Vec<Vertex>,
+    vertex_buffer_entries: Vec<VertexBufferEntry>,
     vram: Texture,
+    vram_bind_group: BindGroup,
     vram_pipeline: RenderPipeline,
 }
 
@@ -83,35 +106,49 @@ impl Renderer {
     ) -> Result<Self, Error> {
         let (adapter, surface) = Self::create_adapter_and_surface(window, backends).await?;
         let (device, queue) = Self::create_device_and_queue(&adapter).await?;
+        let pre_vram = Self::create_vram(&device);
+        let vram = Self::create_vram(&device);
 
+        let vram_bind_group_layout = Self::create_vram_bind_group_layout(&device);
+        let vram_pipeline = Self::create_vram_pipeline(&device, &vram_bind_group_layout);
         let surface_format = surface
             .get_preferred_format(&adapter)
             .expect("surface is incompatible with the adapter");
-
-        let vram = Self::create_vram(&device);
-        let vram_pipeline = Self::create_vram_pipeline(&device);
         let surface_bind_group_layout = Self::create_surface_bind_group_layout(&device);
         let surface_pipeline = Self::create_surface_pipeline(
             &device,
             surface_format,
             &surface_bind_group_layout,
         );
+
+        let sampler = Self::create_sampler(&device);
+        let pre_vram_view = Self::create_texture_view(&pre_vram);
+        let vram_bind_group = Self::create_vram_bind_group(
+            &device,
+            &vram_bind_group_layout,
+            &pre_vram_view,
+            &sampler,
+        );
+        let vram_view = Self::create_texture_view(&vram);
         let surface_bind_group = Self::create_surface_bind_group(
             &device,
             &surface_bind_group_layout,
-            &vram,
+            &vram_view,
+            &sampler,
         );
 
         Ok(Self {
             device,
             just_rendered: false,
+            pre_vram,
             queue,
             surface,
             surface_bind_group,
             surface_format,
             surface_pipeline,
-            vertices: Vec::new(),
+            vertex_buffer_entries: Vec::new(),
             vram,
+            vram_bind_group,
             vram_pipeline,
         })
     }
@@ -155,7 +192,7 @@ impl Renderer {
 
     fn create_vram(device: &Device) -> Texture {
         device.create_texture(&TextureDescriptor {
-            label: None,
+            label: Some("VRAM"),
             size: Extent3d {
                 width: 1024,
                 height: 512,
@@ -182,19 +219,45 @@ macro_rules! create_shader_module {
 }
 
 impl Renderer {
-    fn create_vram_pipeline(device: &Device) -> RenderPipeline {
+    fn create_vram_bind_group_layout(device: &Device) -> BindGroupLayout {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("VRAM bind group layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    fn create_vram_pipeline(
+        device: &Device,
+        bind_group_layout: &BindGroupLayout,
+    ) -> RenderPipeline {
         Self::create_pipeline(
             &device,
             VRAM_TEXTURE_FORMAT,
             PolygonMode::Line,
-            &[],
+            &[bind_group_layout],
             &[VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as BufferAddress,
+                array_stride: std::mem::size_of::<VertexBufferEntry>() as BufferAddress,
                 step_mode: VertexStepMode::Vertex,
                 attributes: &vertex_attr_array![
                     0 => Uint16x2,
                     1 => Uint32,
-                    2 => Uint16x2,
                 ],
             }],
             &create_shader_module!(device, "gfx/vram/vertex.wgsl"),
@@ -204,7 +267,7 @@ impl Renderer {
 
     fn create_surface_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
+            label: Some("Surface bind group layout"),
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
@@ -290,28 +353,7 @@ impl Renderer {
         })
     }
 
-    fn create_surface_bind_group(
-        device: &Device,
-        layout: &BindGroupLayout,
-        vram: &Texture,
-    ) -> BindGroup {
-        device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&Self::create_texture_view(vram)),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&Self::create_vram_sampler(device)),
-                },
-            ],
-        })
-    }
-
-    fn create_vram_sampler(device: &Device) -> Sampler {
+    fn create_sampler(device: &Device) -> Sampler {
         device.create_sampler(&SamplerDescriptor {
             label: None,
             address_mode_u: AddressMode::ClampToEdge,
@@ -325,6 +367,50 @@ impl Renderer {
             compare: None,
             anisotropy_clamp: None,
             border_color: None,
+        })
+    }
+
+    fn create_vram_bind_group(
+        device: &Device,
+        layout: &BindGroupLayout,
+        pre_vram_view: &TextureView,
+        pre_vram_sampler: &Sampler,
+    ) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("VRAM bind group"),
+            layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(pre_vram_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(pre_vram_sampler),
+                },
+            ],
+        })
+    }
+
+    fn create_surface_bind_group(
+        device: &Device,
+        layout: &BindGroupLayout,
+        vram_view: &TextureView,
+        vram_sampler: &Sampler,
+    ) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Surface bind group"),
+            layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(vram_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(vram_sampler),
+                },
+            ],
         })
     }
 
@@ -345,31 +431,31 @@ impl Renderer {
         );
     }
 
-    pub fn draw_quad(&mut self, vertices: [Vertex; 4]) {
+    pub fn draw_quad(&mut self, entries: [VertexBufferEntry; 4]) {
         self.draw_triangle([
-            vertices[0],
-            vertices[1],
-            vertices[2],
+            entries[0],
+            entries[1],
+            entries[2],
         ]);
         self.draw_triangle([
-            vertices[1],
-            vertices[2],
-            vertices[3],
+            entries[1],
+            entries[2],
+            entries[3],
         ]);
     }
 
-    pub fn draw_triangle(&mut self, vertices: [Vertex; 3]) {
+    pub fn draw_triangle(&mut self, entries: [VertexBufferEntry; 3]) {
         if self.just_rendered {
-            self.vertices.clear();
+            self.vertex_buffer_entries.clear();
             self.just_rendered = false;
         }
-        self.vertices.extend(vertices);
+        self.vertex_buffer_entries.extend(entries);
     }
 
     pub fn blit(&mut self, top_left: Vertex, size: Vertex, data: &[u8]) {
         self.queue.write_texture(
             ImageCopyTexture {
-                texture: &self.vram,
+                texture: &self.pre_vram,
                 mip_level: 0,
                 origin: Origin3d {
                     x: u32::from(top_left.x),
@@ -420,8 +506,8 @@ impl Renderer {
 
     fn create_vertex_buffer(&self) -> Buffer {
         self.device.create_buffer_init(&util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&self.vertices),
+            label: Some("Vertex buffer"),
+            contents: bytemuck::cast_slice(&self.vertex_buffer_entries),
             usage: BufferUsages::VERTEX,
         })
     }
@@ -434,8 +520,9 @@ impl Renderer {
     ) {
         let mut pass = Self::create_render_pass(encoder, view);
         pass.set_pipeline(&self.vram_pipeline);
+        pass.set_bind_group(0, &self.vram_bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(0..(self.vertices.len() as u32), 0..1);
+        pass.draw(0..(self.vertex_buffer_entries.len() as u32), 0..1);
     }
 
     fn do_surface_render_pass(

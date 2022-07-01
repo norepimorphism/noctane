@@ -10,7 +10,7 @@ use ringbuffer::{
 };
 use stackvec::StackVec;
 
-use crate::{gfx::Vertex, Gpu};
+use crate::{gfx::{Vertex, VertexBufferEntry}, Gpu};
 use super::MachineCommand;
 
 #[derive(Clone, Debug)]
@@ -245,7 +245,9 @@ impl Gpu {
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
                         let top_left = Vertex::decode(args[0]);
                         let size = Vertex::decode(args[1]);
-                        this.gfx.draw_quad(Self::create_rect(top_left, size));
+                        let rect = Self::create_rect(top_left, size)
+                            .map(VertexBufferEntry::vram);
+                        this.gfx.draw_quad(rect);
 
                         let pixel_count = u32::from(size.x) * u32::from(size.y);
                         this.gp0_strat = QueueStrategy::BlitPixels {
@@ -314,7 +316,7 @@ pub enum Opacity {
 impl Gpu {
     fn decode_polygon<const N: usize, const IS_SHADED: bool, const IS_TEXTURED: bool>(
         args: Arguments,
-    ) -> [Vertex; N] {
+    ) -> [VertexBufferEntry; N] {
         let mut skip = 0;
         if IS_SHADED {
             skip += 1;
@@ -324,7 +326,7 @@ impl Gpu {
         }
         let mut vert_idx = 0;
         [(); N].map(|_| {
-            let vert = Vertex::decode(args[vert_idx]);
+            let vert = VertexBufferEntry::void(Vertex::decode(args[vert_idx]));
             // Skip the shading argument.
             vert_idx += 1 + skip;
 
@@ -332,20 +334,24 @@ impl Gpu {
         })
     }
 
-    fn decode_dot<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+    fn decode_dot<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(1, 1))
+            .map(VertexBufferEntry::void)
     }
 
-    fn decode_small_square<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+    fn decode_small_square<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(8, 8))
+            .map(VertexBufferEntry::void)
     }
 
-    fn decode_big_square<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+    fn decode_big_square<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::new(16, 16))
+            .map(VertexBufferEntry::void)
     }
 
-    fn decode_rect<const IS_TEXTURED: bool>(args: Arguments) -> [Vertex; 4] {
+    fn decode_rect<const IS_TEXTURED: bool>(args: Arguments) -> [VertexBufferEntry; 4] {
         Self::create_rect(Vertex::decode(args[0]), Vertex::decode(args[2]))
+            .map(VertexBufferEntry::void)
     }
 
     const fn create_rect(top_left: Vertex, size: Vertex) -> [Vertex; 4] {
