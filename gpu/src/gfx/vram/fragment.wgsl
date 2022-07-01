@@ -5,14 +5,14 @@ var pre_vram_sampler: sampler;
 
 [[stage(fragment)]]
 fn main(
-    [[builtin(position)]] pos: vec4<f32>,
+    [[location(0)]] pos: vec2<f32>,
     [[location(1)]] id: u32,
 ) -> [[location(0)]] vec4<f32> {
     switch(id) {
         // VRAM.
         case 1: {
             return vec4<f32>(
-                textureSample(pre_vram, pre_vram_sampler, pos.xy).rgb,
+                textureSample(pre_vram, pre_vram_sampler, pos).rgb,
                 // Ignore the alpha channel.
                 1.0,
             );
