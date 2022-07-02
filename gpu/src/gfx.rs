@@ -23,47 +23,55 @@ pub enum Error {
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default)]
-enum SampleStrategy {
+pub enum SampleStrategy {
     #[default]
     Constant = 0,
-    Vram = 1,
+    BlendedTexture = 1,
+    RawTexture = 2,
+}
+
+#[derive(Clone, Copy)]
+pub struct VertexBufferEntry {
+    pub vert: Vertex,
+    pub tex_vert: Vertex,
+    pub sample_strat: SampleStrategy,
+    pub color: [u8; 4],
 }
 
 impl VertexBufferEntry {
-    pub fn constant(vert: Vertex, color: [u8; 4]) -> Self {
-        Self::_new(vert, SampleStrategy::Constant, color)
-    }
-
-    pub fn vram(vert: Vertex) -> Self {
-        Self::_new(
-            vert,
-            SampleStrategy::Vram,
-            // Doesn't matter.
-            [0; 4],
-        )
-    }
-
-    fn _new(vert: Vertex, sample_strat: SampleStrategy, color: [u8; 4]) -> Self {
-        Self { vert, sample_strat: sample_strat as u32, color }
+    fn generate_raw(self) -> RawVertexBufferEntry {
+        RawVertexBufferEntry {
+            vert: self.vert,
+            tex_vert: self.tex_vert,
+            sample_strat: self.sample_strat as u32,
+            color: self.color,
+        }
     }
 }
 
 #[repr(C, align(4))]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct VertexBufferEntry {
-    pub vert: Vertex,
-    pub sample_strat: u32,
-    pub color: [u8; 4],
+struct RawVertexBufferEntry {
+    vert: Vertex,
+    tex_vert: Vertex,
+    sample_strat: u32,
+    color: [u8; 4],
 }
 
-unsafe impl bytemuck::Pod for VertexBufferEntry {}
-unsafe impl bytemuck::Zeroable for VertexBufferEntry {}
+unsafe impl bytemuck::Pod for RawVertexBufferEntry {}
+unsafe impl bytemuck::Zeroable for RawVertexBufferEntry {}
 
 impl Vertex {
     pub fn decode(mut code: u32) -> Self {
         let x = code.pop_bits(11) as u16;
         code.pop_bits(5);
         let y = code.pop_bits(11) as u16;
+
+        Self { x, y }
+    }
+
+    pub fn decode_texture(code: u16) -> Self {
+        let [y, x] = code.to_be_bytes().map(u16::from);
 
         Self { x, y }
     }
@@ -93,7 +101,8 @@ pub struct Renderer {
     surface_bind_group: BindGroup,
     surface_format: TextureFormat,
     surface_pipeline: RenderPipeline,
-    vertex_buffer_entries: Vec<VertexBufferEntry>,
+    tex_vram: Texture,
+    vertex_buffer_entries: Vec<RawVertexBufferEntry>,
     vram: Texture,
     vram_bind_group: BindGroup,
     vram_pipeline: RenderPipeline,
@@ -112,6 +121,7 @@ impl Renderer {
         let (adapter, surface) = Self::create_adapter_and_surface(window, backends).await?;
         let (device, queue) = Self::create_device_and_queue(&adapter).await?;
         let vram = Self::create_vram(&device);
+        let tex_vram = Self::create_vram(&device);
 
         let vram_bind_group_layout = Self::create_vram_bind_group_layout(&device);
         let vram_pipeline = Self::create_vram_pipeline(&device, &vram_bind_group_layout);
@@ -129,12 +139,13 @@ impl Renderer {
         let vram_bind_group = Self::create_vram_bind_group(
             &device,
             &vram_bind_group_layout,
+            &Self::create_texture_view(&tex_vram),
+            &sampler,
         );
-        let vram_view = Self::create_texture_view(&vram);
         let surface_bind_group = Self::create_surface_bind_group(
             &device,
             &surface_bind_group_layout,
-            &vram_view,
+            &Self::create_texture_view(&vram),
             &sampler,
         );
 
@@ -146,6 +157,7 @@ impl Renderer {
             surface_bind_group,
             surface_format,
             surface_pipeline,
+            tex_vram,
             vertex_buffer_entries: Vec::new(),
             vram,
             vram_bind_group,
@@ -222,7 +234,24 @@ impl Renderer {
     fn create_vram_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("VRAM bind group layout"),
-            entries: &[],
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         })
     }
 
@@ -236,12 +265,13 @@ impl Renderer {
             PolygonMode::Fill,
             &[bind_group_layout],
             &[VertexBufferLayout {
-                array_stride: std::mem::size_of::<VertexBufferEntry>() as BufferAddress,
+                array_stride: std::mem::size_of::<RawVertexBufferEntry>() as BufferAddress,
                 step_mode: VertexStepMode::Vertex,
                 attributes: &vertex_attr_array![
                     0 => Uint16x2,
-                    1 => Uint32,
+                    1 => Uint16x2,
                     2 => Uint32,
+                    3 => Uint32,
                 ],
             }],
             &create_shader_module!(device, "gfx/vram/vertex.wgsl"),
@@ -357,12 +387,27 @@ impl Renderer {
     fn create_vram_bind_group(
         device: &Device,
         layout: &BindGroupLayout,
+        tex_vram_view: &TextureView,
+        tex_vram_sampler: &Sampler,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("VRAM bind group"),
             layout,
-            entries: &[],
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(tex_vram_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(tex_vram_sampler),
+                },
+            ],
         })
+    }
+
+    fn create_texture_view(texture: &Texture) -> TextureView {
+        texture.create_view(&TextureViewDescriptor::default())
     }
 
     fn create_surface_bind_group(
@@ -422,12 +467,12 @@ impl Renderer {
             self.vertex_buffer_entries.clear();
             self.just_rendered = false;
         }
-        self.vertex_buffer_entries.extend(entries);
+        self.vertex_buffer_entries.extend(entries.map(VertexBufferEntry::generate_raw));
     }
 
-    pub fn blit(&mut self, top_left: Vertex, size: Vertex, data: &[u8]) {
+    pub fn blit(&mut self, top_left: Vertex, size: [u16; 2], data: &[u8]) {
         let bytes_per_row = std::num::NonZeroU32::new(
-            (std::mem::size_of::<u32>() as u32) * u32::from(size.x)
+            (std::mem::size_of::<u32>() as u32) * u32::from(size[0])
         );
         assert!(bytes_per_row.is_some_and(|value| ((data.len() as u32) % value.get()) == 0));
 
@@ -449,18 +494,23 @@ impl Renderer {
                 rows_per_image: None,
             },
             Extent3d {
-                width: u32::from(size.x),
-                height: u32::from(size.y),
+                width: u32::from(size[0]),
+                height: u32::from(size[1]),
                 depth_or_array_layers: 1,
             },
         )
     }
 
     pub fn render(&mut self) {
+        let mut encoder = self.create_command_encoder();
+        encoder.copy_texture_to_texture(
+            self.vram.as_image_copy(),
+            self.tex_vram.as_image_copy(),
+            Extent3d { width: 1024, height: 512, depth_or_array_layers: 1 },
+        );
+
         let vram_view = Self::create_texture_view(&self.vram);
         let frame = self.surface.get_current_texture().unwrap();
-
-        let mut encoder = self.create_command_encoder();
         let vertex_buffer = self.create_vertex_buffer();
         // Draw to VRAM.
         self.do_vram_render_pass(&mut encoder, &vertex_buffer, &vram_view);
@@ -470,10 +520,6 @@ impl Renderer {
         frame.present();
 
         self.just_rendered = true;
-    }
-
-    fn create_texture_view(texture: &Texture) -> TextureView {
-        texture.create_view(&TextureViewDescriptor::default())
     }
 
     fn create_command_encoder(&self) -> CommandEncoder {

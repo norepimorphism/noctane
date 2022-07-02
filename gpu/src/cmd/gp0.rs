@@ -10,7 +10,7 @@ use ringbuffer::{
 };
 use stackvec::StackVec;
 
-use crate::{gfx::{Vertex, VertexBufferEntry}, Gpu};
+use crate::{gfx::{SampleStrategy, Vertex, VertexBufferEntry}, Gpu};
 use super::MachineCommand;
 
 #[derive(Clone, Debug)]
@@ -19,7 +19,7 @@ pub enum QueueStrategy {
     BlitPixels {
         rem_pixels: u32,
         top_left: Vertex,
-        size: Vertex,
+        size: [u16; 2],
         data: Vec<u8>,
     },
 }
@@ -57,7 +57,7 @@ impl Gpu {
                     u16::from_be_bytes([bytes[0], bytes[1]]),
                     u16::from_be_bytes([bytes[1], bytes[2]]),
                 ]
-                .map(Self::convert_rgb5_to_rgba8);
+                .map(Self::decode_rgb5_to_rgba8);
                 data.extend(pixels[0]);
                 data.extend(pixels[1]);
 
@@ -74,17 +74,13 @@ impl Gpu {
         }
     }
 
-    fn convert_rgb5_to_rgba8(mut halfword: u16) -> [u8; 4] {
-        let mut pop_component = || halfword.pop_bits(5) << 3;
-
-        let r = pop_component();
-        let g = pop_component();
-        let b = pop_component();
+    fn decode_rgb5_to_rgba8(mut code: u16) -> [u8; 4] {
+        let mut pop_component = || code.pop_bits(5) as u8;
 
         [
-            r as u8,
-            g as u8,
-            b as u8,
+            pop_component(),
+            pop_component(),
+            pop_component(),
             u8::MAX,
         ]
     }
@@ -193,56 +189,56 @@ impl Gpu {
                     name: RenderUnshadedUntexturedOpaqueQuad,
                     arg_count: 4,
                     fn: |this: &mut Gpu, param: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_untextured_polygon_entries::<4, false>(param, args));
+                        this.gfx.draw_quad(decode_poly_entries::<4>(args, param, false, None));
                     },
                 },
                 {
                     name: RenderUnshadedBlendedOpaqueQuad,
                     arg_count: 8,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_textured_polygon_entries::<4, false>(args));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(decode_poly_entries::<4>(args, param, false, Some(Texturing::Blended)));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueTriangle,
                     arg_count: 5,
                     fn: |this: &mut Gpu, param: u32, args: Arguments| {
-                        this.gfx.draw_triangle(Self::decode_untextured_polygon_entries::<3, true>(param, args));
+                        this.gfx.draw_triangle(decode_poly_entries::<3>(args, param, true, None));
                     },
                 },
                 {
                     name: RenderShadedUntexturedOpaqueQuad,
                     arg_count: 7,
                     fn: |this: &mut Gpu, param: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::decode_untextured_polygon_entries::<4, true>(param, args));
+                        this.gfx.draw_quad(decode_poly_entries::<4>(args, param, true, None));
                     },
                 },
                 {
-                    name: RenderUntexturedOpaqueRect,
+                    name: RenderUntexturedOpaqueDynamicRect,
                     arg_count: 2,
                     fn: |this: &mut Gpu, param: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::create_untextured_entries(Self::decode_rect(args), param));
+                        this.gfx.draw_quad(decode_rect_entries(args, param, RectangleKind::Dynamic, None));
                     },
                 },
                 {
-                    name: RenderBlendedOpaqueRect,
+                    name: RenderBlendedOpaqueDynamicRect,
                     arg_count: 3,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::create_textured_entries(Self::decode_rect(args)));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(decode_rect_entries(args, param, RectangleKind::Dynamic, Some(Texturing::Blended)));
                     },
                 },
                 {
                     name: RenderUntexturedOpaqueBigSquare,
                     arg_count: 1,
                     fn: |this: &mut Gpu, param: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::create_untextured_entries(Self::decode_big_square(args), param));
+                        this.gfx.draw_quad(decode_rect_entries(args, param, RectangleKind::BigSquare, None));
                     },
                 },
                 {
                     name: RenderBlendedTranslucentSmallSquare,
                     arg_count: 2,
-                    fn: |this: &mut Gpu, _: u32, args: Arguments| {
-                        this.gfx.draw_quad(Self::create_textured_entries(Self::decode_small_square(args)));
+                    fn: |this: &mut Gpu, param: u32, args: Arguments| {
+                        this.gfx.draw_quad(decode_rect_entries(args, param, RectangleKind::SmallSquare, Some(Texturing::Blended)));
                     },
                 },
                 {
@@ -250,8 +246,12 @@ impl Gpu {
                     arg_count: 2,
                     fn: |this: &mut Gpu, _: u32, args: Arguments| {
                         let top_left = Vertex::decode(args[0]);
-                        let size = Vertex::decode(args[1]);
-                        let pixel_count = u32::from(size.x) * u32::from(size.y);
+                        let mut size_word = args[1];
+                        let size = [
+                            size_word.pop_bits(16) as u16,
+                            size_word as u16,
+                        ];
+                        let pixel_count = u32::from(size[0]) * u32::from(size[1]);
                         this.gp0_strat = QueueStrategy::BlitPixels {
                             rem_pixels: pixel_count,
                             top_left,
@@ -310,106 +310,186 @@ impl Gpu {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum Opacity {
     Opaque,
     Translucent,
 }
 
-impl Gpu {
-    fn decode_untextured_polygon_entries<const N: usize, const IS_SHADED: bool>(
-        param: u32,
-        args: Arguments,
-    ) -> [VertexBufferEntry; N] {
-        Self::decode_polygon_entries::<N, IS_SHADED, false, _>(
-            args,
-            |vert| Self::create_untextured_entry(vert, param),
-        )
+#[derive(Clone, Copy, Debug)]
+enum Texturing {
+    Raw,
+    Blended,
+}
+
+impl From<Texturing> for SampleStrategy {
+    fn from(texturing: Texturing) -> Self {
+        match texturing {
+            Texturing::Raw => Self::RawTexture,
+            Texturing::Blended => Self::BlendedTexture,
+        }
+    }
+}
+
+fn decode_poly_entries<const N: usize>(
+    mut args: Arguments,
+    param: u32,
+    is_shaded: bool,
+    texturing: Option<Texturing>,
+) -> [VertexBufferEntry; N] {
+    struct ArgumentStack<'a> {
+        args: &'a Arguments,
+        idx: usize,
     }
 
-    fn decode_textured_polygon_entries<const N: usize, const IS_SHADED: bool>(
-        args: Arguments,
-    ) -> [VertexBufferEntry; N] {
-        Self::decode_polygon_entries::<N, IS_SHADED, true, _>(
-            args,
-            |vert| Self::create_textured_entry(vert),
-        )
+    impl ArgumentStack<'_> {
+        fn pop(&mut self) -> u32 {
+            let value = self.args[self.idx];
+            self.idx += 1;
+
+            value
+        }
     }
 
-    fn decode_polygon_entries<const N: usize, const IS_SHADED: bool, const IS_TEXTURED: bool, F>(
-        args: Arguments,
-        create_entry: F,
-    ) -> [VertexBufferEntry; N]
-    where
-        F: Fn(Vertex) -> VertexBufferEntry,
-    {
-        let mut skip = 0;
-        if IS_SHADED {
-            skip += 1;
-        }
-        if IS_TEXTURED {
-            skip += 1;
-        }
-        let mut vert_idx = 0;
+    let mut stack = ArgumentStack {
+        args: &mut args,
+        idx: 0,
+    };
 
-        [(); N].map(|_| {
-            let entry = create_entry(Vertex::decode(args[vert_idx]));
-            vert_idx += 1 + skip;
+    let sample_strat = texturing
+        .map(SampleStrategy::from)
+        .unwrap_or(SampleStrategy::Constant);
+    let mut tex_base = Vertex::default();
+    let mut vert_idx = 0;
 
-            entry
+    [(); N].map(|_| {
+        let color = decode_bgr8_to_rgba8(if is_shaded && (stack.idx > 0) {
+            stack.pop()
+        } else {
+            param
+        });
+        let vert = Vertex::decode(stack.pop());
+
+        let mut tex_vert = texturing.map(|_| {
+            let mut code = stack.pop();
+            let tex_vert = Vertex::decode_texture(code.pop_bits(16) as u16);
+            match vert_idx {
+                0 => {
+                    tex_base = decode_tex_base(code as u16);
+                }
+                1 => {
+                    // TODO
+                }
+                _ => {},
+            }
+
+            tex_vert
         })
-    }
+        .unwrap_or_default();
+        tex_vert.x += tex_base.x;
+        tex_vert.y += tex_base.y;
+        tracing::error!("({},{})", tex_vert.x, tex_vert.y);
 
-    fn decode_dot(args: Arguments) -> [Vertex; 4] {
-        Self::create_rect(Vertex::decode(args[0]), Vertex::new(1, 1))
-    }
+        vert_idx += 1;
 
-    fn decode_small_square(args: Arguments) -> [Vertex; 4] {
-        Self::create_rect(Vertex::decode(args[0]), Vertex::new(8, 8))
-    }
-
-    fn decode_big_square(args: Arguments) -> [Vertex; 4] {
-        Self::create_rect(Vertex::decode(args[0]), Vertex::new(16, 16))
-    }
-
-    fn decode_rect(args: Arguments) -> [Vertex; 4] {
-        Self::create_rect(Vertex::decode(args[0]), Vertex::decode(args[2]))
-    }
-
-    const fn create_rect(top_left: Vertex, size: Vertex) -> [Vertex; 4] {
-        let mut bottom_left = top_left;
-        bottom_left.y += size.y;
-        let mut top_right = top_left;
-        top_right.x += size.x;
-        let mut bottom_right = top_right;
-        bottom_right.y += size.y;
-
-        [
-            top_left,
-            bottom_left,
-            top_right,
-            bottom_right,
-        ]
-    }
-
-    fn create_untextured_entries<const N: usize>(verts: [Vertex; N], param: u32) -> [VertexBufferEntry; N] {
-        verts.map(|vert| Self::create_untextured_entry(vert, param))
-    }
-
-    fn create_textured_entries<const N: usize>(verts: [Vertex; N]) -> [VertexBufferEntry; N] {
-        verts.map(Self::create_textured_entry)
-    }
-
-    fn create_untextured_entry(vert: Vertex, param: u32) -> VertexBufferEntry {
-        VertexBufferEntry::constant(vert, param.to_le_bytes())
-    }
-
-    fn create_textured_entry(vert: Vertex) -> VertexBufferEntry {
-        VertexBufferEntry::constant(
+        VertexBufferEntry {
             vert,
-            // TODO: Use black for now.
-            [0, 0, 0, !0],
-        )
-    }
+            tex_vert,
+            sample_strat,
+            color,
+        }
+    })
+}
+
+enum RectangleKind {
+    Dot,
+    SmallSquare,
+    BigSquare,
+    Dynamic,
+}
+
+fn decode_rect_entries(
+    args: Arguments,
+    param: u32,
+    kind: RectangleKind,
+    texturing: Option<Texturing>,
+) -> [VertexBufferEntry; 4] {
+    let size = match kind {
+        RectangleKind::Dot => [1, 1],
+        RectangleKind::SmallSquare => [8, 8],
+        RectangleKind::BigSquare => [16, 16],
+        RectangleKind::Dynamic => {
+            let idx = if texturing.is_some() { 2 } else { 1 };
+            let mut word = args[idx];
+
+            [
+                word.pop_bits(16) as u16,
+                word as u16,
+            ]
+        }
+    };
+    let sample_strat = texturing
+        .map(SampleStrategy::from)
+        .unwrap_or(SampleStrategy::Constant);
+    let color = decode_bgr8_to_rgba8(param);
+
+    let mut tex_data = args[1];
+    let mut tex_top_left = Vertex::decode_texture(tex_data.pop_bits(16) as u16);
+    let tex_base = decode_tex_base(tex_data as u16);
+    tex_top_left.x += tex_base.x;
+    tex_top_left.y += tex_base.y;
+
+    let tex_rect = create_rect(tex_top_left, size);
+    let rect = create_rect(Vertex::decode(args[0]), size);
+    let mut idx = 0;
+
+    [(); 4].map(|_| {
+        let entry = VertexBufferEntry {
+            vert: rect[idx],
+            tex_vert: tex_rect[idx],
+            sample_strat,
+            color,
+        };
+        idx += 1;
+
+        entry
+    })
+
+}
+
+const fn create_rect(top_left: Vertex, size: [u16; 2]) -> [Vertex; 4] {
+    let mut bottom_left = top_left;
+    bottom_left.y += size[1];
+    let mut top_right = top_left;
+    top_right.x += size[0];
+    let mut bottom_right = top_right;
+    bottom_right.y += size[1];
+
+    [
+        top_left,
+        bottom_left,
+        top_right,
+        bottom_right,
+    ]
+}
+
+fn decode_bgr8_to_rgba8(code: u32) -> [u8; 4] {
+    let bytes = code.to_be_bytes();
+    let get_component = |i| bytes[i] as u8;
+
+    [
+        get_component(3),
+        get_component(2),
+        get_component(1),
+        u8::MAX,
+    ]
+}
+
+fn decode_tex_base(mut code: u16) -> Vertex {
+    Vertex::new(
+        64 * code.pop_bits(4) as u16,
+        256 * code.pop_bits(1) as u16,
+    )
 }
 
 pub struct Command {
@@ -475,27 +555,27 @@ pub enum CommandKind {
     RenderUntexturedOpaqueDot,
     RenderUntexturedOpaqueSmallSquare,
     RenderUntexturedOpaqueBigSquare,
-    RenderUntexturedOpaqueRect,
+    RenderUntexturedOpaqueDynamicRect,
     RenderUntexturedTranslucentDot,
     RenderUntexturedTranslucentSmallSquare,
     RenderUntexturedTranslucentBigSquare,
-    RenderUntexturedTranslucentRect,
+    RenderUntexturedTranslucentDynamicRect,
     RenderBlendedOpaqueDot,
     RenderBlendedOpaqueSmallSquare,
     RenderBlendedOpaqueBigSquare,
-    RenderBlendedOpaqueRect,
+    RenderBlendedOpaqueDynamicRect,
     RenderBlendedTranslucentDot,
     RenderBlendedTranslucentSmallSquare,
     RenderBlendedTranslucentBigSquare,
-    RenderBlendedTranslucentRect,
+    RenderBlendedTranslucentDynamicRect,
     RenderRawOpaqueDot,
     RenderRawOpaqueSmallSquare,
     RenderRawOpaqueBigSquare,
-    RenderRawOpaqueRect,
+    RenderRawOpaqueDynamicRect,
     RenderRawTranslucentDot,
     RenderRawTranslucentSmallSquare,
     RenderRawTranslucentBigSquare,
-    RenderRawTranslucentRect,
+    RenderRawTranslucentDynamicRect,
     CopyRect,
     MoveRectToVram,
     MoveRectToCpuBus,
@@ -623,12 +703,12 @@ impl CommandKind {
             //     texturing: Texturing::Raw,
             //     opacity: Opacity::Translucent,
             // },
-            0x60 | 0x61 => Self::RenderUntexturedOpaqueRect,
-            0x62 | 0x63 => Self::RenderUntexturedTranslucentRect,
-            0x64        => Self::RenderBlendedOpaqueRect,
-            0x65        => Self::RenderRawOpaqueRect,
-            0x66        => Self::RenderBlendedTranslucentRect,
-            0x67        => Self::RenderRawTranslucentRect,
+            0x60 | 0x61 => Self::RenderUntexturedOpaqueDynamicRect,
+            0x62 | 0x63 => Self::RenderUntexturedTranslucentDynamicRect,
+            0x64        => Self::RenderBlendedOpaqueDynamicRect,
+            0x65        => Self::RenderRawOpaqueDynamicRect,
+            0x66        => Self::RenderBlendedTranslucentDynamicRect,
+            0x67        => Self::RenderRawTranslucentDynamicRect,
             0x68 | 0x69 => Self::RenderUntexturedOpaqueDot,
             0x6a | 0x6b => Self::RenderUntexturedTranslucentDot,
             0x6c        => Self::RenderBlendedOpaqueDot,

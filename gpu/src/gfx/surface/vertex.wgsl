@@ -1,13 +1,6 @@
 struct Output {
     [[builtin(position)]] pos: vec4<f32>;
-    [[
-        location(0),
-        // `vram_pos` is the texture coordinate sent to the fragment shader. Despite the vertex
-        // shader only being called three times---once for each vertex---and `vram_pos` therefore
-        // being calculated only three times, its value is interpolated for the fragment shader such
-        // that a unique value exists for each pixel.
-        interpolate(perspective, center),
-    ]]
+    [[location(0), interpolate(perspective, center)]]
     vram_pos: vec2<f32>;
 };
 
