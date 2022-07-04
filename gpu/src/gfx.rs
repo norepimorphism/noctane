@@ -70,12 +70,6 @@ impl Vertex {
         Self { x, y }
     }
 
-    pub fn decode_texture(code: u16) -> Self {
-        let [y, x] = code.to_be_bytes().map(u16::from);
-
-        Self { x, y }
-    }
-
     pub fn new(x: u16, y: u16) -> Self {
         Self { x, y }
     }

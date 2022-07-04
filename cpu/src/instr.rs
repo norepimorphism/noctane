@@ -1275,26 +1275,26 @@ def_instr_and_op_kind!(
 
             // First, we read the full word from memory.
             if let Ok(value) = ctx.mem.read_data_32(word_idx) {
-                let bitshift = byte_idx * 8;
+                let bitshift = 32 - (byte_idx * 8);
                 // Then, we clear the topmost bits of the register that will be overwritten by the
                 // value read from memory.
                 //
                 // If the byte index of the memory address is...
-                // - 0: the entire register is cleared
-                // - 1: the top three bytes of the register are cleared
-                // - 2: the top half of the register is cleared
-                // - 3: the top byte of the register is cleared
+                // - 0: the top byte of the register is cleared
+                // - 1: the top half of the register is cleared
+                // - 2: the top three bytes of the register are cleared
+                // - 3: the entire register is cleared
                 ctx.opn.rt.gpr_value &= (1 << bitshift) - 1;
                 // Finally, we copy over the shifted value.
                 //
                 // If the byte index of the memory address is...
-                // - 0: the entire memory value is copied to the register
-                // - 1: the bottom three bytes of the memory value are copied to the top three bytes
+                // - 0: the bottom byte of the memory value is copied to the top byte of the
+                //      register
+                // - 1: the bottom half of the memory value is copied to the top half of the
+                //      register
+                // - 2: the bottom three bytes of the memory value are copied to the top three bytes
                 //      of the register
-                // - 2: the bottom half of the memory value is copied to the top half of the
-                //      register
-                // - 3: the bottom byte of the memory value is copied to the top byte of the
-                //      register
+                // - 3: the entire memory value is copied to the register
                 ctx.opn.rt.gpr_value |= value << bitshift;
                 ctx.reg.set_gpr(ctx.opn.rt.index, ctx.opn.rt.gpr_value);
 
@@ -1315,26 +1315,26 @@ def_instr_and_op_kind!(
 
             // First, we read the full word from memory.
             if let Ok(value) = ctx.mem.read_data_32(word_idx) {
-                let bitshift = (byte_idx + 1) * 8;
+                let bitshift = 32 - (byte_idx * 8);
                 // Then, we clear the bottommost bits of the register that will be overwritten by
                 // the value read from memory.
                 //
                 // If the byte index of the memory address is...
-                // - 0: the bottom byte of the register is cleared
-                // - 1: the bottom half of the register is cleared
-                // - 2: the bottom three bytes of the register are cleared
-                // - 3: the entire register is cleared
+                // - 0: the entire register is cleared
+                // - 1: the bottom three bytes of the register are cleared
+                // - 2: the bottom half of the register is cleared
+                // - 3: the bottom byte of the register is cleared
                 ctx.opn.rt.gpr_value &= !(1 << bitshift) - 1;
                 // Finally, we copy over the shifted value.
                 //
                 // If the byte index of the memory address is...
-                // - 0: the top byte of the memory value is copied to the bottom byte of the
-                //      register
-                // - 1: the top half of the memory value is copied to the bottom half of the
-                //      register
-                // - 2: the top three bytes of the memory value are copied to the bottom three bytes
+                // - 0: the entire memory value is copied to the register
+                // - 1: the top three bytes of the memory value are copied to the bottom three bytes
                 //      of the register
-                // - 3: the entire memory value is copied to the register
+                // - 2: the top half of the memory value is copied to the bottom half of the
+                //      register
+                // - 3: the top byte of the memory value is copied to the bottom byte of the
+                //      register
                 ctx.opn.rt.gpr_value |= value >> (32 - bitshift);
                 ctx.reg.set_gpr(ctx.opn.rt.index, ctx.opn.rt.gpr_value);
 

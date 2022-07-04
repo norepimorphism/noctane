@@ -1492,6 +1492,7 @@ gen_cpu_bus_io!(
             use std::fmt;
 
             use noctane_util::{BitStack as _, BitStackExt as _};
+            use ringbuffer::RingBuffer as _;
 
             macro_rules! read_madr {
                 ($io:expr, $chan:ident $(,)?) => {
@@ -1691,7 +1692,7 @@ gen_cpu_bus_io!(
                                 // TODO: Respect transfer direction.
                                 while next_entry_addr != 0xffffff {
                                     // TODO: Don't immediately execute.
-                                    while !params.gpu.gp0_queue_is_empty() {
+                                    while !params.gpu.gp0().queue.is_empty() {
                                         params.gpu.execute_next_gp0_command();
                                     }
 
@@ -2660,6 +2661,7 @@ gen_cpu_bus_io!(
                 name: 1,
                 read_32: |_, io| {
                     use noctane_util::{BitStack as _, BitStackExt as _};
+                    use ringbuffer::RingBuffer as _;
 
                     let mut code = 0;
                     // TODO: Draw even/odd lines in interlace mode.
@@ -2671,13 +2673,13 @@ gen_cpu_bus_io!(
                     // TODO: Ready to send VRAM to CPU.
                     code.push_bool(true);
                     // Ready to receive command.
-                    code.push_bool(!io.gpu.gp0_queue_is_full());
+                    code.push_bool(!io.gpu.gp0().queue.is_full());
                     // TODO: DMA.
                     code.push_bits(1, 1);
                     // TODO: IRQ.
                     code.push_bool(true);
                     // Display Enable.
-                    code.push_bool(!io.gpu.display.is_enabled);
+                    code.push_bool(!io.gpu.display().is_enabled);
                     // TODO: Vertical Interlace.
                     code.push_bool(false);
                     // TODO: Display Area Color Depth.

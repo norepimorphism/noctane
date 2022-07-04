@@ -1593,6 +1593,7 @@ dependencies = [
  "noctane-proc-macro",
  "noctane-util",
  "rand",
+ "ringbuffer",
  "tracing",
 ]
 

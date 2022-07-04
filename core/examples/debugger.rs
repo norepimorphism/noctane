@@ -402,7 +402,7 @@ impl Debugger {
             )
             .unwrap();
             // Perform the render operation.
-            self.core.gpu.gfx.render();
+            self.core.gpu.gfx_mut().render();
             // The GUI thread is waiting for `render_state` to change, so we must now notify it.
             *render_state = RenderState::Complete;
             render.cvar.notify_one();

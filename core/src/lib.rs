@@ -80,8 +80,8 @@ impl Core {
         }
         self.instrs_since_last_vblank = 0;
 
-        // 60 Hz.
-        if self.last_vblank.elapsed().as_nanos() >= 16666667 {
+        // 50 Hz.
+        if self.last_vblank.elapsed().as_millis() >= 20 {
             self.last_vblank = Instant::now();
 
             Some(())

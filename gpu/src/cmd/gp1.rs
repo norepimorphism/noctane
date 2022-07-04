@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use noctane_util::BitStack as _;
+use ringbuffer::RingBufferExt as _;
 
 use super::MachineCommand;
 
@@ -19,7 +20,7 @@ impl crate::Gpu {
                 self.reset();
             }
             Command::ClearCommandQueue => {
-                self.clear_gp0_queue();
+                self.gp0.queue.clear();
             }
             Command::AckInterrupt => {
                 // TODO

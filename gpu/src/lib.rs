@@ -12,7 +12,7 @@
 pub mod cmd;
 pub mod gfx;
 
-use ringbuffer::{ConstGenericRingBuffer, RingBuffer as _, RingBufferExt as _};
+use ringbuffer::RingBufferExt as _;
 
 pub use cmd::MachineCommand;
 
@@ -31,12 +31,12 @@ pub struct Extent2d {
 impl Gpu {
     pub fn new(gfx: gfx::Renderer) -> Self {
         Self {
-            display: Display::default(),
+            display: Default::default(),
             dma_request: None,
             gfx,
-            gp0_strat: cmd::gp0::QueueStrategy::PushWord,
-            gp0_state: None,
-            gp0_queue: ConstGenericRingBuffer::new(),
+            gp0: Default::default(),
+            tex_page: Default::default(),
+            tex_window: Default::default(),
         }
     }
 }
@@ -44,31 +44,43 @@ impl Gpu {
 /// The PSX Graphics Processing Unit (GPU).
 #[derive(Debug)]
 pub struct Gpu {
-    pub display: Display,
-    pub dma_request: Option<DmaRequest>,
-    pub gfx: gfx::Renderer,
-    gp0_strat: cmd::gp0::QueueStrategy,
-    gp0_state: Option<cmd::gp0::State>,
-    gp0_queue: ConstGenericRingBuffer<u32, 16>,
+    display: Display,
+    dma_request: Option<DmaRequest>,
+    gfx: gfx::Renderer,
+    gp0: cmd::gp0::State,
+    tex_page: cmd::gp0::TexturePage,
+    tex_window: cmd::gp0::TextureWindow,
 }
 
 impl Gpu {
+    pub fn display(&self) -> &Display {
+        &self.display
+    }
+
+    pub fn display_mut(&mut self) -> &mut Display {
+        &mut self.display
+    }
+
+    pub fn gfx(&self) -> &gfx::Renderer {
+        &self.gfx
+    }
+
+    pub fn gfx_mut(&mut self) -> &mut gfx::Renderer {
+        &mut self.gfx
+    }
+
+    pub fn gp0(&self) -> &cmd::gp0::State {
+        &self.gp0
+    }
+
+    pub fn gp0_mut(&mut self) -> &mut cmd::gp0::State {
+        &mut self.gp0
+    }
+
     pub fn reset(&mut self) {
-        self.clear_gp0_queue();
+        self.gp0.queue.clear();
         self.display.is_enabled = false;
         // TODO
-    }
-
-    pub fn gp0_queue_is_empty(&self) -> bool {
-        self.gp0_queue.is_empty()
-    }
-
-    pub fn gp0_queue_is_full(&self) -> bool {
-        self.gp0_queue.is_full()
-    }
-
-    pub fn clear_gp0_queue(&mut self) {
-        self.gp0_queue.clear();
     }
 }
 

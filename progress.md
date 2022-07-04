@@ -1,8 +1,16 @@
 # Progress Log
 
+## 7/4/2022
+
+Noctane is now at 10,100 lines of code. (There are approximately 13,000 including blank and comment lines.)
+
+## 6/30/2022
+
+Noctane is now at 9,700 lines of code. (There are approximately 12,600 including blank and comment lines.)
+
 ## 6/25/2022
 
-Noctane is now at 9,200 lines of code. (There are approximately 12,100 including blank and comment lines).
+Noctane is now at 9,200 lines of code. (There are approximately 12,100 including blank and comment lines.)
 
 The GPU is now quasi- in-development. Command lists seem to be working.
 
@@ -12,7 +20,7 @@ I was hoping to 'crank out' this emulator in a few months, but it seems it may b
 
 ## 6/19/2022
 
-Noctane is now at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines).
+Noctane is now at 8,500 lines of code. (There are approximately 10,800 including blank and comment lines.)
 
 The DMA and SPU registers are mostly implemented or stubbed-out now.
 

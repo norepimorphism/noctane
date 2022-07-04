@@ -13,6 +13,7 @@ indoc = "1.0"
 noctane-gpu = { path = "../gpu" }
 noctane-proc-macro = { path = "../proc-macro" }
 noctane-util = { path = "../util" }
+ringbuffer = "0.8"
 tracing = "0.1"
 
 [dev-dependencies]

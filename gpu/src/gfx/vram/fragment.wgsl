@@ -5,26 +5,34 @@ var tex_vram_sampler: sampler;
 
 [[stage(fragment)]]
 fn main(
-    [[location(0)]] pos: vec2<f32>,
+    [[builtin(position)]] pos: vec4<f32>,
+    [[location(0)]] tex_pos: vec2<f32>,
     [[location(1)]] sample_strat: u32,
     [[location(2)]] color: vec4<f32>,
 ) -> [[location(0)]] vec4<f32> {
-    switch(sample_strat) {
-        // Blended texture.
-        case 1: {
-            return mix(
-                textureSample(tex_vram, tex_vram_sampler, pos),
-                color,
-                0.5,
-            );
-        }
-        // Raw texture.
-        case 2: {
-            return textureSample(tex_vram, tex_vram_sampler, pos);
-        }
+    if (sample_strat == 0u) {
         // Constant.
-        default: {
-            return color;
+        return color;
+    } else {
+        let sample = textureSample(tex_vram, tex_vram_sampler, tex_pos);
+        if (all(sample.rgb == vec3<f32>(0.0, 0.0, 0.0))) {
+            // 'Black' is rendered as transparent.
+            discard;
+        }
+
+        switch(sample_strat) {
+            // Blended texture.
+            case 1: {
+                return mix(
+                    2.0 * sample,
+                    2.0 * color,
+                    0.5,
+                );
+            }
+            // Raw texture.
+            default: {
+                return sample;
+            }
         }
     }
 }
