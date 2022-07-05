@@ -1668,7 +1668,7 @@ gen_cpu_bus_io!(
                                     .into_iter()
                                     .map(|i| start_idx + ((i * block_len) as usize))
                                 {
-                                    tracing::info!("Block {}", block_idx);
+                                    tracing::info!("DMA block start");
                                     for word_idx in (0..params.len)
                                         .into_iter()
                                         .map(|i| {
@@ -1677,7 +1677,6 @@ gen_cpu_bus_io!(
                                         })
                                     {
                                         if let Some(word) = params.ram.get(word_idx).copied() {
-                                            tracing::info!("Word {}: {:#010x}", word_idx, word);
                                             let _ = params.gpu.queue_gp0_word(word);
                                         } else {
                                             todo!()

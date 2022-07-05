@@ -11,7 +11,17 @@ use ringbuffer::{
 };
 use stackvec::StackVec;
 
-use crate::{gfx::{SampleStrategy, Vertex, VertexBufferEntry}, Gpu};
+use crate::{
+    gfx::{
+        SamplePaletteStrategy,
+        SamplePaletteStrategyKind,
+        SampleStrategy,
+        SampleTextureStrategy,
+        Vertex,
+        VertexBufferEntry,
+    },
+    Gpu,
+};
 use super::MachineCommand;
 
 impl Default for State {
@@ -61,6 +71,8 @@ impl fmt::Debug for CommandVector {
 
 impl Gpu {
     pub fn queue_gp0_word(&mut self, word: u32) -> Result<(), ()> {
+        tracing::warn!("{:08x}", word);
+
         match self.gp0.strat {
             QueueStrategy::PushWord => {
                 self.gp0.push_word(word)
@@ -84,6 +96,7 @@ impl Gpu {
                 *rem_pixels = rem_pixels.saturating_sub(2);
 
                 if *rem_pixels == 0 {
+                    tracing::info!("Blitting pixels...");
                     self.gfx.blit(top_left, size, data);
                     self.gp0.strat = QueueStrategy::PushWord;
                 }
@@ -112,7 +125,6 @@ impl State {
         } else {
             // TODO: Some commands don't use queue space.
             self.queue.push(word);
-            tracing::warn!("{:08x}", word);
 
             Ok(())
         }
@@ -137,8 +149,8 @@ impl Gpu {
             }
         } else if let Some(mach) = self.gp0.queue.dequeue() {
             let mach = MachineCommand::decode(mach);
-            tracing::info!("GP0({:02X}h)", mach.opcode);
             let cmd = Command::decode(mach);
+            tracing::info!("GP0({:?})", cmd);
 
             macro_rules! process_gp0_command {
                 (
@@ -308,9 +320,7 @@ impl Gpu {
                             rem_pixels: pixel_count,
                             top_left,
                             size,
-                            data: Vec::with_capacity(
-                                std::mem::size_of::<u16>() * (pixel_count as usize)
-                            ),
+                            data: Vec::with_capacity(4 * (pixel_count as usize)),
                         };
                     },
                 },
@@ -374,15 +384,6 @@ enum Texturing {
     Blended,
 }
 
-impl From<Texturing> for SampleStrategy {
-    fn from(texturing: Texturing) -> Self {
-        match texturing {
-            Texturing::Raw => Self::RawTexture,
-            Texturing::Blended => Self::BlendedTexture,
-        }
-    }
-}
-
 impl Gpu {
     fn decode_poly_entries<const N: usize>(
         &self,
@@ -391,13 +392,6 @@ impl Gpu {
         is_shaded: bool,
         texturing: Option<Texturing>,
     ) -> [VertexBufferEntry; N] {
-        struct IncompleteVertexBufferEntry {
-            vert: Vertex,
-            tex_vert_data: u16,
-            sample_strat: SampleStrategy,
-            color: [u8; 4],
-        }
-
         struct ArgumentStack<'a> {
             args: &'a Arguments,
             idx: usize,
@@ -417,11 +411,9 @@ impl Gpu {
             idx: 0,
         };
 
-        let sample_strat = texturing
-            .map(SampleStrategy::from)
-            .unwrap_or(SampleStrategy::Constant);
         let mut pal_vert = Vertex::default();
         let mut tex_page = TexturePage::default();
+        let mut tex_vert_data = [0; 4];
         let mut vert_idx = 0;
 
         let entries = [(); N].map(|_| {
@@ -432,9 +424,9 @@ impl Gpu {
             });
             let vert = Vertex::decode(stack.pop());
 
-            let tex_vert_data = texturing.map(|_| {
+            if texturing.is_some() {
                 let mut code = stack.pop();
-                let tex_vert_data = code.pop_bits(16) as u16;
+                tex_vert_data[vert_idx] = code.pop_bits(16) as u16;
                 match vert_idx {
                     0 => {
                         pal_vert = decode_palette_vertex(code as u16);
@@ -444,33 +436,50 @@ impl Gpu {
                     }
                     _ => {},
                 }
-
-                tex_vert_data
-            })
-            .unwrap_or_default();
+            }
             vert_idx += 1;
 
-            IncompleteVertexBufferEntry {
-                vert,
-                tex_vert_data,
-                sample_strat,
-                color,
-            }
-        })
-        .map(|incomplete| {
-            let tex_vert = self.tex_window.decode_texture_vertex(
-                &tex_page,
-                incomplete.tex_vert_data,
-            );
-            tracing::error!("Palette: ({},{})", pal_vert.x, pal_vert.y);
-            tracing::error!("Texture: ({},{})", tex_vert.x, tex_vert.y);
-
             VertexBufferEntry {
-                vert: incomplete.vert,
-                tex_vert,
-                sample_strat: incomplete.sample_strat,
-                color: incomplete.color,
+                vert,
+                strat: match texturing {
+                    None => SampleStrategy::Constant { color },
+                    Some(texturing) => {
+                        SampleStrategy::Texture(SampleTextureStrategy {
+                            // We'll fill this in later.
+                            vert: Default::default(),
+                            // We'll fill this in later.
+                            pal_strat: None,
+                            blend_color: match texturing {
+                                Texturing::Blended => Some(color),
+                                Texturing::Raw => None,
+                            },
+                        })
+                    }
+                },
             }
+        });
+        vert_idx = 0;
+
+        entries.map(|mut incomplete| {
+            if let SampleStrategy::Texture(ref mut strat) = incomplete.strat {
+                strat.vert = self.tex_window.decode_texture_vertex(
+                    &tex_page,
+                    tex_vert_data[vert_idx],
+                );
+                strat.pal_strat = <Option<SamplePaletteStrategyKind>>::from(
+                    tex_page.color_depth,
+                )
+                .map(|kind| {
+                    SamplePaletteStrategy {
+                        kind,
+                        vert: pal_vert,
+                    }
+                });
+            }
+            let complete = incomplete;
+            vert_idx += 1;
+
+            complete
         });
 
         entries
@@ -506,33 +515,49 @@ impl Gpu {
                 ]
             }
         };
-        let sample_strat = texturing
-            .map(SampleStrategy::from)
-            .unwrap_or(SampleStrategy::Constant);
+        let rect = create_rect(Vertex::decode(args[0]), size);
         let color = decode_bgr8_to_rgba8(param);
 
-        let mut tex_data = args[1];
+        let mut tex_data = args.get(1).copied().unwrap_or_default();
         let tex_top_left = self.tex_window.decode_texture_vertex(
             &self.tex_page,
             tex_data.pop_bits(16) as u16,
         );
-
         let tex_rect = create_rect(tex_top_left, size);
-        let rect = create_rect(Vertex::decode(args[0]), size);
+
+        let pal_strat = <Option<SamplePaletteStrategyKind>>::from(
+            self.tex_page.color_depth,
+        )
+        .map(|kind| {
+            SamplePaletteStrategy {
+                kind,
+                vert: decode_palette_vertex(tex_data as u16),
+            }
+        });
+
         let mut idx = 0;
 
-        [(); 4].map(|_| {
+        rect.map(|vert| {
             let entry = VertexBufferEntry {
-                vert: rect[idx],
-                tex_vert: tex_rect[idx],
-                sample_strat,
-                color,
+                vert,
+                strat: match texturing {
+                    None => SampleStrategy::Constant { color },
+                    Some(texturing) => {
+                        SampleStrategy::Texture(SampleTextureStrategy {
+                            vert: tex_rect[idx],
+                            pal_strat,
+                            blend_color: match texturing {
+                                Texturing::Blended => Some(color),
+                                Texturing::Raw => None,
+                            },
+                        })
+                    }
+                }
             };
             idx += 1;
 
             entry
         })
-
     }
 }
 
@@ -604,6 +629,16 @@ pub enum ColorDepth {
     Bpp15,
 }
 
+impl From<ColorDepth> for Option<SamplePaletteStrategyKind> {
+    fn from(depth: ColorDepth) -> Self {
+        match depth {
+            ColorDepth::Bpp4 => Some(SamplePaletteStrategyKind::Bpp4),
+            ColorDepth::Bpp8 => Some(SamplePaletteStrategyKind::Bpp8),
+            ColorDepth::Bpp15 => None,
+        }
+    }
+}
+
 impl TextureWindow {
     fn decode(mut code: u32) -> Self {
         Self {
@@ -668,6 +703,7 @@ fn decode_palette_vertex(mut code: u16) -> Vertex {
     )
 }
 
+#[derive(Debug)]
 pub struct Command {
     pub kind: CommandKind,
     pub param: u32,

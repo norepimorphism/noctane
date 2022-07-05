@@ -1275,7 +1275,7 @@ def_instr_and_op_kind!(
 
             // First, we read the full word from memory.
             if let Ok(value) = ctx.mem.read_data_32(word_idx) {
-                let bitshift = 32 - (byte_idx * 8);
+                let bitshift = 32 - ((byte_idx + 1) * 8);
                 // Then, we clear the topmost bits of the register that will be overwritten by the
                 // value read from memory.
                 //
@@ -1315,7 +1315,7 @@ def_instr_and_op_kind!(
 
             // First, we read the full word from memory.
             if let Ok(value) = ctx.mem.read_data_32(word_idx) {
-                let bitshift = 32 - (byte_idx * 8);
+                let bitshift = byte_idx * 8;
                 // Then, we clear the bottommost bits of the register that will be overwritten by
                 // the value read from memory.
                 //
@@ -1324,7 +1324,7 @@ def_instr_and_op_kind!(
                 // - 1: the bottom three bytes of the register are cleared
                 // - 2: the bottom half of the register is cleared
                 // - 3: the bottom byte of the register is cleared
-                ctx.opn.rt.gpr_value &= !(1 << bitshift) - 1;
+                ctx.opn.rt.gpr_value &= !(!0 >> bitshift);
                 // Finally, we copy over the shifted value.
                 //
                 // If the byte index of the memory address is...
@@ -1335,7 +1335,7 @@ def_instr_and_op_kind!(
                 //      register
                 // - 3: the top byte of the memory value is copied to the bottom byte of the
                 //      register
-                ctx.opn.rt.gpr_value |= value >> (32 - bitshift);
+                ctx.opn.rt.gpr_value |= value >> bitshift;
                 ctx.reg.set_gpr(ctx.opn.rt.index, ctx.opn.rt.gpr_value);
 
                 PcBehavior::Increments
@@ -1653,15 +1653,23 @@ def_instr_and_op_kind!(
             let word_idx = vaddr & !0b11;
             let byte_idx = vaddr & 0b11;
 
+            // First, we read the full word from memory.
             let Ok(mut value) = ctx.mem.read_data_32(word_idx) else {
                 return ctx.raise_exc(exc::code::ADDRESS_LOAD);
             };
 
-            let bitshift = (byte_idx + 1) * 8;
-            // Clear the bottommost bits that will be replaced.
-            value &= !((1 << bitshift) - 1);
+            let bitshift = 32 - ((byte_idx + 1) * 8);
+            // Then, we clear the bottommost bits of the value read from memory that will be
+            // overwritten by the register.
+            //
+            // If the byte index of the memory address is...
+            // - 0: the bottom byte of the memory value is cleared
+            // - 1: the bottom half of the memory value is cleared
+            // - 2: the bottom three bytes of the memory value are cleared
+            // - 3: the entire memory value is cleared
+            value &= !(!0 >> bitshift);
             // Copy over the shifted register.
-            value |= ctx.opn.rt.gpr_value >> (32 - bitshift);
+            value |= ctx.opn.rt.gpr_value >> bitshift;
 
             if ctx.mem.write_data_32(word_idx, value).is_ok() {
                 PcBehavior::Increments
@@ -1679,12 +1687,20 @@ def_instr_and_op_kind!(
             let word_idx = vaddr & !0b11;
             let byte_idx = vaddr & 0b11;
 
+            // First, we read the full word from memory.
             let Ok(mut value) = ctx.mem.read_data_32(word_idx) else {
                 return ctx.raise_exc(exc::code::ADDRESS_LOAD);
             };
 
             let bitshift = byte_idx * 8;
-            // Clear the topmost bits that will be replaced.
+            // Then, we clear the topmost bits of the value read from memory that will be
+            // overwritten by the register.
+            //
+            // If the byte index of the memory address is...
+            // - 0: the entire memory value is cleared
+            // - 1: the top three bytes of the memory value are cleared
+            // - 2: the top half of the memory value is cleared
+            // - 3: the top byte of the memory value is cleared
             value &= (1 << bitshift) - 1;
             // Copy over the shifted register.
             value |= ctx.opn.rt.gpr_value << bitshift;

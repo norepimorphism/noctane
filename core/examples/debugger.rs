@@ -111,11 +111,30 @@ fn main() {
 }
 
 fn setup_tracing() {
+    use tracing_subscriber::EnvFilter;
+
     tracing_subscriber::fmt()
         // Set the environment variable `RUST_LOG` to one of `TRACE`, `DEBUG`, `INFO`, `WARN`, or
         // `ERROR`. Reading from the environment saves us from writing additional code to parse
         // verbosity flags.
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter({
+            // TODO: It would be awesome if these directives could be parsed at compile-time.
+            [
+                "gfx_backend_vulkan=warn",
+                "naga=warn",
+                "wgpu_core=warn",
+                "wgpu_hal=warn",
+            ]
+            .iter()
+            .map(|it| {
+                it.parse()
+                    .expect("Failed to parse directive '{}': {}")
+            })
+            .fold(
+                EnvFilter::from_default_env(),
+                |filter, it| filter.add_directive(it),
+            )
+        })
         .with_ansi(true)
         .with_level(true)
         // The target is mostly just noise, I think.

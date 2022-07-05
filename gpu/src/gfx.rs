@@ -21,31 +21,96 @@ pub enum Error {
     NoCompatibleDeviceFound,
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, Default)]
-pub enum SampleStrategy {
-    #[default]
-    Constant = 0,
-    BlendedTexture = 1,
-    RawTexture = 2,
-}
-
 #[derive(Clone, Copy)]
 pub struct VertexBufferEntry {
     pub vert: Vertex,
-    pub tex_vert: Vertex,
-    pub sample_strat: SampleStrategy,
-    pub color: [u8; 4],
+    pub strat: SampleStrategy,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SampleStrategy {
+    Constant {
+        color: [u8; 4],
+    },
+    Texture(SampleTextureStrategy),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SampleTextureStrategy {
+    /// The top-left vertex of the texture to sample.
+    pub vert: Vertex,
+    pub pal_strat: Option<SamplePaletteStrategy>,
+    pub blend_color: Option<[u8; 4]>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SamplePaletteStrategy {
+    pub kind: SamplePaletteStrategyKind,
+    pub vert: Vertex,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SamplePaletteStrategyKind {
+    /// Sample a 4-bit color palette.
+    Bpp4,
+    /// Sample a 8-bit color palette.
+    Bpp8,
 }
 
 impl VertexBufferEntry {
     fn generate_raw(self) -> RawVertexBufferEntry {
-        RawVertexBufferEntry {
-            vert: self.vert,
-            tex_vert: self.tex_vert,
-            sample_strat: self.sample_strat as u32,
-            color: self.color,
+        match self.strat {
+            SampleStrategy::Constant { color } => {
+                RawVertexBufferEntry {
+                    vert: self.vert,
+                    flags: SampleStrategyFlags::STRAT_CONST.bits(),
+                    color,
+                    // Don't care.
+                    tex_vert: Vertex::default(),
+                    // Don't care.
+                    pal_vert: Vertex::default(),
+                }
+            }
+            SampleStrategy::Texture(strat) => {
+                let mut flags = SampleStrategyFlags::STRAT_TEX;
+
+                let blend_color = strat.blend_color.map(|color| {
+                    flags |= SampleStrategyFlags::TEX_BLEND;
+
+                    color
+                })
+                .unwrap_or_default();
+                let pal_vert = strat.pal_strat.map(|strat| {
+                    flags |= SampleStrategyFlags::TEX_PALETTE;
+                    flags |= match strat.kind {
+                        SamplePaletteStrategyKind::Bpp4 => SampleStrategyFlags::PAL_BPP4,
+                        SamplePaletteStrategyKind::Bpp8 => SampleStrategyFlags::PAL_BPP8,
+                    };
+
+                    strat.vert
+                })
+                .unwrap_or_default();
+
+                RawVertexBufferEntry {
+                    vert: self.vert,
+                    flags: flags.bits(),
+                    color: blend_color,
+                    tex_vert: strat.vert,
+                    pal_vert,
+                }
+            }
         }
+    }
+}
+
+bitflags::bitflags! {
+    struct SampleStrategyFlags: u32 {
+        const STRAT_CONST   = 0 << 0;
+        const STRAT_TEX     = 1 << 0;
+        const TEX_PALETTE   = 1 << 1;
+        const TEX_BLEND     = 1 << 2;
+        const PAL_BPP4      = 0 << 3;
+        const PAL_BPP8      = 1 << 3;
     }
 }
 
@@ -53,9 +118,10 @@ impl VertexBufferEntry {
 #[derive(Clone, Copy, Debug, Default)]
 struct RawVertexBufferEntry {
     vert: Vertex,
-    tex_vert: Vertex,
-    sample_strat: u32,
+    flags: u32,
     color: [u8; 4],
+    tex_vert: Vertex,
+    pal_vert: Vertex,
 }
 
 unsafe impl bytemuck::Pod for RawVertexBufferEntry {}
@@ -263,9 +329,10 @@ impl Renderer {
                 step_mode: VertexStepMode::Vertex,
                 attributes: &vertex_attr_array![
                     0 => Uint16x2,
-                    1 => Uint16x2,
+                    1 => Uint32,
                     2 => Uint32,
-                    3 => Uint32,
+                    3 => Uint16x2,
+                    4 => Uint16x2,
                 ],
             }],
             &create_shader_module!(device, "gfx/vram/vertex.wgsl"),
@@ -465,6 +532,10 @@ impl Renderer {
     }
 
     pub fn blit(&mut self, top_left: Vertex, size: [u16; 2], data: &[u8]) {
+        if !self.vertex_buffer_entries.is_empty() {
+            self.render();
+        }
+
         let bytes_per_row = std::num::NonZeroU32::new(
             (std::mem::size_of::<u32>() as u32) * u32::from(size[0])
         );
