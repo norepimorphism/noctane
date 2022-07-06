@@ -188,7 +188,7 @@ impl Gpu {
                             }
                         )*
                         _ => {
-                            tracing::error!("Unimplemented command: {:?}", cmd.kind);
+                            todo!("Unimplemented command: {:?}", cmd.kind);
                         }
                     }
                 };
@@ -445,9 +445,9 @@ impl Gpu {
                     None => SampleStrategy::Constant { color },
                     Some(texturing) => {
                         SampleStrategy::Texture(SampleTextureStrategy {
-                            // We'll fill this in later.
+                            // We'll fill these three in later.
                             vert: Default::default(),
-                            // We'll fill this in later.
+                            page_x: 0,
                             pal_strat: None,
                             blend_color: match texturing {
                                 Texturing::Blended => Some(color),
@@ -466,6 +466,7 @@ impl Gpu {
                     &tex_page,
                     tex_vert_data[vert_idx],
                 );
+                strat.page_x = tex_page.base.x;
                 strat.pal_strat = <Option<SamplePaletteStrategyKind>>::from(
                     tex_page.color_depth,
                 )
@@ -480,9 +481,7 @@ impl Gpu {
             vert_idx += 1;
 
             complete
-        });
-
-        entries
+        })
     }
 }
 
@@ -545,6 +544,7 @@ impl Gpu {
                     Some(texturing) => {
                         SampleStrategy::Texture(SampleTextureStrategy {
                             vert: tex_rect[idx],
+                            page_x: self.tex_page.base.x,
                             pal_strat,
                             blend_color: match texturing {
                                 Texturing::Blended => Some(color),

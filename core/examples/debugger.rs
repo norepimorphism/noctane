@@ -36,7 +36,7 @@ fn main() {
     let event_loop = winit::event_loop::EventLoop::new();
     let game_window = winit::window::WindowBuilder::new()
         .with_title("Game")
-        .with_inner_size(winit::dpi::PhysicalSize::new(1024, 512))
+        .with_inner_size(winit::dpi::LogicalSize::new(1024, 512))
         .with_resizable(false)
         .build(&event_loop)
         .expect("failed to create window");

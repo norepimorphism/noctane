@@ -13,7 +13,7 @@ use raw_window_handle::HasRawWindowHandle;
 // otherwise.
 use wgpu::{*, util::DeviceExt as _};
 
-const VRAM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+const VRAM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Uint;
 
 #[derive(Debug)]
 pub enum Error {
@@ -21,7 +21,7 @@ pub enum Error {
     NoCompatibleDeviceFound,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct VertexBufferEntry {
     pub vert: Vertex,
     pub strat: SampleStrategy,
@@ -39,6 +39,7 @@ pub enum SampleStrategy {
 pub struct SampleTextureStrategy {
     /// The top-left vertex of the texture to sample.
     pub vert: Vertex,
+    pub page_x: u16,
     pub pal_strat: Option<SamplePaletteStrategy>,
     pub blend_color: Option<[u8; 4]>,
 }
@@ -64,6 +65,8 @@ impl VertexBufferEntry {
                 RawVertexBufferEntry {
                     vert: self.vert,
                     flags: SampleStrategyFlags::STRAT_CONST.bits(),
+                    // Don't care.
+                    tex_page_x: 0,
                     color,
                     // Don't care.
                     tex_vert: Vertex::default(),
@@ -94,6 +97,7 @@ impl VertexBufferEntry {
                 RawVertexBufferEntry {
                     vert: self.vert,
                     flags: flags.bits(),
+                    tex_page_x: strat.page_x,
                     color: blend_color,
                     tex_vert: strat.vert,
                     pal_vert,
@@ -104,7 +108,7 @@ impl VertexBufferEntry {
 }
 
 bitflags::bitflags! {
-    struct SampleStrategyFlags: u32 {
+    struct SampleStrategyFlags: u16 {
         const STRAT_CONST   = 0 << 0;
         const STRAT_TEX     = 1 << 0;
         const TEX_PALETTE   = 1 << 1;
@@ -118,7 +122,8 @@ bitflags::bitflags! {
 #[derive(Clone, Copy, Debug, Default)]
 struct RawVertexBufferEntry {
     vert: Vertex,
-    flags: u32,
+    flags: u16,
+    tex_page_x: u16,
     color: [u8; 4],
     tex_vert: Vertex,
     pal_vert: Vertex,
@@ -195,18 +200,15 @@ impl Renderer {
             &surface_bind_group_layout,
         );
 
-        let sampler = Self::create_sampler(&device);
         let vram_bind_group = Self::create_vram_bind_group(
             &device,
             &vram_bind_group_layout,
             &Self::create_texture_view(&tex_vram),
-            &sampler,
         );
         let surface_bind_group = Self::create_surface_bind_group(
             &device,
             &surface_bind_group_layout,
             &Self::create_texture_view(&vram),
-            &sampler,
         );
 
         Ok(Self {
@@ -294,24 +296,16 @@ impl Renderer {
     fn create_vram_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("VRAM bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Uint,
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
                 },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
+                count: None,
+            }],
         })
     }
 
@@ -329,7 +323,7 @@ impl Renderer {
                 step_mode: VertexStepMode::Vertex,
                 attributes: &vertex_attr_array![
                     0 => Uint16x2,
-                    1 => Uint32,
+                    1 => Uint16x2,
                     2 => Uint32,
                     3 => Uint16x2,
                     4 => Uint16x2,
@@ -343,24 +337,16 @@ impl Renderer {
     fn create_surface_bind_group_layout(device: &Device) -> BindGroupLayout {
         device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Surface bind group layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Uint,
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
                 },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
+                count: None,
+            }],
         })
     }
 
@@ -428,42 +414,18 @@ impl Renderer {
         })
     }
 
-    fn create_sampler(device: &Device) -> Sampler {
-        device.create_sampler(&SamplerDescriptor {
-            label: None,
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
-            lod_min_clamp: 1.0,
-            lod_max_clamp: 1.0,
-            compare: None,
-            anisotropy_clamp: None,
-            border_color: None,
-        })
-    }
-
     fn create_vram_bind_group(
         device: &Device,
         layout: &BindGroupLayout,
         tex_vram_view: &TextureView,
-        tex_vram_sampler: &Sampler,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("VRAM bind group"),
             layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(tex_vram_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(tex_vram_sampler),
-                },
-            ],
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(tex_vram_view),
+            }],
         })
     }
 
@@ -475,21 +437,14 @@ impl Renderer {
         device: &Device,
         layout: &BindGroupLayout,
         vram_view: &TextureView,
-        vram_sampler: &Sampler,
     ) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("Surface bind group"),
             layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(vram_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(vram_sampler),
-                },
-            ],
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(vram_view),
+            }],
         })
     }
 
