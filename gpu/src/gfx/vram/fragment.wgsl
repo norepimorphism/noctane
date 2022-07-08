@@ -28,10 +28,12 @@ fn main(
     [[location(4), interpolate(flat)]]
     tex_page_x: u32,
 ) -> [[location(0)]] vec4<u32> {
+    let color = vec4<u32>(255.0 * color);
+
     switch (flags & 1u) {
         // Constant.
         case 0u: {
-            return vec4<u32>(255.0 * color);
+            return color;
         }
         // Texture.
         default: {
@@ -57,10 +59,15 @@ fn main(
             }
 
             // Blending.
-            // if (((flags >> 2u) & 1u) == 1u) {
-            //     let fragment = vec4<f32>(sample) / 255.0;
-            //     sample = vec4<u32>(255.0 * mix(fragment, color, 0.5));
-            // }
+            if (((flags >> 2u) & 1u) == 1u) {
+                var rgb = color.rgb * sample.rgb;
+                sample = vec4<u32>(
+                    255u & (rgb.r >> 4u),
+                    255u & (rgb.g >> 4u),
+                    255u & (rgb.b >> 4u),
+                    sample.a
+                );
+            }
 
             return sample;
         }
