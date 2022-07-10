@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+#![feature(slice_as_chunks)]
+
 #[macro_export]
 macro_rules! format_int {
     ($value:expr, $abs_value:expr $(,)?) => {
@@ -11,7 +13,6 @@ macro_rules! format_int {
     };
 }
 
-pub mod bios;
 pub mod hex;
 
 pub trait BitStack {

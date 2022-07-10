@@ -69,8 +69,8 @@ impl fmt::Display for ArgumentValue {
 
                 write!(f, "\"")
             }
-            Self::UInt(it)      => write!(f, "{}", format_int!(*it, *it)),
-            Self::SInt(it)      => write!(f, "{}", format_int!(*it, it.abs())),
+            Self::UInt(it)      => write!(f, "{}", noctane_util::format_int!(*it, *it)),
+            Self::SInt(it)      => write!(f, "{}", noctane_util::format_int!(*it, it.abs())),
             Self::Address(it)   => write!(f, "{:#010x}", it),
         }
     }

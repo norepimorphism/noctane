@@ -2,7 +2,7 @@
 
 #![feature(let_else, slice_as_chunks)]
 
-use std::{collections::HashSet, io::Write as _, sync::{Arc, Condvar, Mutex}};
+use std::collections::HashSet;
 
 struct Render {
     state: Mutex<RenderState>,
@@ -40,74 +40,23 @@ fn main() {
         .with_resizable(false)
         .build(&event_loop)
         .expect("failed to create window");
-    // SAFETY: TODO
-    let gfx = unsafe {
-        pollster::block_on(noctane_gpu::gfx::Renderer::new(
-            &game_window,
-            wgpu_types::Backends::all(),
-        ))
-        .map(|mut it| {
-            let size = game_window.inner_size();
-            it.resize(size.width, size.height);
 
-            it
-        })
-        .expect("failed to create renderer")
-    };
-    let mut core = noctane::Core::new(gfx);
-
-    // Fill BIOS with the ROM image.
-    for (idx, instr) in bios.as_chunks::<4>().0.into_iter().enumerate() {
-        // The PSX CPU is little-endian, so we must make sure that if the host platform is
-        // big-endian, the bytes are swapped before being written.
-        core.banks.bios[idx] = u32::from_le_bytes(*instr);
-    }
-
-    let render = Arc::new(Render::new());
-    let mut debugger = Some({
-        let render_clone = Arc::clone(&render);
-
-        std::thread::spawn(|| {
-            Debugger::new(core, render_clone).run();
-        })
-    });
-    event_loop.run(move |event, _, ctrl_flow| {
-        use winit::{
-            event::{Event, WindowEvent},
-            event_loop::ControlFlow,
-        };
-
-        *ctrl_flow = ControlFlow::Poll;
-
-        match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                if let Some(debugger) = debugger.take() {
-                    debugger.join().unwrap();
-                }
-                *ctrl_flow = ControlFlow::Exit;
+    noctane_core::Core::run(
+        event_loop,
+        game_window,
+        |_| {},
+        |core| {
+            let bios_bank = &mut core.banks_mut().bios;
+            // Fill BIOS with the ROM image.
+            for (idx, word) in bios.as_chunks::<4>().0.into_iter().enumerate() {
+                // The PSX CPU is little-endian, so we must make sure that if the host platform is
+                // big-endian, the bytes are swapped before being written.
+                bios_bank[idx] = u32::from_le_bytes(*word);
             }
-            Event::MainEventsCleared => {
-                if matches!(*render.state.lock().unwrap(), RenderState::Requested) {
-                    game_window.request_redraw();
-                }
-            }
-            Event::RedrawRequested(_) => {
-                let render = &*render;
-                let mut render_state = render.state.lock().unwrap();
-                if matches!(*render_state, RenderState::Requested) {
-                    *render_state = RenderState::InProgress;
-                    render.cvar.notify_one();
 
-                    let _ = render.cvar.wait_while(
-                        render_state,
-                        |state| matches!(state, RenderState::InProgress),
-                    )
-                    .unwrap();
-                }
-            }
-            _ => {},
-        }
-    });
+            Debugger::new(core).run()
+        },
+    )
 }
 
 fn setup_tracing() {
@@ -145,13 +94,9 @@ fn setup_tracing() {
 }
 
 impl Debugger {
-    fn new(
-        core: noctane::Core,
-        render: Arc<Render>,
-    ) -> Self {
+    fn new(mut core: noctane::Core) -> Self {
         Self {
             core,
-            render,
             addr_breakpoints: HashSet::new(),
             sym_breakpoints: HashSet::new(),
             stdout: String::new(),
@@ -161,7 +106,6 @@ impl Debugger {
 
 struct Debugger {
     core: noctane::Core,
-    render: Arc<Render>,
     addr_breakpoints: HashSet<u32>,
     sym_breakpoints: HashSet<String>,
     stdout: String,
@@ -405,35 +349,7 @@ enum Jump {
 
 impl Debugger {
     fn step(&mut self) -> Step {
-        if self.core.take_vblank().is_some() {
-            let render = &*self.render;
-            // Request a render operation.
-            let mut render_state = render.state.lock().unwrap();
-            *render_state = RenderState::Requested;
-            // The GUI thread locks `render_state` and sees that a render has been requested. At
-            // that point, the GUI thread will request a redraw, release the lock, re-acquire
-            // the lock (due to *winit* event handling), and, once in the redraw event, will set
-            // `render_state` to [`RenderState::InProgress`]. Finally, the lock is released
-            // again, and this thread continues.
-            let mut render_state = render.cvar.wait_while(
-                render_state,
-                |state| matches!(state, RenderState::Requested),
-            )
-            .unwrap();
-            // Perform the render operation.
-            self.core.gpu.gfx_mut().render();
-            // The GUI thread is waiting for `render_state` to change, so we must now notify it.
-            *render_state = RenderState::Complete;
-            render.cvar.notify_one();
-
-            self.core.issue_vblank();
-
-            // Release the `render_state` lock, allowing the GUI thread to acquire it and
-            // observe that the render is complete.
-        }
-        self.core.gpu.execute_next_gp0_command();
-        let execed = self.core.cpu().execute_next_instr();
-        self.core.instrs_since_last_vblank += 1;
+        let execed = self.core.step();
 
         if let noctane_cpu::instr::PcBehavior::Jumps {
             kind,
@@ -477,7 +393,7 @@ impl Debugger {
         macro_rules! handle_table_call {
             ($table_name:ident $fn_name:ident) => {
                 {
-                    use noctane_util::bios::func;
+                    use noctane::bios::func;
 
                     // We just queued a jump. Many (all?) table jumps set *r9* in the delay slot,
                     // so we must step before we can see the final value of *r9* going into the

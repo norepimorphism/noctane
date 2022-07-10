@@ -191,7 +191,9 @@ impl Renderer {
         let vram_bind_group_layout = Self::create_vram_bind_group_layout(&device);
         let vram_pipeline = Self::create_vram_pipeline(&device, &vram_bind_group_layout);
         let surface_format = surface
-            .get_preferred_format(&adapter)
+            .get_supported_formats(&adapter)
+            .first()
+            .copied()
             .expect("surface is incompatible with the adapter");
         let surface_bind_group_layout = Self::create_surface_bind_group_layout(&device);
         let surface_pipeline = Self::create_surface_pipeline(
@@ -288,7 +290,7 @@ impl Renderer {
 
 macro_rules! create_shader_module {
     ($device:expr, $path:literal $(,)?) => {
-        $device.create_shader_module(&include_wgsl!($path))
+        $device.create_shader_module(include_wgsl!($path))
     };
 }
 
@@ -316,7 +318,7 @@ impl Renderer {
         Self::create_pipeline(
             &device,
             VRAM_TEXTURE_FORMAT,
-            PolygonMode::Fill,
+            PolygonMode::Line,
             &[bind_group_layout],
             &[VertexBufferLayout {
                 array_stride: std::mem::size_of::<RawVertexBufferEntry>() as BufferAddress,
@@ -386,11 +388,11 @@ impl Renderer {
             fragment: Some(FragmentState {
                 module: fragment_shader,
                 entry_point: "main",
-                targets: &[wgpu::ColorTargetState {
+                targets: &[Some(wgpu::ColorTargetState {
                     format: texture_format,
                     blend: None,
                     write_mask: ColorWrites::ALL,
-                }],
+                })],
             }),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
@@ -598,11 +600,11 @@ impl Renderer {
         ops: Operations<Color>,
     ) -> RenderPass<'a> {
         encoder.begin_render_pass(&RenderPassDescriptor {
-            color_attachments: &[RenderPassColorAttachment {
+            color_attachments: &[Some(RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops,
-            }],
+            })],
             ..Default::default()
         })
     }

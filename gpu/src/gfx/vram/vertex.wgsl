@@ -8,7 +8,7 @@ struct Output {
     [[location(2), interpolate(perspective, center)]]
     tex_pos: vec2<f32>;
     [[location(3), interpolate(flat)]]
-    pal_pos: vec2<f32>;
+    pal_pos: vec2<u32>;
     [[location(4), interpolate(flat)]]
     tex_page_x: u32;
 };
@@ -50,7 +50,7 @@ fn main(
     out.flags = packed.x;
     out.color = unpack4x8unorm(color);
     out.tex_pos = vec2<f32>(tex_pos);
-    out.pal_pos = vec2<f32>(pal_pos);
+    out.pal_pos = pal_pos;
     out.tex_page_x = packed.y;
     return out;
 }

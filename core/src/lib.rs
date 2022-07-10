@@ -1,12 +1,102 @@
 // SPDX-License-Identifier: MPL-2.0
 
+#![feature(slice_as_chunks)]
+
 use std::time::Instant;
 
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
+use winit::{event_loop::EventLoop, window::Window};
+
+use std::sync::{Arc, Condvar, Mutex};
+
+pub mod bios;
+
+struct Render {
+    state: Mutex<RenderState>,
+    cvar: Condvar,
+}
+
+enum RenderState {
+    Requested,
+    InProgress,
+    Complete,
+}
+
+impl Render {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(RenderState::Complete),
+            cvar: Condvar::new(),
+        }
+    }
+}
 
 impl Core {
-    pub fn new(gfx: noctane_gpu::gfx::Renderer) -> Self {
+    pub fn run(
+        event_loop: EventLoop<()>,
+        game_window: Window,
+        setup: impl Fn(&mut Self),
+        main: impl Fn(Self) + Sync + Send + 'static,
+    ) {
+        let render = Arc::new(Render::new());
+        // SAFETY: TODO
+        let mut this = unsafe { Self::new(&game_window, Arc::clone(&render)) };
+        let mut main_thread = Some(std::thread::spawn(move || main(this)));
+
+        event_loop.run(move |event, _, ctrl_flow| {
+            use winit::{
+                event::{Event, WindowEvent},
+                event_loop::ControlFlow,
+            };
+
+            *ctrl_flow = ControlFlow::Poll;
+
+            match event {
+                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                    if let Some(thread) = main_thread.take() {
+                        thread.join().unwrap();
+                    }
+                    *ctrl_flow = ControlFlow::Exit;
+                }
+                Event::MainEventsCleared => {
+                    if matches!(*render.state.lock().unwrap(), RenderState::Requested) {
+                        game_window.request_redraw();
+                    }
+                }
+                Event::RedrawRequested(_) => {
+                    let render = &*render;
+                    let mut render_state = render.state.lock().unwrap();
+                    if matches!(*render_state, RenderState::Requested) {
+                        *render_state = RenderState::InProgress;
+                        render.cvar.notify_one();
+
+                        let _ = render.cvar.wait_while(
+                            render_state,
+                            |state| matches!(state, RenderState::InProgress),
+                        )
+                        .unwrap();
+                    }
+                }
+                _ => {},
+            }
+        });
+    }
+
+    unsafe fn new(game_window: &Window, render: Arc<Render>) -> Self {
+        // SAFETY: TODO
+        let gfx = pollster::block_on(noctane_gpu::gfx::Renderer::new(
+            &game_window,
+            wgpu_types::Backends::all(),
+        ))
+        .map(|mut it| {
+            let size = game_window.inner_size();
+            it.resize(size.width, size.height);
+
+            it
+        })
+        .expect("failed to create renderer");
+
         Self {
             banks: Default::default(),
             bus_cfg: Default::default(),
@@ -19,6 +109,7 @@ impl Core {
             last_vblank: Instant::now(),
             post: Default::default(),
             ram_cfg: Default::default(),
+            render: render,
             spu_cfg: Default::default(),
             spu_voices: Default::default(),
             timers: Default::default(),
@@ -27,20 +118,21 @@ impl Core {
 }
 
 pub struct Core {
-    pub banks: Banks,
-    pub bus_cfg: noctane_cpu::bus::io::bus::Config,
-    pub cpu_state: noctane_cpu::State,
-    pub dma_cfg: noctane_cpu::bus::io::dma::Config,
-    pub instrs_since_last_vblank: usize,
-    pub int: noctane_cpu::bus::io::int::Sources,
-    pub gpu: Gpu,
-    pub last_gpu_result: u32,
-    pub last_vblank: Instant,
-    pub post: noctane_cpu::bus::io::post::Status,
-    pub ram_cfg: noctane_cpu::bus::io::ram::Config,
-    pub spu_cfg: noctane_cpu::bus::io::spu::Config,
-    pub spu_voices: [noctane_cpu::bus::io::spu_voice::Config; 24],
-    pub timers: noctane_cpu::bus::io::Timers,
+    banks: Banks,
+    bus_cfg: noctane_cpu::bus::io::bus::Config,
+    cpu_state: noctane_cpu::State,
+    dma_cfg: noctane_cpu::bus::io::dma::Config,
+    instrs_since_last_vblank: usize,
+    int: noctane_cpu::bus::io::int::Sources,
+    gpu: Gpu,
+    last_gpu_result: u32,
+    last_vblank: Instant,
+    post: noctane_cpu::bus::io::post::Status,
+    ram_cfg: noctane_cpu::bus::io::ram::Config,
+    render: Arc<Render>,
+    spu_cfg: noctane_cpu::bus::io::spu::Config,
+    spu_voices: [noctane_cpu::bus::io::spu_voice::Config; 24],
+    timers: noctane_cpu::bus::io::Timers,
 }
 
 #[derive(Default)]
@@ -52,7 +144,72 @@ pub struct Banks {
 }
 
 impl Core {
-    pub fn cpu(&mut self) -> Cpu {
+    pub fn banks_mut(&mut self) -> &mut Banks {
+        &mut self.banks
+    }
+
+    pub fn step(&mut self) -> noctane_cpu::instr::Executed {
+        if self.take_vblank().is_some() {
+            self.do_vblank();
+        }
+        self.gpu.execute_next_gp0_command();
+        let execed = self.cpu().execute_next_instr();
+        self.instrs_since_last_vblank += 1;
+
+        execed
+    }
+
+    fn take_vblank(&mut self) -> Option<()> {
+        // Greatly reduce the number of syscalls produced.
+        if (self.instrs_since_last_vblank < 50_000) || ((self.instrs_since_last_vblank % 5_000) > 0) {
+            return None;
+        }
+        self.instrs_since_last_vblank = 0;
+
+        // 60 Hz.
+        if self.last_vblank.elapsed().as_millis() >= 16 {
+            self.last_vblank = Instant::now();
+
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn do_vblank(&mut self) {
+        {
+            let render = &*self.render;
+            // Request a render operation.
+            let mut render_state = render.state.lock().unwrap();
+            *render_state = RenderState::Requested;
+            // The GUI thread locks `render_state` and sees that a render has been requested. At
+            // that point, the GUI thread will request a redraw, release the lock, re-acquire
+            // the lock (due to *winit* event handling), and, once in the redraw event, will set
+            // `render_state` to [`RenderState::InProgress`]. Finally, the lock is released
+            // again, and this thread continues.
+            let mut render_state = render.cvar.wait_while(
+                render_state,
+                |state| matches!(state, RenderState::Requested),
+            )
+            .unwrap();
+            // Perform the render operation.
+            self.gpu.gfx_mut().render();
+            // The GUI thread is waiting for `render_state` to change, so we must now notify it.
+            *render_state = RenderState::Complete;
+            render.cvar.notify_one();
+        }
+        // Release the `render_state` lock, allowing the GUI thread to acquire it and
+        // observe that the render is complete.
+
+        self.issue_vblank();
+    }
+
+    fn issue_vblank(&mut self) {
+        // Request a V-blank interrupt.
+        self.int.vblank.request = Some(Default::default());
+    }
+
+    fn cpu(&mut self) -> Cpu {
         self.cpu_state.connect_bus(noctane_cpu::Bus {
             ram: &mut self.banks.ram,
             exp_1: &mut self.banks.exp_1,
@@ -71,28 +228,6 @@ impl Core {
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })
-    }
-
-    pub fn take_vblank(&mut self) -> Option<()> {
-        // Greatly reduce the number of syscalls produced.
-        if (self.instrs_since_last_vblank < 50_000) || ((self.instrs_since_last_vblank % 5_000) > 0) {
-            return None;
-        }
-        self.instrs_since_last_vblank = 0;
-
-        // 50 Hz.
-        if self.last_vblank.elapsed().as_millis() >= 20 {
-            self.last_vblank = Instant::now();
-
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    pub fn issue_vblank(&mut self) {
-        // Request a V-blank interrupt.
-        self.int.vblank.request = Some(Default::default());
     }
 }
 

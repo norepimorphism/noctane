@@ -24,7 +24,7 @@ fn main(
     [[location(2), interpolate(perspective, center)]]
     tex_pos: vec2<f32>,
     [[location(3), interpolate(flat)]]
-    pal_pos: vec2<f32>,
+    pal_pos: vec2<u32>,
     [[location(4), interpolate(flat)]]
     tex_page_x: u32,
 ) -> [[location(0)]] vec4<u32> {
