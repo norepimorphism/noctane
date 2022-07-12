@@ -2,13 +2,24 @@
 
 #![feature(slice_as_chunks)]
 
-use std::time::Instant;
+use imports::*;
 
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 use winit::{event_loop::EventLoop, window::Window};
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::{sync::{Arc, Condvar, Mutex}, time::Instant};
+
+#[cfg(target_arch = "wasm32")]
+mod imports {
+    pub use wasm_rs_async_executor::single_threaded as async_executor;
+    pub use wasm_thread as thread;
+}
+#[cfg(not(target_arch = "wasm32"))]
+mod imports {
+    pub use pollster as async_executor;
+    pub use std::thread;
+}
 
 pub mod bios;
 
@@ -42,7 +53,8 @@ impl Core {
         let render = Arc::new(Render::new());
         // SAFETY: TODO
         let mut this = unsafe { Self::new(&game_window, Arc::clone(&render)) };
-        let mut main_thread = Some(std::thread::spawn(move || main(this)));
+        setup(&mut this);
+        let mut main_thread = Some(thread::spawn(move || main(this)));
 
         event_loop.run(move |event, _, ctrl_flow| {
             use winit::{
@@ -85,7 +97,7 @@ impl Core {
 
     unsafe fn new(game_window: &Window, render: Arc<Render>) -> Self {
         // SAFETY: TODO
-        let gfx = pollster::block_on(noctane_gpu::gfx::Renderer::new(
+        let gfx = async_executor::block_on(noctane_gpu::gfx::Renderer::new(
             &game_window,
             wgpu_types::Backends::all(),
         ))
@@ -109,7 +121,7 @@ impl Core {
             last_vblank: Instant::now(),
             post: Default::default(),
             ram_cfg: Default::default(),
-            render: render,
+            render,
             spu_cfg: Default::default(),
             spu_voices: Default::default(),
             timers: Default::default(),
@@ -150,7 +162,7 @@ impl Core {
 
     pub fn step(&mut self) -> noctane_cpu::instr::Executed {
         if self.take_vblank().is_some() {
-            self.do_vblank();
+            self.render();
         }
         self.gpu.execute_next_gp0_command();
         let execed = self.cpu().execute_next_instr();
@@ -176,7 +188,7 @@ impl Core {
         }
     }
 
-    fn do_vblank(&mut self) {
+    fn render(&mut self) {
         {
             let render = &*self.render;
             // Request a render operation.

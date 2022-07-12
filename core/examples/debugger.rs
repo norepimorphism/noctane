@@ -2,27 +2,7 @@
 
 #![feature(let_else, slice_as_chunks)]
 
-use std::collections::HashSet;
-
-struct Render {
-    state: Mutex<RenderState>,
-    cvar: Condvar,
-}
-
-enum RenderState {
-    Requested,
-    InProgress,
-    Complete,
-}
-
-impl Render {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(RenderState::Complete),
-            cvar: Condvar::new(),
-        }
-    }
-}
+use std::{collections::HashSet, io::Write as _};
 
 fn main() {
     setup_tracing();
@@ -486,7 +466,7 @@ impl Debugger {
             noctane_cpu::exc::code::BREAKPOINT => {
                 // See RM[A-21].
                 let code = (execed.fetched.op >> 6) & ((1 << 20) - 1);
-                if let Some(call) = noctane_util::bios::func::Call::try_from_break(
+                if let Some(call) = noctane::bios::func::Call::try_from_break(
                     self,
                     code,
                 ) {
@@ -501,7 +481,7 @@ impl Debugger {
                 let code = self.core.cpu_state.reg.gpr(4);
                 println!(
                     "{}",
-                    noctane_util::bios::func::Call::from_syscall(self, code),
+                    noctane::bios::func::Call::from_syscall(self, code),
                 );
             }
             _ => {
@@ -512,7 +492,7 @@ impl Debugger {
     }
 }
 
-impl noctane_util::bios::func::CallSource for Debugger {
+impl noctane::bios::func::CallSource for Debugger {
     fn read_raw_arg(&mut self, index: usize) -> u32 {
         let reg = &self.core.cpu_state.reg;
 

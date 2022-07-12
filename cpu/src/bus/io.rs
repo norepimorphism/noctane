@@ -2605,37 +2605,41 @@ gen_cpu_bus_io!(
             Register {
                 name: INDEX,
                 read_8: |_, _, _| {
-                    todo!()
+                    // TODO
+                    !0
                 },
                 write_8: |_, _, _, _| {
-                    todo!()
+                    // TODO
                 },
             },
             Register {
                 name: 1,
                 read_8: |_, _, _| {
-                    todo!()
+                    // TODO
+                    !0
                 },
                 write_8: |_, _, _, _| {
-                    todo!()
+                    // TODO
                 },
             },
             Register {
                 name: 2,
                 read_8: |_, _, _| {
-                    todo!()
+                    // TODO
+                    !0
                 },
                 write_8: |_, _, _, _| {
-                    todo!()
+                    // TODO
                 },
             },
             Register {
                 name: 3,
                 read_8: |_, _, _| {
-                    todo!()
+                    // TODO
+                    !0
                 },
                 write_8: |_, _, _, _| {
-                    todo!()
+                    // TODO
                 },
             },
         ],
