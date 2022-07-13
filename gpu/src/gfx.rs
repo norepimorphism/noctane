@@ -257,7 +257,6 @@ impl Renderer {
         adapter.request_device(
             &DeviceDescriptor {
                 limits: adapter.limits(),
-                features: Features::POLYGON_MODE_LINE,
                 ..Default::default()
             },
             None,
@@ -318,7 +317,7 @@ impl Renderer {
         Self::create_pipeline(
             &device,
             VRAM_TEXTURE_FORMAT,
-            PolygonMode::Line,
+            PolygonMode::Fill,
             &[bind_group_layout],
             &[VertexBufferLayout {
                 array_stride: std::mem::size_of::<RawVertexBufferEntry>() as BufferAddress,
@@ -454,11 +453,7 @@ impl Renderer {
         self.surface.configure(
             &self.device,
             &SurfaceConfiguration {
-                usage: {
-                    TextureUsages::TEXTURE_BINDING
-                        | TextureUsages::RENDER_ATTACHMENT
-                        | TextureUsages::COPY_DST
-                },
+                usage: TextureUsages::RENDER_ATTACHMENT,
                 format: self.surface_format,
                 width,
                 height,

@@ -1,11 +1,12 @@
 struct Output {
-    [[builtin(position)]] pos: vec4<f32>;
-    [[location(0), interpolate(perspective, center)]]
-    vram_pos: vec2<f32>;
-};
+    @builtin(position)
+    pos: vec4<f32>,
+    @location(0) @interpolate(perspective, center)
+    vram_pos: vec2<f32>
+}
 
-[[stage(vertex)]]
-fn main([[builtin(vertex_index)]] index: u32) -> Output {
+@vertex
+fn main(@builtin(vertex_index) index: u32) -> Output {
     // We need to generate a fullscreen quad with one triangle (I guess it's not really a quad at
     // that point...). Specifically, we'll construct a right triangle such that the hypotenuse is
     // bisected by the bottom-right corner of the screen.

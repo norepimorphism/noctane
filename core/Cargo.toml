@@ -14,6 +14,7 @@ name = "cpu"
 harness = false
 
 [dependencies]
+instant = { version = "0.1", features = ["stdweb"] }
 noctane-cpu = { path = "../cpu" }
 noctane-gpu = { path = "../gpu" }
 noctane-util = { path = "../util" }
@@ -29,8 +30,10 @@ criterion = "0.3"
 pollster = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
 wasm-rs-async-executor = "0.9"
-wasm_thread = "0.2"
+wasm_thread = { version = "0.2", features = ["es_modules"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 js-sys = "0.3"

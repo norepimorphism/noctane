@@ -5,13 +5,13 @@
 use std::{collections::HashSet, io::Write as _};
 
 fn main() {
-    setup_tracing();
+    noctane::log::init();
 
     let bios_filepath = std::env::args()
         // Skip the executable path argument and retrieve the first 'real' argument.
         .nth(1)
         .expect("expected ROM filepath");
-    let bios = std::fs::read(bios_filepath).expect("failed to read ROM");
+    let mut bios = std::fs::read(bios_filepath).expect("failed to read ROM");
 
     let event_loop = winit::event_loop::EventLoop::new();
     let game_window = winit::window::WindowBuilder::new()
@@ -21,56 +21,18 @@ fn main() {
         .build(&event_loop)
         .expect("failed to create window");
 
-    noctane_core::Core::run(
+    noctane::Core::run(
         event_loop,
         game_window,
         |_| {},
         |core| {
-            let bios_bank = &mut core.banks_mut().bios;
-            // Fill BIOS with the ROM image.
-            for (idx, word) in bios.as_chunks::<4>().0.into_iter().enumerate() {
-                // The PSX CPU is little-endian, so we must make sure that if the host platform is
-                // big-endian, the bytes are swapped before being written.
-                bios_bank[idx] = u32::from_le_bytes(*word);
-            }
+            // SAFETY: TODO
+            let (_, bios, _) = unsafe { bios.align_to::<u32>() };
+            core.banks_mut().bios[..bios.len()].copy_from_slice(bios);
 
             Debugger::new(core).run()
         },
     )
-}
-
-fn setup_tracing() {
-    use tracing_subscriber::EnvFilter;
-
-    tracing_subscriber::fmt()
-        // Set the environment variable `RUST_LOG` to one of `TRACE`, `DEBUG`, `INFO`, `WARN`, or
-        // `ERROR`. Reading from the environment saves us from writing additional code to parse
-        // verbosity flags.
-        .with_env_filter({
-            // TODO: It would be awesome if these directives could be parsed at compile-time.
-            [
-                "gfx_backend_vulkan=warn",
-                "naga=warn",
-                "wgpu_core=warn",
-                "wgpu_hal=warn",
-            ]
-            .iter()
-            .map(|it| {
-                it.parse()
-                    .expect("Failed to parse directive '{}': {}")
-            })
-            .fold(
-                EnvFilter::from_default_env(),
-                |filter, it| filter.add_directive(it),
-            )
-        })
-        .with_ansi(true)
-        .with_level(true)
-        // The target is mostly just noise, I think.
-        .with_target(false)
-        // Timestamps are mostly noise as well.
-        .without_time()
-        .init();
 }
 
 impl Debugger {

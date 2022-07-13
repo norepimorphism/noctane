@@ -11,6 +11,8 @@ fn main() {
 
 #[wasm_bindgen(start)]
 pub fn run() {
+    // noctane::log::init();
+
     let drop_callback = Closure::wrap(Box::new(handle_drop) as Box<dyn Fn(_)>);
     drop_zone_element()
         .add_event_listener_with_callback("drop", drop_callback.as_ref().unchecked_ref())
@@ -57,8 +59,8 @@ fn run_noctane(setup: impl Fn(&mut noctane::Core)) {
     find_element_by_id("canvas-container")
         .expect("'#canvas-container' should exist")
         .replace_child(
-            &drop_zone_element(),
             &web_sys::Element::from(game_window.canvas()),
+            &drop_zone_element(),
         )
         .expect("failed to append canvas to document");
 
@@ -101,22 +103,17 @@ fn load_bios(
 
         let chunk: js_sys::Uint8Array = read.at(0).unchecked_into();
         let chunk = chunk.to_vec();
-        copy_chunk_to_bios(&chunk, bios);
-
-        let word_count = chunk.len() / 4;
-        bios = &mut bios[word_count..];
+        let chunk_len = copy_chunk_to_bios(&chunk, bios);
+        bios = &mut bios[chunk_len..];
     }
 }
 
-fn copy_chunk_to_bios(chunk: &[u8], bios: &mut [u32]) {
-    for (idx, word) in chunk
-        .as_chunks::<4>()
-        .0
-        .into_iter()
-        .enumerate()
-    {
-        // The PSX CPU is little-endian, so we must make sure that if the host platform is
-        // big-endian, the bytes are swapped before being written.
-        bios[idx] = u32::from_le_bytes(*word);
-    }
+fn copy_chunk_to_bios(chunk: &[u8], bios: &mut [u32]) -> usize {
+    let chunk_len = chunk.len();
+
+    // SAFETY: TODO
+    let (_, chunk, _) = unsafe { chunk.align_to::<u32>() };
+    bios[..chunk_len].copy_from_slice(chunk);
+
+    return chunk_len;
 }

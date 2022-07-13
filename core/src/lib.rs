@@ -4,11 +4,12 @@
 
 use imports::*;
 
+use instant::Instant;
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 use winit::{event_loop::EventLoop, window::Window};
 
-use std::{sync::{Arc, Condvar, Mutex}, time::Instant};
+use std::sync::{Arc, Condvar, Mutex};
 
 #[cfg(target_arch = "wasm32")]
 mod imports {
@@ -22,6 +23,7 @@ mod imports {
 }
 
 pub mod bios;
+pub mod log;
 
 struct Render {
     state: Mutex<RenderState>,
@@ -67,18 +69,24 @@ impl Core {
             match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                     if let Some(thread) = main_thread.take() {
-                        thread.join().unwrap();
+                        thread.join().expect("main thread panicked");
                     }
                     *ctrl_flow = ControlFlow::Exit;
                 }
                 Event::MainEventsCleared => {
-                    if matches!(*render.state.lock().unwrap(), RenderState::Requested) {
+                    if matches!(
+                        *render.state.lock().expect("mutex was poisoned"),
+                        RenderState::Requested,
+                    ) {
                         game_window.request_redraw();
                     }
                 }
                 Event::RedrawRequested(_) => {
                     let render = &*render;
-                    let mut render_state = render.state.lock().unwrap();
+                    let mut render_state = render
+                        .state
+                        .lock()
+                        .expect("mutex was poisoned");
                     if matches!(*render_state, RenderState::Requested) {
                         *render_state = RenderState::InProgress;
                         render.cvar.notify_one();
@@ -87,7 +95,7 @@ impl Core {
                             render_state,
                             |state| matches!(state, RenderState::InProgress),
                         )
-                        .unwrap();
+                        .expect("mutex was poisoned");
                     }
                 }
                 _ => {},
@@ -192,7 +200,10 @@ impl Core {
         {
             let render = &*self.render;
             // Request a render operation.
-            let mut render_state = render.state.lock().unwrap();
+            let mut render_state = render
+                .state
+                .lock()
+                .expect("mutex was poisoned");
             *render_state = RenderState::Requested;
             // The GUI thread locks `render_state` and sees that a render has been requested. At
             // that point, the GUI thread will request a redraw, release the lock, re-acquire
@@ -203,7 +214,7 @@ impl Core {
                 render_state,
                 |state| matches!(state, RenderState::Requested),
             )
-            .unwrap();
+            .expect("mutex was poisoned");
             // Perform the render operation.
             self.gpu.gfx_mut().render();
             // The GUI thread is waiting for `render_state` to change, so we must now notify it.

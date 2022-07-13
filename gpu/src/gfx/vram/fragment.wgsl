@@ -1,4 +1,4 @@
-[[group(0), binding(0)]]
+@group(0) @binding(0)
 var tex_vram: texture_2d<u32>;
 
 fn calc_palette_index(
@@ -15,19 +15,19 @@ fn calc_palette_index(
     return masked;
 }
 
-[[stage(fragment)]]
+@fragment
 fn main(
-    [[location(0), interpolate(flat)]]
+    @location(0) @interpolate(flat)
     flags: u32,
-    [[location(1), interpolate(perspective, center)]]
+    @location(1) @interpolate(perspective, center)
     color: vec4<f32>,
-    [[location(2), interpolate(perspective, center)]]
+    @location(2) @interpolate(perspective, center)
     tex_pos: vec2<f32>,
-    [[location(3), interpolate(flat)]]
+    @location(3) @interpolate(flat)
     pal_pos: vec2<u32>,
-    [[location(4), interpolate(flat)]]
+    @location(4) @interpolate(flat)
     tex_page_x: u32,
-) -> [[location(0)]] vec4<u32> {
+) -> @location(0) vec4<u32> {
     let color = vec4<u32>(255.0 * color);
 
     switch (flags & 1u) {
@@ -40,7 +40,7 @@ fn main(
             var tex_pos = vec2<i32>(tex_pos);
             let pal_pos = vec2<i32>(pal_pos);
 
-            var sample: vec4<u32>;
+            var tex_sample: vec4<u32>;
 
             // Palette.
             if (((flags >> 1u) & 1u) == 1u) {
@@ -52,24 +52,24 @@ fn main(
                 tex_pos = vec2<i32>(pal_pos.x + i32(idx), pal_pos.y);
             }
 
-            sample = textureLoad(tex_vram, tex_pos, 0);
-            if (all(sample.rgb == vec3<u32>(0u, 0u, 0u))) {
+            tex_sample = textureLoad(tex_vram, tex_pos, 0);
+            if (all(tex_sample.rgb == vec3<u32>(0u, 0u, 0u))) {
                 // 'Black' is rendered as transparent.
                 discard;
             }
 
             // Blending.
             if (((flags >> 2u) & 1u) == 1u) {
-                var rgb = color.rgb * sample.rgb;
-                sample = vec4<u32>(
+                var rgb = color.rgb * tex_sample.rgb;
+                tex_sample = vec4<u32>(
                     255u & (rgb.r >> 4u),
                     255u & (rgb.g >> 4u),
                     255u & (rgb.b >> 4u),
-                    sample.a
+                    tex_sample.a
                 );
             }
 
-            return sample;
+            return tex_sample;
         }
     }
 }
