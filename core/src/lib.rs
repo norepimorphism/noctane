@@ -2,10 +2,13 @@
 
 #![feature(slice_as_chunks)]
 
+pub mod bios;
+pub mod log;
+
 use instant::Instant;
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
-use winit::{event_loop::EventLoop, window::Window};
+use winit::{event_loop::{EventLoop, EventLoopProxy}, window::Window};
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
@@ -14,57 +17,10 @@ pub use wasm_thread as thread;
 #[cfg(not(target_arch = "wasm32"))]
 pub use std::thread;
 
-pub mod bios;
-pub mod log;
-
-#[cfg(target_arch = "wasm32")]
-fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<T> {
-    loop {
-        if let Ok(it) = mutex.try_lock() {
-            return it;
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<T> {
-    mutex.lock().expect("mutex was poisoned")
-}
-
-struct Render {
-    state: Mutex<RenderState>,
-    cvar: Condvar,
-}
-
-enum RenderState {
-    Requested,
-    InProgress,
-    Complete,
-}
-
-impl Render {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(RenderState::Complete),
-            cvar: Condvar::new(),
-        }
-    }
-}
-
 impl Core {
-    pub unsafe fn new(game_window: &Window) -> Self {
+    pub async unsafe fn new(game_window: &Window) -> Self {
         // SAFETY: TODO
-        let gfx = pollster::block_on(noctane_gpu::gfx::Renderer::new(
-            &game_window,
-            wgpu_types::Backends::all(),
-        ))
-        .map(|mut it| {
-            let size = game_window.inner_size();
-            it.resize(size.width, size.height);
-
-            it
-        })
-        .expect("failed to create renderer");
+        let gfx = Self::create_gfx(game_window).await;
 
         Self {
             banks: Default::default(),
@@ -78,59 +34,25 @@ impl Core {
             last_vblank: Instant::now(),
             post: Default::default(),
             ram_cfg: Default::default(),
-            render: Arc::new(Render::new()),
             spu_cfg: Default::default(),
             spu_voices: Default::default(),
             timers: Default::default(),
         }
     }
 
-    pub fn run(
-        self,
-        event_loop: EventLoop<()>,
-        game_window: Window,
-        main: impl Fn(Self) + Sync + Send + 'static,
-    ) {
-        let render = Arc::clone(&self.render);
-        let mut main_thread = Some(thread::spawn(move || main(self)));
+    async unsafe fn create_gfx(game_window: &Window) -> noctane_gpu::gfx::Renderer {
+        noctane_gpu::gfx::Renderer::new(
+            &game_window,
+            wgpu_types::Backends::all(),
+        )
+        .await
+        .map(|mut it| {
+            let size = game_window.inner_size();
+            it.resize(size.width, size.height);
 
-        event_loop.run(move |event, _, ctrl_flow| {
-            use winit::{
-                event::{Event, WindowEvent},
-                event_loop::ControlFlow,
-            };
-
-            *ctrl_flow = ControlFlow::Poll;
-
-            match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    if let Some(thread) = main_thread.take() {
-                        thread.join().expect("main thread panicked");
-                    }
-                    *ctrl_flow = ControlFlow::Exit;
-                }
-                Event::MainEventsCleared => {
-                    if matches!(*lock_mutex(&render.state), RenderState::Requested) {
-                        game_window.request_redraw();
-                    }
-                }
-                Event::RedrawRequested(_) => {
-                    let render = &*render;
-                    let mut render_state = lock_mutex(&render.state);
-                    if matches!(*render_state, RenderState::Requested) {
-                        *render_state = RenderState::InProgress;
-                        render.cvar.notify_one();
-
-                        // let _ = render.cvar.wait_while(
-                        //     render_state,
-                        //     |state| matches!(state, RenderState::InProgress),
-                        // )
-                        // .expect("mutex was poisoned");
-                    }
-                }
-                _ => {},
-            }
-        });
+            it
+        })
+        .expect("failed to create renderer")
     }
 }
 
@@ -146,7 +68,6 @@ pub struct Core {
     last_vblank: Instant,
     post: noctane_cpu::bus::io::post::Status,
     ram_cfg: noctane_cpu::bus::io::ram::Config,
-    render: Arc<Render>,
     spu_cfg: noctane_cpu::bus::io::spu::Config,
     spu_voices: [noctane_cpu::bus::io::spu_voice::Config; 24],
     timers: noctane_cpu::bus::io::Timers,
@@ -161,6 +82,34 @@ pub struct Banks {
 }
 
 impl Core {
+    pub fn run(
+        self,
+        event_loop: EventLoop<()>,
+        game_window: Window,
+        main: impl Fn(Self) + Sync + Send + 'static,
+    ) {
+        let mut main_thread = Some(thread::spawn(move || main(self)));
+
+        event_loop.run(move |event, _, ctrl_flow| {
+            use winit::{
+                event::{Event, WindowEvent},
+                event_loop::ControlFlow,
+            };
+
+            *ctrl_flow = ControlFlow::Wait;
+
+            match event {
+                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                    if let Some(thread) = main_thread.take() {
+                        thread.join().expect("main thread panicked");
+                    }
+                    *ctrl_flow = ControlFlow::Exit;
+                }
+                _ => {},
+            }
+        });
+    }
+
     pub fn banks_mut(&mut self) -> &mut Banks {
         &mut self.banks
     }
@@ -194,33 +143,7 @@ impl Core {
     }
 
     fn render(&mut self) {
-        {
-            let render = &*self.render;
-            // Request a render operation.
-            let mut render_state = render
-                .state
-                .lock()
-                .expect("mutex was poisoned");
-            *render_state = RenderState::Requested;
-            // The GUI thread locks `render_state` and sees that a render has been requested. At
-            // that point, the GUI thread will request a redraw, release the lock, re-acquire
-            // the lock (due to *winit* event handling), and, once in the redraw event, will set
-            // `render_state` to [`RenderState::InProgress`]. Finally, the lock is released
-            // again, and this thread continues.
-            let mut render_state = render.cvar.wait_while(
-                render_state,
-                |state| matches!(state, RenderState::Requested),
-            )
-            .expect("mutex was poisoned");
-            // Perform the render operation.
-            self.gpu.gfx_mut().render();
-            // The GUI thread is waiting for `render_state` to change, so we must now notify it.
-            *render_state = RenderState::Complete;
-            render.cvar.notify_one();
-        }
-        // Release the `render_state` lock, allowing the GUI thread to acquire it and
-        // observe that the render is complete.
-
+        self.gpu.gfx_mut().render();
         self.issue_vblank();
     }
 
@@ -248,82 +171,5 @@ impl Core {
             exp_3: &mut self.banks.exp_3,
             bios: &mut self.banks.bios,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Core;
-
-    macro_rules! def_write_to_test {
-        (
-            $mem:expr,
-            $ty:ty,
-            $map_addr:expr,
-            $read_32_name:ident ($($read_32_arg:expr),* $(,)?),
-            $write_8_name:ident (),
-            $write_16_name:ident (),
-            $write_32_name:ident () $(,)?
-        ) => {
-            const VALUE: u32 = !0;
-
-            fn assert_success(mem: &mut $ty, addr: u32, bit_width: &str) {
-                assert_eq!(
-                    mem.$read_32_name($map_addr(addr), $($read_32_arg),*),
-                    Ok(VALUE),
-                    "failed to write {}-bit value",
-                    bit_width,
-                );
-            }
-
-            for addr in (0..32).step_by(4) {
-                let _ = $mem.$write_8_name($map_addr(addr + 0), VALUE as u8);
-                let _ = $mem.$write_8_name($map_addr(addr + 1), VALUE as u8);
-                let _ = $mem.$write_8_name($map_addr(addr + 2), VALUE as u8);
-                let _ = $mem.$write_8_name($map_addr(addr + 3), VALUE as u8);
-                assert_success($mem, addr, "8");
-
-                let _ = $mem.$write_16_name($map_addr(addr + 0), VALUE as u16);
-                let _ = $mem.$write_16_name($map_addr(addr + 2), VALUE as u16);
-                assert_success($mem, addr, "16");
-
-                let _ = $mem.$write_32_name($map_addr(addr), VALUE);
-                assert_success($mem, addr, "32");
-            }
-        };
-    }
-
-    #[test]
-    fn write_to_cpu_memory() {
-        let mut core = Core::default();
-        let mut cpu = core.cpu();
-        let mem = cpu.mem_mut();
-
-        def_write_to_test!(
-            mem,
-            noctane_cpu::Memory,
-            |addr| addr,
-            read_data_32(),
-            write_data_8(),
-            write_data_16(),
-            write_data_32(),
-        );
-    }
-
-    #[test]
-    fn write_to_cpu_bus() {
-        let mut core = Core::default();
-        let mut cpu = core.cpu();
-        let bus = cpu.mem_mut().bus_mut();
-
-        def_write_to_test!(
-            bus,
-            noctane_cpu::Bus,
-            |addr| noctane_cpu::mem::Address::from(addr as usize),
-            read_32(),
-            write_8(),
-            write_16(),
-            write_32(),
-        );
     }
 }

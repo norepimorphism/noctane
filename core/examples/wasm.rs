@@ -58,7 +58,7 @@ async fn handle_file_drop(file: web_sys::File) {
         .expect("failed to append canvas to document");
 
     // SAFETY: TODO
-    let mut core = unsafe { noctane::Core::new(&game_window) };
+    let mut core = unsafe { noctane::Core::new(&game_window) }.await;
 
     let reader: web_sys::ReadableStreamDefaultReader = file
         .stream()

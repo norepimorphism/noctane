@@ -22,7 +22,7 @@ fn main() {
         .expect("failed to create window");
 
     // SAFETY: TODO
-    let mut core = unsafe { noctane::Core::new(&game_window) };
+    let mut core = pollster::block_on(unsafe { noctane::Core::new(&game_window) });
     // SAFETY: TODO
     let (_, bios, _) = unsafe { bios.align_to::<u32>() };
     core.banks_mut().bios[..bios.len()].copy_from_slice(bios);

@@ -21,7 +21,7 @@ noctane-util = { path = "../util" }
 pollster = "0.2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-wgpu-types = "0.13"
+wgpu-types = { git = "https://github.com/JolifantoBambla/wgpu" }
 winit = "0.26"
 
 [dev-dependencies]

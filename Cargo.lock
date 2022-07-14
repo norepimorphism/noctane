@@ -1645,7 +1645,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm_thread",
  "web-sys",
- "wgpu-types",
+ "wgpu-types 0.13.0 (git+https://github.com/JolifantoBambla/wgpu)",
  "winit",
 ]
 
@@ -1686,7 +1686,7 @@ dependencies = [
  "ringbuffer",
  "stackvec",
  "tracing",
- "wgpu",
+ "wgpu 0.13.0",
 ]
 
 [[package]]
@@ -1720,7 +1720,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "wgpu",
+ "wgpu 0.13.1",
  "winapi",
 ]
 
@@ -3087,6 +3087,26 @@ dependencies = [
 
 [[package]]
 name = "wgpu"
+version = "0.13.0"
+source = "git+https://github.com/JolifantoBambla/wgpu#48325f1aaa1a26744e328112254a299e5509b9f1"
+dependencies = [
+ "arrayvec",
+ "js-sys",
+ "log",
+ "naga",
+ "parking_lot 0.11.2",
+ "raw-window-handle 0.4.3",
+ "smallvec",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu-core 0.13.0",
+ "wgpu-hal 0.13.0",
+ "wgpu-types 0.13.0 (git+https://github.com/JolifantoBambla/wgpu)",
+]
+
+[[package]]
+name = "wgpu"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "277e967bf8b7820a76852645a6bce8bbd31c32fda2042e82d8e3ea75fda8892d"
@@ -3101,9 +3121,33 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu-core",
- "wgpu-hal",
- "wgpu-types",
+ "wgpu-core 0.13.1",
+ "wgpu-hal 0.13.1",
+ "wgpu-types 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "wgpu-core"
+version = "0.13.0"
+source = "git+https://github.com/JolifantoBambla/wgpu#48325f1aaa1a26744e328112254a299e5509b9f1"
+dependencies = [
+ "arrayvec",
+ "bit-vec",
+ "bitflags",
+ "cfg_aliases",
+ "codespan-reporting",
+ "copyless",
+ "fxhash",
+ "log",
+ "naga",
+ "parking_lot 0.11.2",
+ "profiling",
+ "raw-window-handle 0.4.3",
+ "smallvec",
+ "thiserror",
+ "web-sys",
+ "wgpu-hal 0.13.0",
+ "wgpu-types 0.13.0 (git+https://github.com/JolifantoBambla/wgpu)",
 ]
 
 [[package]]
@@ -3127,8 +3171,46 @@ dependencies = [
  "smallvec",
  "thiserror",
  "web-sys",
- "wgpu-hal",
- "wgpu-types",
+ "wgpu-hal 0.13.1",
+ "wgpu-types 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "wgpu-hal"
+version = "0.13.0"
+source = "git+https://github.com/JolifantoBambla/wgpu#48325f1aaa1a26744e328112254a299e5509b9f1"
+dependencies = [
+ "android_system_properties",
+ "arrayvec",
+ "ash",
+ "bit-set",
+ "bitflags",
+ "block",
+ "core-graphics-types",
+ "d3d12",
+ "foreign-types",
+ "fxhash",
+ "glow",
+ "gpu-alloc",
+ "gpu-descriptor",
+ "inplace_it",
+ "js-sys",
+ "khronos-egl",
+ "libloading",
+ "log",
+ "metal",
+ "naga",
+ "objc",
+ "parking_lot 0.11.2",
+ "profiling",
+ "range-alloc",
+ "raw-window-handle 0.4.3",
+ "renderdoc-sys",
+ "thiserror",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu-types 0.13.0 (git+https://github.com/JolifantoBambla/wgpu)",
+ "winapi",
 ]
 
 [[package]]
@@ -3166,7 +3248,7 @@ dependencies = [
  "thiserror",
  "wasm-bindgen",
  "web-sys",
- "wgpu-types",
+ "wgpu-types 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi",
 ]
 
@@ -3175,6 +3257,14 @@ name = "wgpu-types"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f48d691b733b9d50ea8cb18f377fd1ed927c90c55ad1ec5b90f68885471977f7"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "wgpu-types"
+version = "0.13.0"
+source = "git+https://github.com/JolifantoBambla/wgpu#48325f1aaa1a26744e328112254a299e5509b9f1"
 dependencies = [
  "bitflags",
 ]
