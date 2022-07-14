@@ -21,15 +21,16 @@ fn main() {
         .build(&event_loop)
         .expect("failed to create window");
 
-    noctane::Core::run(
+    // SAFETY: TODO
+    let mut core = unsafe { noctane::Core::new(&game_window) };
+    // SAFETY: TODO
+    let (_, bios, _) = unsafe { bios.align_to::<u32>() };
+    core.banks_mut().bios[..bios.len()].copy_from_slice(bios);
+
+    core.run(
         event_loop,
         game_window,
-        |_| {},
         |core| {
-            // SAFETY: TODO
-            let (_, bios, _) = unsafe { bios.align_to::<u32>() };
-            core.banks_mut().bios[..bios.len()].copy_from_slice(bios);
-
             Debugger::new(core).run()
         },
     )

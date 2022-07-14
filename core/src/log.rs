@@ -36,5 +36,8 @@ pub fn init() {
 #[cfg(target_arch = "wasm32")]
 pub fn init() {
     console_error_panic_hook::set_once();
-    tracing_wasm::set_as_global_default();
+    let config = tracing_wasm::WASMLayerConfigBuilder::new()
+        .set_max_level(tracing::Level::INFO)
+        .build();
+    tracing_wasm::set_as_global_default_with_config(config);
 }

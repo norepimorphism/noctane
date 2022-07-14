@@ -2,28 +2,34 @@
 
 #![feature(slice_as_chunks)]
 
-use imports::*;
-
 use instant::Instant;
 pub use noctane_cpu::Cpu;
 pub use noctane_gpu::Gpu;
 use winit::{event_loop::EventLoop, window::Window};
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 #[cfg(target_arch = "wasm32")]
-mod imports {
-    pub use wasm_rs_async_executor::single_threaded as async_executor;
-    pub use wasm_thread as thread;
-}
+pub use wasm_thread as thread;
 #[cfg(not(target_arch = "wasm32"))]
-mod imports {
-    pub use pollster as async_executor;
-    pub use std::thread;
-}
+pub use std::thread;
 
 pub mod bios;
 pub mod log;
+
+#[cfg(target_arch = "wasm32")]
+fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<T> {
+    loop {
+        if let Ok(it) = mutex.try_lock() {
+            return it;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<T> {
+    mutex.lock().expect("mutex was poisoned")
+}
 
 struct Render {
     state: Mutex<RenderState>,
@@ -46,66 +52,9 @@ impl Render {
 }
 
 impl Core {
-    pub fn run(
-        event_loop: EventLoop<()>,
-        game_window: Window,
-        setup: impl Fn(&mut Self),
-        main: impl Fn(Self) + Sync + Send + 'static,
-    ) {
-        let render = Arc::new(Render::new());
+    pub unsafe fn new(game_window: &Window) -> Self {
         // SAFETY: TODO
-        let mut this = unsafe { Self::new(&game_window, Arc::clone(&render)) };
-        setup(&mut this);
-        let mut main_thread = Some(thread::spawn(move || main(this)));
-
-        event_loop.run(move |event, _, ctrl_flow| {
-            use winit::{
-                event::{Event, WindowEvent},
-                event_loop::ControlFlow,
-            };
-
-            *ctrl_flow = ControlFlow::Poll;
-
-            match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    if let Some(thread) = main_thread.take() {
-                        thread.join().expect("main thread panicked");
-                    }
-                    *ctrl_flow = ControlFlow::Exit;
-                }
-                Event::MainEventsCleared => {
-                    if matches!(
-                        *render.state.lock().expect("mutex was poisoned"),
-                        RenderState::Requested,
-                    ) {
-                        game_window.request_redraw();
-                    }
-                }
-                Event::RedrawRequested(_) => {
-                    let render = &*render;
-                    let mut render_state = render
-                        .state
-                        .lock()
-                        .expect("mutex was poisoned");
-                    if matches!(*render_state, RenderState::Requested) {
-                        *render_state = RenderState::InProgress;
-                        render.cvar.notify_one();
-
-                        let _ = render.cvar.wait_while(
-                            render_state,
-                            |state| matches!(state, RenderState::InProgress),
-                        )
-                        .expect("mutex was poisoned");
-                    }
-                }
-                _ => {},
-            }
-        });
-    }
-
-    unsafe fn new(game_window: &Window, render: Arc<Render>) -> Self {
-        // SAFETY: TODO
-        let gfx = async_executor::block_on(noctane_gpu::gfx::Renderer::new(
+        let gfx = pollster::block_on(noctane_gpu::gfx::Renderer::new(
             &game_window,
             wgpu_types::Backends::all(),
         ))
@@ -129,11 +78,59 @@ impl Core {
             last_vblank: Instant::now(),
             post: Default::default(),
             ram_cfg: Default::default(),
-            render,
+            render: Arc::new(Render::new()),
             spu_cfg: Default::default(),
             spu_voices: Default::default(),
             timers: Default::default(),
         }
+    }
+
+    pub fn run(
+        self,
+        event_loop: EventLoop<()>,
+        game_window: Window,
+        main: impl Fn(Self) + Sync + Send + 'static,
+    ) {
+        let render = Arc::clone(&self.render);
+        let mut main_thread = Some(thread::spawn(move || main(self)));
+
+        event_loop.run(move |event, _, ctrl_flow| {
+            use winit::{
+                event::{Event, WindowEvent},
+                event_loop::ControlFlow,
+            };
+
+            *ctrl_flow = ControlFlow::Poll;
+
+            match event {
+                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                    if let Some(thread) = main_thread.take() {
+                        thread.join().expect("main thread panicked");
+                    }
+                    *ctrl_flow = ControlFlow::Exit;
+                }
+                Event::MainEventsCleared => {
+                    if matches!(*lock_mutex(&render.state), RenderState::Requested) {
+                        game_window.request_redraw();
+                    }
+                }
+                Event::RedrawRequested(_) => {
+                    let render = &*render;
+                    let mut render_state = lock_mutex(&render.state);
+                    if matches!(*render_state, RenderState::Requested) {
+                        *render_state = RenderState::InProgress;
+                        render.cvar.notify_one();
+
+                        // let _ = render.cvar.wait_while(
+                        //     render_state,
+                        //     |state| matches!(state, RenderState::InProgress),
+                        // )
+                        // .expect("mutex was poisoned");
+                    }
+                }
+                _ => {},
+            }
+        });
     }
 }
 
