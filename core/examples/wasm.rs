@@ -101,10 +101,12 @@ async fn load_bios(
     reader: web_sys::ReadableStreamDefaultReader,
     mut bios: &mut [u32],
 ) {
-    #[derive(Debug, Deserialize)]
+    #[derive(Deserialize)]
     struct ReadResult {
-        chunk: Option<serde_bytes::ByteBuf>,
-        done: bool,
+        #[serde(with = "serde_bytes")]
+        value: Option<Vec<u8>>,
+        #[serde(rename = "done")]
+        is_done: bool,
     }
 
     tracing::info!("Loading BIOS");
@@ -116,13 +118,12 @@ async fn load_bios(
             .expect("expected promise; found exception");
         let read_result: ReadResult = serde_wasm_bindgen::from_value(read_result)
             .expect("failed to deserialize read result");
-        tracing::info!("{:#?}", read_result);
-        if read_result.done {
+        if read_result.is_done {
             tracing::info!("Done");
             break;
         }
 
-        let chunk_len = copy_chunk_to_bios(&read_result.chunk.unwrap(), bios);
+        let chunk_len = copy_chunk_to_bios(&read_result.value.unwrap(), bios);
         bios = &mut bios[chunk_len..];
     }
 }
